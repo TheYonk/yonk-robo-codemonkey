@@ -10,6 +10,7 @@ import asyncpg
 from .repo_scanner import scan_repo
 from .treesitter.parsers import parse_file
 from .treesitter.extract_symbols import extract_symbols
+from .treesitter.extract_edges import extract_edges
 from .treesitter.chunking import create_chunks
 
 
@@ -39,6 +40,7 @@ async def index_repository(
             "files": 0,
             "symbols": 0,
             "chunks": 0,
+            "edges": 0,
         }
 
         # Scan and index each file
@@ -56,6 +58,9 @@ async def index_repository(
         )
         stats["chunks"] = await conn.fetchval(
             "SELECT COUNT(*) FROM chunk WHERE repo_id = $1", repo_id
+        )
+        stats["edges"] = await conn.fetchval(
+            "SELECT COUNT(*) FROM edge WHERE repo_id = $1", repo_id
         )
 
         return stats
@@ -113,6 +118,9 @@ async def _index_file(
     # Extract symbols
     symbols = extract_symbols(source, tree, language, str(file_path))
 
+    # Extract edges
+    edges = extract_edges(source, tree, language, str(file_path))
+
     # Create chunks
     chunks = create_chunks(source, symbols, language)
 
@@ -143,9 +151,10 @@ async def _index_file(
             repo_id, rel_path, language, file_hash, mtime
         )
 
-        # Delete old symbols/chunks for this file
+        # Delete old symbols/chunks/edges for this file
         await conn.execute("DELETE FROM symbol WHERE file_id = $1", file_id)
         await conn.execute("DELETE FROM chunk WHERE file_id = $1", file_id)
+        await conn.execute("DELETE FROM edge WHERE evidence_file_id = $1", file_id)
 
         # Insert symbols
         symbol_id_map = {}  # Map FQN to UUID
@@ -182,3 +191,52 @@ async def _index_file(
                 chunk.start_line, chunk.end_line,
                 chunk.content, chunk.content_hash
             )
+
+        # Insert edges (best-effort resolution of FQNs to symbol IDs)
+        for edge in edges:
+            # Resolve source symbol ID
+            src_symbol_id = None
+            if edge.from_symbol_fqn:
+                # Try local file first
+                src_symbol_id = symbol_id_map.get(edge.from_symbol_fqn)
+                # If not found, try cross-repo lookup
+                if not src_symbol_id:
+                    src_symbol_id = await conn.fetchval(
+                        "SELECT id FROM symbol WHERE repo_id = $1 AND fqn = $2",
+                        repo_id, edge.from_symbol_fqn
+                    )
+
+            # Resolve destination symbol ID
+            dst_symbol_id = symbol_id_map.get(edge.to_symbol_fqn)
+            if not dst_symbol_id:
+                dst_symbol_id = await conn.fetchval(
+                    "SELECT id FROM symbol WHERE repo_id = $1 AND fqn = $2",
+                    repo_id, edge.to_symbol_fqn
+                )
+
+            # Only insert edge if both symbols are resolved
+            # (For IMPORTS edges, src_symbol_id can be None for file-level imports,
+            # but we need dst_symbol_id to exist)
+            if (edge.edge_type == "IMPORTS" and dst_symbol_id) or \
+               (src_symbol_id and dst_symbol_id):
+                # For file-level imports, use a placeholder symbol ID
+                # Actually, looking at the schema, both src and dst are NOT NULL
+                # So we need to skip file-level imports if we can't resolve them
+                if not src_symbol_id and edge.edge_type == "IMPORTS":
+                    # Skip file-level imports that can't be resolved
+                    continue
+
+                await conn.execute(
+                    """
+                    INSERT INTO edge (
+                        repo_id, src_symbol_id, dst_symbol_id, type,
+                        evidence_file_id, evidence_start_line, evidence_end_line,
+                        confidence
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    repo_id, src_symbol_id, dst_symbol_id, edge.edge_type,
+                    file_id, edge.evidence_start_line, edge.evidence_end_line,
+                    edge.confidence
+                )

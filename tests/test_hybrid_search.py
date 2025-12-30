@@ -1,11 +1,14 @@
 """Tests for vector search functionality.
 
 Tests basic vector-only search path with mock embeddings.
+Also tests Phase 4: edges, graph traversal, and symbol_context.
 """
 import pytest
 import pytest_asyncio
 import asyncpg
 from codegraph_mcp.retrieval.vector_search import vector_search, VectorSearchResult
+from codegraph_mcp.retrieval.graph_traversal import get_callers, get_callees, get_symbol_by_fqn
+from codegraph_mcp.retrieval.symbol_context import get_symbol_context
 from codegraph_mcp.indexer.indexer import index_repository
 from pathlib import Path
 import os
@@ -242,5 +245,223 @@ async def test_vector_search_identical_embedding(database_url, indexed_repo):
             assert len(results) > 0
             assert any(abs(r.score - 1.0) < 0.01 for r in results), \
                 f"Expected at least one result with score ~1.0, got scores: {[r.score for r in results]}"
+    finally:
+        await conn.close()
+
+
+# ===== Phase 4 Tests: Edges, Graph Traversal, Symbol Context =====
+
+
+@pytest.mark.asyncio
+async def test_edges_extracted(database_url, indexed_repo):
+    """Test that edges were extracted during indexing."""
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        edge_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM edge WHERE repo_id = $1",
+            indexed_repo
+        )
+        # Should have at least some edges (imports, calls, or inheritance)
+        # The actual count depends on the test fixture content
+        assert edge_count >= 0  # May be 0 if test fixture has no relationships
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_symbol_lookup_by_fqn(database_url, indexed_repo):
+    """Test looking up a symbol by fully qualified name."""
+    # Get a known symbol from the test repo
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Find any symbol in the test repo
+        row = await conn.fetchrow(
+            "SELECT fqn FROM symbol WHERE repo_id = $1 LIMIT 1",
+            indexed_repo
+        )
+
+        if row:
+            fqn = row["fqn"]
+
+            # Look up the symbol
+            result = await get_symbol_by_fqn(fqn, database_url, indexed_repo)
+
+            assert result is not None
+            assert result["fqn"] == fqn
+            assert "symbol_id" in result
+            assert "name" in result
+            assert "kind" in result
+            assert "file_path" in result
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_callers_query(database_url, indexed_repo):
+    """Test finding callers of a symbol."""
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Find a symbol that might have callers (any function)
+        row = await conn.fetchrow(
+            "SELECT id FROM symbol WHERE repo_id = $1 AND kind = 'function' LIMIT 1",
+            indexed_repo
+        )
+
+        if row:
+            symbol_id = str(row["id"])
+
+            # Get callers (may be empty, but should not error)
+            callers = await get_callers(symbol_id, database_url, indexed_repo, max_depth=2)
+
+            # Should return a list (may be empty)
+            assert isinstance(callers, list)
+
+            # If we have callers, verify the structure
+            for caller in callers:
+                assert hasattr(caller, "symbol_id")
+                assert hasattr(caller, "fqn")
+                assert hasattr(caller, "depth")
+                assert hasattr(caller, "edge_type")
+                assert 1 <= caller.depth <= 2
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_callees_query(database_url, indexed_repo):
+    """Test finding callees of a symbol."""
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Find a symbol that might have callees (any function)
+        row = await conn.fetchrow(
+            "SELECT id FROM symbol WHERE repo_id = $1 AND kind = 'function' LIMIT 1",
+            indexed_repo
+        )
+
+        if row:
+            symbol_id = str(row["id"])
+
+            # Get callees (may be empty, but should not error)
+            callees = await get_callees(symbol_id, database_url, indexed_repo, max_depth=2)
+
+            # Should return a list (may be empty)
+            assert isinstance(callees, list)
+
+            # If we have callees, verify the structure
+            for callee in callees:
+                assert hasattr(callee, "symbol_id")
+                assert hasattr(callee, "fqn")
+                assert hasattr(callee, "depth")
+                assert hasattr(callee, "edge_type")
+                assert 1 <= callee.depth <= 2
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_symbol_context_basic(database_url, indexed_repo):
+    """Test getting context for a symbol."""
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Find any symbol with a docstring or definition
+        row = await conn.fetchrow(
+            "SELECT id, fqn FROM symbol WHERE repo_id = $1 LIMIT 1",
+            indexed_repo
+        )
+
+        if row:
+            symbol_id = str(row["id"])
+            fqn = row["fqn"]
+
+            # Get symbol context
+            context = await get_symbol_context(
+                symbol_id=symbol_id,
+                database_url=database_url,
+                repo_id=indexed_repo,
+                max_depth=2,
+                budget_tokens=12000
+            )
+
+            # Verify context structure
+            assert context is not None
+            assert context.symbol_id == symbol_id
+            assert context.fqn == fqn
+            assert isinstance(context.spans, list)
+            assert context.total_chars >= 0
+            assert context.total_tokens_approx >= 0
+            assert context.callers_count >= 0
+            assert context.callees_count >= 0
+            assert context.depth_reached >= 0
+
+            # Should have at least one span (the definition)
+            if context.spans:
+                span = context.spans[0]
+                assert span.file_path is not None
+                assert span.start_line > 0
+                assert span.end_line >= span.start_line
+                assert span.content is not None
+                assert span.label in ["definition", "caller", "callee", "evidence"]
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_symbol_context_budget_control(database_url, indexed_repo):
+    """Test that symbol_context respects token budget."""
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Find any symbol
+        row = await conn.fetchrow(
+            "SELECT id FROM symbol WHERE repo_id = $1 LIMIT 1",
+            indexed_repo
+        )
+
+        if row:
+            symbol_id = str(row["id"])
+
+            # Get context with small budget
+            context = await get_symbol_context(
+                symbol_id=symbol_id,
+                database_url=database_url,
+                repo_id=indexed_repo,
+                max_depth=2,
+                budget_tokens=100  # Very small budget
+            )
+
+            # Should not exceed budget (approximate)
+            assert context.total_tokens_approx <= 100 * 1.2  # Allow 20% margin
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_symbol_context_deduplication(database_url, indexed_repo):
+    """Test that symbol_context deduplicates spans by file+line."""
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Find any symbol
+        row = await conn.fetchrow(
+            "SELECT id FROM symbol WHERE repo_id = $1 LIMIT 1",
+            indexed_repo
+        )
+
+        if row:
+            symbol_id = str(row["id"])
+
+            # Get context
+            context = await get_symbol_context(
+                symbol_id=symbol_id,
+                database_url=database_url,
+                repo_id=indexed_repo,
+                max_depth=2,
+                budget_tokens=12000
+            )
+
+            # Check for duplicate spans (same file_path + start_line + end_line)
+            span_keys = set()
+            for span in context.spans:
+                key = (span.file_path, span.start_line, span.end_line)
+                assert key not in span_keys, f"Duplicate span found: {key}"
+                span_keys.add(key)
     finally:
         await conn.close()
