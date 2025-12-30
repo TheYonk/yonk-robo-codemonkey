@@ -28,11 +28,11 @@
 - [x] Test: semantic search returns plausible chunks (tests/test_hybrid_search.py)
 - [x] CLI: `codegraph embed --repo_id <uuid>`
 
-## Phase 3 — Full Text Search (FTS)
-- [ ] Maintain tsvector fields for chunk + document (+ optional symbol)
-- [ ] GIN indexes
-- [ ] Implement fts_search(query) using websearch_to_tsquery
-- [ ] Tests: keyword/identifier search hits expected files
+## Phase 3 — Full Text Search (FTS) ✓ COMPLETE
+- [x] Maintain tsvector fields for chunk + document (+ optional symbol)
+- [x] GIN indexes (already in DDL)
+- [x] Implement fts_search(query) using websearch_to_tsquery('simple', query)
+- [x] Tests: keyword/identifier search hits expected files (tests/test_fts.py)
 
 ## Phase 4 — Graph Edges (CALLS, IMPORTS, INHERITS)
 - [ ] Extract imports per language (best-effort)
@@ -48,19 +48,22 @@
 - [ ] Generate file/module/symbol summaries (lazily, on-demand)
 - [ ] Store summaries + embed them
 
-## Phase 6 — Tagging (AUTO + MANUAL + RULES)
-- [ ] Implement tag rules (path/import/regex/symbol)
-- [ ] Seed starter tags: auth, database, api/http, logging, caching, metrics, payments
-- [ ] Tag entities at index time
-- [ ] Manual tagging MCP tool
+## Phase 6 — Tagging (AUTO + MANUAL + RULES) ✓ COMPLETE
+- [x] Implement tag rules (PATH/IMPORT/REGEX/SYMBOL matchers)
+- [x] Seed starter tags: auth, database, api/http, logging, caching, metrics, payments
+- [x] Tag entities with apply_tag_rules function
+- [x] Tests: tagging system and rule engine (tests/test_tags.py)
+- [ ] Manual tagging MCP tool (deferred)
 
 ## Phase 7 — Hybrid Search + Context Packing
-- [ ] Implement hybrid_search:
-  - [ ] gather vector candidates
-  - [ ] gather FTS candidates
-  - [ ] apply tag filters/boosts
-  - [ ] merge + rerank
-- [ ] Implement symbol_context:
+- [x] Implement hybrid_search: ✓ COMPLETE
+  - [x] gather vector candidates (top_k=30)
+  - [x] gather FTS candidates (top_k=30)
+  - [x] apply tag filters (tags_any, tags_all)
+  - [x] merge + rerank with explainability (vec_rank, fts_rank, matched_tags)
+  - [x] Combined scoring: 0.55*vec + 0.35*fts + 0.10*tag_boost
+  - [x] MCP tool: hybrid_search
+- [ ] Implement symbol_context: (deferred to Phase 4)
   - [ ] resolve top symbols
   - [ ] graph expand (depth 1-2)
   - [ ] pack context within token budget
