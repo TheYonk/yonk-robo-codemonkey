@@ -35,6 +35,12 @@ def run() -> None:
     idx.add_argument("--repo", required=True, help="Path to repository")
     idx.add_argument("--name", required=True, help="Repository name")
 
+    # Embedding commands
+    emb = sub.add_parser("embed", help="Generate embeddings for chunks")
+    emb.add_argument("--repo_id", required=True, help="Repository UUID")
+    emb.add_argument("--only-missing", action="store_true",
+                     help="Only embed chunks without existing embeddings")
+
     args = parser.parse_args()
 
     try:
@@ -48,6 +54,16 @@ def run() -> None:
                 args.repo,
                 args.name,
                 settings.database_url
+            ))
+        elif args.cmd == "embed":
+            asyncio.run(embed_repo(
+                args.repo_id,
+                settings.database_url,
+                settings.embeddings_provider,
+                settings.embeddings_model,
+                settings.embeddings_base_url if settings.embeddings_provider == "ollama" else settings.vllm_base_url,
+                settings.vllm_api_key,
+                args.only_missing
             ))
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
@@ -180,3 +196,48 @@ async def index_repo(repo_path: str, repo_name: str, database_url: str) -> None:
         raise RuntimeError(f"Repository not found: {e}")
     except Exception as e:
         raise RuntimeError(f"Indexing failed: {e}")
+
+
+async def embed_repo(
+    repo_id: str,
+    database_url: str,
+    provider: str,
+    model: str,
+    base_url: str,
+    api_key: str,
+    only_missing: bool
+) -> None:
+    """Generate embeddings for repository chunks.
+
+    Args:
+        repo_id: Repository UUID
+        database_url: PostgreSQL connection string
+        provider: Embeddings provider ("ollama" or "vllm")
+        model: Model name
+        base_url: Provider base URL
+        api_key: API key (for vLLM)
+        only_missing: Only embed chunks without existing embeddings
+    """
+    from codegraph_mcp.embeddings.embedder import embed_chunks
+
+    print(f"Generating embeddings for repository: {repo_id}")
+    print(f"Provider: {provider}")
+    print(f"Model: {model}")
+    print(f"Mode: {'Only missing chunks' if only_missing else 'All chunks'}")
+
+    try:
+        stats = await embed_chunks(
+            repo_id=repo_id,
+            database_url=database_url,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            only_missing=only_missing
+        )
+
+        print(f"\n✓ Embedding complete")
+        print(f"  Chunks embedded: {stats['embedded']}")
+
+    except Exception as e:
+        raise RuntimeError(f"Embedding failed: {e}")

@@ -1,15 +1,57 @@
-import httpx
-from codegraph_mcp.config import settings
+"""vLLM OpenAI-compatible embeddings client.
 
-async def vllm_embed(texts: list[str]) -> list[list[float]]:
-    # OpenAI-compatible: POST /v1/embeddings with {model, input}
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.post(
-            f"{settings.vllm_base_url.rstrip('/')}/v1/embeddings",
-            headers={"Authorization": f"Bearer {settings.vllm_api_key}"},
-            json={"model": settings.embeddings_model, "input": texts},
-        )
-        r.raise_for_status()
-        data = r.json()
-        # data["data"] is list with "embedding"
-        return [row["embedding"] for row in data["data"]]
+Provides embedding generation via vLLM's OpenAI-compatible /v1/embeddings endpoint.
+"""
+from __future__ import annotations
+import httpx
+
+
+async def vllm_embed(
+    texts: list[str],
+    model: str,
+    base_url: str,
+    api_key: str,
+    batch_size: int = 32
+) -> list[list[float]]:
+    """Generate embeddings using vLLM (OpenAI-compatible API).
+
+    Args:
+        texts: List of texts to embed
+        model: Model name
+        base_url: vLLM base URL
+        api_key: API key for authentication
+        batch_size: Maximum texts per request
+
+    Returns:
+        List of embedding vectors
+
+    Raises:
+        httpx.HTTPError: If API request fails
+    """
+    if not texts:
+        return []
+
+    all_embeddings: list[list[float]] = []
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        # Process in batches
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+
+            try:
+                response = await client.post(
+                    f"{base_url.rstrip('/')}/v1/embeddings",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={"model": model, "input": batch},
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                # Extract embeddings in order
+                batch_embeddings = [item["embedding"] for item in data["data"]]
+                all_embeddings.extend(batch_embeddings)
+
+            except httpx.HTTPError as e:
+                raise RuntimeError(f"vLLM embedding failed: {e}")
+
+    return all_embeddings

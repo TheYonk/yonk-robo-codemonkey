@@ -19,13 +19,14 @@
 - [x] Test: index a small repo and verify counts (tests/test_index_smoke.py)
 - [x] CLI: `codegraph index --repo /path --name repoName`
 
-## Phase 2 — Embeddings (pgvector)
-- [ ] Implement embeddings client:
-  - [ ] Ollama /api/embeddings
-  - [ ] vLLM OpenAI /v1/embeddings
-- [ ] Hash chunks; embed only changed/new
-- [ ] Store chunk embeddings + create vector index
-- [ ] Test: semantic search returns plausible chunks
+## Phase 2 — Embeddings (pgvector) ✓ COMPLETE
+- [x] Implement embeddings client:
+  - [x] Ollama /api/embeddings
+  - [x] vLLM OpenAI /v1/embeddings
+- [x] Hash chunks; embed only changed/new
+- [x] Store chunk embeddings + create vector index
+- [x] Test: semantic search returns plausible chunks (tests/test_hybrid_search.py)
+- [x] CLI: `codegraph embed --repo_id <uuid>`
 
 ## Phase 3 — Full Text Search (FTS)
 - [ ] Maintain tsvector fields for chunk + document (+ optional symbol)
