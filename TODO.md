@@ -7,16 +7,17 @@
 - [x] Add `codegraph db ping` CLI command
 - [x] Smoke test connects + can run `SELECT 1` (tests/test_ddl_smoke.py)
 
-## Phase 1 — Indexing MVP (Symbols + Chunks)
-- [ ] Repo scanner honoring .gitignore using pathspec
-- [ ] Language detection (py, js/ts, go, java)
-- [ ] Tree-sitter parsing per language
-- [ ] Extract symbols (function/class/method/interface)
-- [ ] Create chunks:
-  - [ ] per-symbol chunk
-  - [ ] file header chunk (imports + module docs)
-- [ ] Store: repo, file, symbol, chunk
-- [ ] Test: index a small repo and verify counts
+## Phase 1 — Indexing MVP (Symbols + Chunks) ✓ COMPLETE
+- [x] Repo scanner honoring .gitignore using pathspec
+- [x] Language detection (py, js/ts, go, java)
+- [x] Tree-sitter parsing per language (tree-sitter 0.20.4 + tree-sitter-languages)
+- [x] Extract symbols (function/class/method/interface) with fqn, signatures, docstrings
+- [x] Create chunks:
+  - [x] per-symbol chunk
+  - [x] file header chunk (imports + module docs)
+- [x] Store: repo, file, symbol, chunk (transactional per-file updates)
+- [x] Test: index a small repo and verify counts (tests/test_index_smoke.py)
+- [x] CLI: `codegraph index --repo /path --name repoName`
 
 ## Phase 2 — Embeddings (pgvector)
 - [ ] Implement embeddings client:

@@ -7,6 +7,7 @@ import asyncpg
 from dotenv import load_dotenv
 
 from codegraph_mcp.db.ddl import DDL_PATH
+from codegraph_mcp.indexer.indexer import index_repository
 
 
 def run() -> None:
@@ -43,8 +44,11 @@ def run() -> None:
             elif args.dbcmd == "ping":
                 asyncio.run(db_ping(settings.database_url))
         elif args.cmd == "index":
-            # Placeholder until indexer built
-            print(f"Index placeholder: repo={args.repo} name={args.name}")
+            asyncio.run(index_repo(
+                args.repo,
+                args.name,
+                settings.database_url
+            ))
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
         sys.exit(130)
@@ -151,3 +155,28 @@ async def db_ping(database_url: str) -> None:
         raise RuntimeError(f"Failed to query database: {e}")
     finally:
         await conn.close()
+
+
+async def index_repo(repo_path: str, repo_name: str, database_url: str) -> None:
+    """Index a repository.
+
+    Args:
+        repo_path: Path to repository root
+        repo_name: Name for the repository
+        database_url: PostgreSQL connection string
+    """
+    print(f"Indexing repository: {repo_name}")
+    print(f"Path: {repo_path}")
+
+    try:
+        stats = await index_repository(repo_path, repo_name, database_url)
+
+        print(f"\n✓ Indexing complete")
+        print(f"  Files indexed: {stats['files']}")
+        print(f"  Symbols extracted: {stats['symbols']}")
+        print(f"  Chunks created: {stats['chunks']}")
+
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Repository not found: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Indexing failed: {e}")
