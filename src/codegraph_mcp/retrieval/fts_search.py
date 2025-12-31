@@ -5,6 +5,7 @@ Provides keyword/identifier search over chunks and documents using ts_rank_cd.
 from __future__ import annotations
 import asyncpg
 from dataclasses import dataclass
+from codegraph_mcp.db.schema_manager import schema_context
 
 
 @dataclass
@@ -29,6 +30,7 @@ async def fts_search_chunks(
     query: str,
     database_url: str,
     repo_id: str | None = None,
+    schema_name: str | None = None,
     top_k: int = 30
 ) -> list[FTSResult]:
     """Search chunks using full-text search.
@@ -37,6 +39,7 @@ async def fts_search_chunks(
         query: Search query (will be processed with websearch_to_tsquery)
         database_url: Database connection string
         repo_id: Optional repository UUID to filter by
+        schema_name: Optional schema name for isolation
         top_k: Number of results to return
 
     Returns:
@@ -85,7 +88,12 @@ async def fts_search_chunks(
             """
             params = (query, top_k)
 
-        rows = await conn.fetch(sql, *params)
+        # Execute query with schema context if provided
+        if schema_name:
+            async with schema_context(conn, schema_name):
+                rows = await conn.fetch(sql, *params)
+        else:
+            rows = await conn.fetch(sql, *params)
 
         results = []
         for row in rows:
@@ -111,6 +119,7 @@ async def fts_search_documents(
     query: str,
     database_url: str,
     repo_id: str | None = None,
+    schema_name: str | None = None,
     top_k: int = 30
 ) -> list[FTSResult]:
     """Search documents using full-text search.
@@ -119,6 +128,7 @@ async def fts_search_documents(
         query: Search query (will be processed with websearch_to_tsquery)
         database_url: Database connection string
         repo_id: Optional repository UUID to filter by
+        schema_name: Optional schema name for isolation
         top_k: Number of results to return
 
     Returns:
@@ -126,6 +136,9 @@ async def fts_search_documents(
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set schema context if provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         # Build query
         if repo_id:
             sql = """

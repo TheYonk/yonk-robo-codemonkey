@@ -138,3 +138,58 @@ Comprehensive database migration assessment system for evaluating migration comp
 - [x] 11 passing tests covering detection, assessment, caching, scoring
 - [x] Test coverage for ruleset loading, auto-detection, finding generation
 - [x] Validation of database storage and report generation
+
+## Schema Isolation (Multi-Repo Support) ✓ IN PROGRESS
+Implemented schema-per-repo isolation for testing migration assessment with multiple real codebases.
+
+### Core Infrastructure
+- [x] Schema management system (schema_manager.py)
+  - [x] create_schema(), init_schema_tables()
+  - [x] schema_context() async context manager for search_path management
+  - [x] resolve_repo_to_schema() for repo name/UUID → (repo_id, schema_name)
+  - [x] ensure_schema_initialized() with conflict detection
+  - [x] list_repo_schemas() for repo listing
+- [x] Configuration support (SCHEMA_PREFIX, USE_SCHEMAS env vars)
+- [x] Indexing pipeline updated for schema isolation
+- [x] CLI commands:
+  - [x] `codegraph index --force` flag for schema reinitialization
+  - [x] `codegraph repo ls` to list all indexed repos with schema info
+
+### MCP Tools Updated for Schema Isolation (5 of 16 tools)
+- [x] migration_assess - Uses resolve_repo_to_schema() and passes schema_name
+- [x] migration_inventory - Schema-aware queries
+- [x] migration_risks - Schema-aware queries
+- [x] migration_plan_outline - Schema-aware queries
+- [x] hybrid_search - Resolves repo and passes schema to search functions
+
+### Underlying Functions Updated
+- [x] migration/assessor.py - assess_migration() accepts schema_name
+- [x] migration/detector.py - detect_source_databases() accepts schema_name
+- [x] retrieval/hybrid_search.py - hybrid_search() accepts schema_name
+- [x] retrieval/vector_search.py - vector_search() accepts schema_name
+- [x] retrieval/fts_search.py - fts_search_chunks() accepts schema_name
+
+### Remaining Work (11 MCP tools)
+- [ ] symbol_lookup(fqn, symbol_id, repo)
+- [ ] symbol_context(symbol, depth, budget_tokens, repo)
+- [ ] callers(symbol, max_depth, repo)
+- [ ] callees(symbol, max_depth, repo)
+- [ ] doc_search(query, repo, top_k)
+- [ ] file_summary(file_path, repo, generate)
+- [ ] symbol_summary(symbol_fqn, repo, generate)
+- [ ] module_summary(module_path, repo, generate)
+- [ ] list_tags(repo)
+- [ ] tag_entity(entity_id, entity_type, tag_name, repo, source)
+- [ ] tag_rules_sync(repo)
+
+### Testing & Validation
+- [x] Test repositories indexed:
+  - [x] legacy1 (Oracle/Java) → schema codegraph_legacy1
+  - [x] pg_go_app (PostgreSQL/Go) → schema codegraph_pg_go_app
+- [x] Migration assessment tested on both repos
+- [x] Cross-schema isolation validated:
+  - [x] Search for "NVL" in pg_go_app returns 0 results ✓
+  - [x] Search for "jsonb" in legacy1 returns 0 results ✓
+  - [x] Same-schema searches work correctly ✓
+- [x] Validation report (SCHEMA_ISOLATION_VALIDATION.md)
+- [ ] Full end-to-end MCP server test with updated tools

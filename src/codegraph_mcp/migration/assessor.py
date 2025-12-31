@@ -11,6 +11,7 @@ import re
 
 from codegraph_mcp.migration.ruleset import load_migration_rules, MigrationRuleset
 from codegraph_mcp.migration.detector import detect_source_databases
+from codegraph_mcp.db.schema_manager import schema_context
 
 
 @dataclass
@@ -48,6 +49,7 @@ async def assess_migration(
     source_db: str,
     target_db: str,
     database_url: str,
+    schema_name: str | None = None,
     connect: dict[str, Any] | None = None,
     regenerate: bool = False,
     top_k_evidence: int = 50
@@ -59,6 +61,7 @@ async def assess_migration(
         source_db: Source database type ('auto', 'oracle', 'sqlserver', 'mongodb', etc.)
         target_db: Target database type (default 'postgresql')
         database_url: CodeGraph database connection
+        schema_name: Optional schema name for isolation
         connect: Optional live DB connection config
         regenerate: Force regeneration even if cached
         top_k_evidence: Maximum evidence items per finding
@@ -70,11 +73,16 @@ async def assess_migration(
     ruleset = load_migration_rules()
 
     conn = await asyncpg.connect(dsn=database_url)
+
     try:
+        # Use schema context if provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         # Auto-detect source DB if needed
         detected_dbs = []
         if source_db == "auto":
-            detected_dbs = await detect_source_databases(repo_id, database_url, ruleset)
+            detected_dbs = await detect_source_databases(repo_id, database_url, ruleset, schema_name)
             if detected_dbs:
                 source_db = detected_dbs[0].db_type
             else:

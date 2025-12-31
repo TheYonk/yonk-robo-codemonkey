@@ -12,12 +12,14 @@ from .treesitter.parsers import parse_file
 from .treesitter.extract_symbols import extract_symbols
 from .treesitter.extract_edges import extract_edges
 from .treesitter.chunking import create_chunks
+from codegraph_mcp.db.schema_manager import ensure_schema_initialized, schema_context
 
 
 async def index_repository(
     repo_path: str,
     repo_name: str,
-    database_url: str
+    database_url: str,
+    force: bool = False
 ) -> dict[str, int]:
     """Index a repository into the database.
 
@@ -25,6 +27,7 @@ async def index_repository(
         repo_path: Path to repository root
         repo_name: Name for the repository
         database_url: Database connection string
+        force: If True, reinitialize schema even if it exists
 
     Returns:
         Dictionary with counts of indexed entities
@@ -33,37 +36,44 @@ async def index_repository(
 
     conn = await asyncpg.connect(dsn=database_url)
     try:
-        # Create or get repo record
-        repo_id = await _ensure_repo(conn, repo_name, str(repo_root))
+        # Ensure schema exists and is initialized
+        schema_name = await ensure_schema_initialized(conn, repo_name, force=force)
+        print(f"Using schema: {schema_name}")
 
-        stats = {
-            "files": 0,
-            "symbols": 0,
-            "chunks": 0,
-            "edges": 0,
-        }
+        # All DB operations must happen within schema context
+        async with schema_context(conn, schema_name):
+            # Create or get repo record
+            repo_id = await _ensure_repo(conn, repo_name, str(repo_root))
 
-        # Scan and index each file
-        for file_path, language in scan_repo(repo_root):
-            try:
-                await _index_file(conn, repo_id, file_path, language, repo_root)
-                stats["files"] += 1
-            except Exception as e:
-                print(f"Warning: Failed to index {file_path}: {e}")
-                continue
+            stats = {
+                "files": 0,
+                "symbols": 0,
+                "chunks": 0,
+                "edges": 0,
+                "schema": schema_name,
+            }
 
-        # Get final counts
-        stats["symbols"] = await conn.fetchval(
-            "SELECT COUNT(*) FROM symbol WHERE repo_id = $1", repo_id
-        )
-        stats["chunks"] = await conn.fetchval(
-            "SELECT COUNT(*) FROM chunk WHERE repo_id = $1", repo_id
-        )
-        stats["edges"] = await conn.fetchval(
-            "SELECT COUNT(*) FROM edge WHERE repo_id = $1", repo_id
-        )
+            # Scan and index each file
+            for file_path, language in scan_repo(repo_root):
+                try:
+                    await _index_file(conn, repo_id, file_path, language, repo_root)
+                    stats["files"] += 1
+                except Exception as e:
+                    print(f"Warning: Failed to index {file_path}: {e}")
+                    continue
 
-        return stats
+            # Get final counts
+            stats["symbols"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM symbol WHERE repo_id = $1", repo_id
+            )
+            stats["chunks"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM chunk WHERE repo_id = $1", repo_id
+            )
+            stats["edges"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM edge WHERE repo_id = $1", repo_id
+            )
+
+            return stats
 
     finally:
         await conn.close()

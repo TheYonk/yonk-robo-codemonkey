@@ -20,7 +20,8 @@ class DBDetection:
 async def detect_source_databases(
     repo_id: str,
     database_url: str,
-    ruleset: MigrationRuleset
+    ruleset: MigrationRuleset,
+    schema_name: str | None = None
 ) -> list[DBDetection]:
     """Auto-detect likely source database(s) from repo code.
 
@@ -28,12 +29,16 @@ async def detect_source_databases(
         repo_id: Repository UUID
         database_url: CodeGraph database connection
         ruleset: Migration ruleset with detection patterns
+        schema_name: Optional schema name for isolation
 
     Returns:
         List of DBDetection results sorted by confidence (highest first)
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Use schema context if provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         detections = {}
 
         for db_type, patterns in ruleset.detection.items():

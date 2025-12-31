@@ -25,6 +25,7 @@ from codegraph_mcp.reports.feature_index_builder import build_feature_index as _
 from codegraph_mcp.db_introspect.report_generator import generate_db_architecture_report
 from codegraph_mcp.migration.assessor import assess_migration
 from codegraph_mcp.config import Settings
+from codegraph_mcp.db.schema_manager import resolve_repo_to_schema, schema_context
 
 TOOL_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {}
 
@@ -42,7 +43,7 @@ async def ping() -> dict[str, str]:
 @tool("hybrid_search")
 async def hybrid_search(
     query: str,
-    repo_id: str | None = None,
+    repo: str | None = None,
     tags_any: list[str] | None = None,
     tags_all: list[str] | None = None,
     final_top_k: int = 12
@@ -51,7 +52,7 @@ async def hybrid_search(
 
     Args:
         query: Search query string
-        repo_id: Optional repository UUID to filter by
+        repo: Optional repository name or UUID to filter by
         tags_any: Optional list of tags (match any)
         tags_all: Optional list of tags (match all)
         final_top_k: Number of results to return (default 12)
@@ -61,6 +62,22 @@ async def hybrid_search(
     """
     settings = Settings()
 
+    # Resolve repo to schema if provided
+    repo_id = None
+    schema_name = None
+    if repo:
+        import asyncpg
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
+        finally:
+            await conn.close()
+
     results = await _hybrid_search(
         query=query,
         database_url=settings.database_url,
@@ -69,6 +86,7 @@ async def hybrid_search(
         embeddings_base_url=settings.embeddings_base_url,
         embeddings_api_key=settings.vllm_api_key,
         repo_id=repo_id,
+        schema_name=schema_name,
         tags_any=tags_any,
         tags_all=tags_all,
         vector_top_k=settings.vector_top_k,
@@ -97,6 +115,7 @@ async def hybrid_search(
             }
             for r in results
         ],
+        "schema_name": schema_name,
         "query": query,
         "total_results": len(results)
     }
@@ -106,30 +125,47 @@ async def hybrid_search(
 async def symbol_lookup(
     fqn: str | None = None,
     symbol_id: str | None = None,
-    repo_id: str | None = None
+    repo: str | None = None
 ) -> dict[str, Any]:
     """Look up a symbol by fully qualified name or ID.
 
     Args:
         fqn: Fully qualified name (e.g., "MyClass.my_method")
         symbol_id: Symbol UUID (alternative to fqn)
-        repo_id: Optional repository UUID to filter by
+        repo: Optional repository name or UUID to filter by
 
     Returns:
         Symbol details or error if not found
     """
     settings = Settings()
 
+    # Resolve repo to schema if provided
+    repo_id = None
+    schema_name = None
+    if repo:
+        import asyncpg
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
+        finally:
+            await conn.close()
+
     if symbol_id:
-        result = await get_symbol_by_id(symbol_id, settings.database_url)
+        result = await get_symbol_by_id(symbol_id, settings.database_url, schema_name)
     elif fqn:
-        result = await get_symbol_by_fqn(fqn, settings.database_url, repo_id)
+        result = await get_symbol_by_fqn(fqn, settings.database_url, repo_id, schema_name)
     else:
         return {"error": "Must provide either fqn or symbol_id"}
 
     if not result:
         return {"error": "Symbol not found"}
 
+    result["schema_name"] = schema_name
     return result
 
 
@@ -137,7 +173,7 @@ async def symbol_lookup(
 async def symbol_context(
     fqn: str | None = None,
     symbol_id: str | None = None,
-    repo_id: str | None = None,
+    repo: str | None = None,
     max_depth: int = 2,
     budget_tokens: int | None = None
 ) -> dict[str, Any]:
@@ -152,7 +188,7 @@ async def symbol_context(
     Args:
         fqn: Fully qualified name
         symbol_id: Symbol UUID (alternative to fqn)
-        repo_id: Optional repository filter
+        repo: Optional repository name or UUID to filter by
         max_depth: Maximum graph traversal depth (default 2)
         budget_tokens: Token budget (default from config)
 
@@ -164,11 +200,28 @@ async def symbol_context(
     if budget_tokens is None:
         budget_tokens = settings.context_budget_tokens
 
+    # Resolve repo to schema if provided
+    repo_id = None
+    schema_name = None
+    if repo:
+        import asyncpg
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
+        finally:
+            await conn.close()
+
     result = await _get_symbol_context(
         symbol_fqn=fqn,
         symbol_id=symbol_id,
         database_url=settings.database_url,
         repo_id=repo_id,
+        schema_name=schema_name,
         max_depth=max_depth,
         budget_tokens=budget_tokens
     )
@@ -178,6 +231,7 @@ async def symbol_context(
 
     # Convert to dictionary
     return {
+        "schema_name": schema_name,
         "symbol_id": result.symbol_id,
         "fqn": result.fqn,
         "name": result.name,
@@ -210,7 +264,7 @@ async def symbol_context(
 async def callers(
     symbol_id: str | None = None,
     fqn: str | None = None,
-    repo_id: str | None = None,
+    repo: str | None = None,
     max_depth: int = 2
 ) -> dict[str, Any]:
     """Find symbols that call the given symbol.
@@ -218,7 +272,7 @@ async def callers(
     Args:
         symbol_id: Symbol UUID
         fqn: Fully qualified name (alternative to symbol_id)
-        repo_id: Optional repository filter
+        repo: Optional repository name or UUID to filter by
         max_depth: Maximum traversal depth (default 2)
 
     Returns:
@@ -226,9 +280,25 @@ async def callers(
     """
     settings = Settings()
 
+    # Resolve repo to schema if provided
+    repo_id = None
+    schema_name = None
+    if repo:
+        import asyncpg
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
+        finally:
+            await conn.close()
+
     # Resolve symbol if FQN provided
     if fqn and not symbol_id:
-        symbol = await get_symbol_by_fqn(fqn, settings.database_url, repo_id)
+        symbol = await get_symbol_by_fqn(fqn, settings.database_url, repo_id, schema_name)
         if not symbol:
             return {"error": "Symbol not found"}
         symbol_id = symbol["symbol_id"]
@@ -237,10 +307,11 @@ async def callers(
         return {"error": "Must provide either symbol_id or fqn"}
 
     results = await _get_callers(
-        symbol_id, settings.database_url, repo_id, max_depth
+        symbol_id, settings.database_url, schema_name, max_depth
     )
 
     return {
+        "schema_name": schema_name,
         "callers": [
             {
                 "symbol_id": r.symbol_id,
@@ -265,7 +336,7 @@ async def callers(
 async def callees(
     symbol_id: str | None = None,
     fqn: str | None = None,
-    repo_id: str | None = None,
+    repo: str | None = None,
     max_depth: int = 2
 ) -> dict[str, Any]:
     """Find symbols called by the given symbol.
@@ -273,7 +344,7 @@ async def callees(
     Args:
         symbol_id: Symbol UUID
         fqn: Fully qualified name (alternative to symbol_id)
-        repo_id: Optional repository filter
+        repo: Optional repository name or UUID to filter by
         max_depth: Maximum traversal depth (default 2)
 
     Returns:
@@ -281,9 +352,25 @@ async def callees(
     """
     settings = Settings()
 
+    # Resolve repo to schema if provided
+    repo_id = None
+    schema_name = None
+    if repo:
+        import asyncpg
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
+        finally:
+            await conn.close()
+
     # Resolve symbol if FQN provided
     if fqn and not symbol_id:
-        symbol = await get_symbol_by_fqn(fqn, settings.database_url, repo_id)
+        symbol = await get_symbol_by_fqn(fqn, settings.database_url, repo_id, schema_name)
         if not symbol:
             return {"error": "Symbol not found"}
         symbol_id = symbol["symbol_id"]
@@ -292,10 +379,11 @@ async def callees(
         return {"error": "Must provide either symbol_id or fqn"}
 
     results = await _get_callees(
-        symbol_id, settings.database_url, repo_id, max_depth
+        symbol_id, settings.database_url, schema_name, max_depth
     )
 
     return {
+        "schema_name": schema_name,
         "callees": [
             {
                 "symbol_id": r.symbol_id,
@@ -319,14 +407,14 @@ async def callees(
 @tool("doc_search")
 async def doc_search(
     query: str,
-    repo_id: str | None = None,
+    repo: str | None = None,
     top_k: int = 10
 ) -> dict[str, Any]:
     """Search documentation and markdown files using full-text search.
 
     Args:
         query: Search query string
-        repo_id: Optional repository UUID to filter by
+        repo: Optional repository name or UUID to filter by
         top_k: Number of results to return (default 10)
 
     Returns:
@@ -334,14 +422,32 @@ async def doc_search(
     """
     settings = Settings()
 
+    # Resolve repo to schema if provided
+    repo_id = None
+    schema_name = None
+    if repo:
+        import asyncpg
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
+        finally:
+            await conn.close()
+
     results = await fts_search_documents(
         query=query,
         database_url=settings.database_url,
         repo_id=repo_id,
+        schema_name=schema_name,
         top_k=top_k
     )
 
     return {
+        "schema_name": schema_name,
         "results": [
             {
                 "document_id": str(r.entity_id),
@@ -361,12 +467,14 @@ async def doc_search(
 @tool("file_summary")
 async def file_summary(
     file_id: str,
+    repo: str,
     generate: bool = False
 ) -> dict[str, Any]:
     """Get or generate a summary for a file.
 
     Args:
         file_id: File UUID
+        repo: Repository name or UUID
         generate: Whether to generate if not exists
 
     Returns:
@@ -376,85 +484,101 @@ async def file_summary(
 
     conn = await asyncpg.connect(dsn=settings.database_url)
     try:
-        # Check if summary exists and file hasn't changed
-        row = await conn.fetchrow(
-            """
-            SELECT fs.summary, fs.updated_at, f.path, f.updated_at as file_updated_at, f.repo_id
-            FROM file_summary fs
-            JOIN file f ON f.id = fs.file_id
-            WHERE fs.file_id = $1
-            """,
-            file_id
-        )
-
-        # Check if file changed since summary was generated
-        needs_regeneration = False
-        if row and row["file_updated_at"] > row["updated_at"]:
-            needs_regeneration = True
-
-        if row and not needs_regeneration:
+        # Resolve repo to schema
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
             return {
-                "file_id": file_id,
-                "path": row["path"],
-                "summary": row["summary"],
-                "why": "Existing file summary retrieved from database"
+                "error": str(e),
+                "why": "Repository not found in any schema"
             }
 
-        # Generate if requested or if needs regeneration
-        if generate or needs_regeneration:
-            result = await _generate_file_summary(
-                file_id=file_id,
-                database_url=settings.database_url,
-                llm_provider=settings.embeddings_provider,  # Reuse embeddings provider setting
-                llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
-                llm_base_url=settings.embeddings_base_url
+        async with schema_context(conn, schema_name):
+            # Check if summary exists and file hasn't changed
+            row = await conn.fetchrow(
+                """
+                SELECT fs.summary, fs.updated_at, f.path, f.updated_at as file_updated_at, f.repo_id
+                FROM file_summary fs
+                JOIN file f ON f.id = fs.file_id
+                WHERE fs.file_id = $1
+                """,
+                file_id
             )
 
-            if result.success:
-                # Store summary in database
-                await conn.execute(
-                    """
-                    INSERT INTO file_summary (file_id, summary)
-                    VALUES ($1, $2)
-                    ON CONFLICT (file_id)
-                    DO UPDATE SET summary = EXCLUDED.summary, updated_at = now()
-                    """,
-                    file_id, result.summary
+            # Check if file changed since summary was generated
+            needs_regeneration = False
+            if row and row["file_updated_at"] > row["updated_at"]:
+                needs_regeneration = True
+
+            if row and not needs_regeneration:
+                return {
+                    "schema_name": schema_name,
+                    "file_id": file_id,
+                    "path": row["path"],
+                    "summary": row["summary"],
+                    "why": "Existing file summary retrieved from database"
+                }
+
+            # Generate if requested or if needs regeneration
+            if generate or needs_regeneration:
+                # Note: _generate_file_summary creates its own connection, schema_name should be passed
+                result = await _generate_file_summary(
+                    file_id=file_id,
+                    database_url=settings.database_url,
+                    schema_name=schema_name,
+                    llm_provider=settings.embeddings_provider,
+                    llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
+                    llm_base_url=settings.embeddings_base_url
                 )
 
-                # Get repo_id and store as document
-                if row:
-                    repo_id = row["repo_id"]
+                if result.success:
+                    # Store summary in database
+                    await conn.execute(
+                        """
+                        INSERT INTO file_summary (file_id, summary)
+                        VALUES ($1, $2)
+                        ON CONFLICT (file_id)
+                        DO UPDATE SET summary = EXCLUDED.summary, updated_at = now()
+                        """,
+                        file_id, result.summary
+                    )
+
+                    # Get repo_id and store as document
+                    current_repo_id = row["repo_id"] if row else None
+                    if not current_repo_id:
+                        repo_row = await conn.fetchrow(
+                            "SELECT repo_id FROM file WHERE id = $1", file_id
+                        )
+                        current_repo_id = repo_row["repo_id"] if repo_row else None
+
+                    if current_repo_id:
+                        await store_summary_as_document(
+                            repo_id=current_repo_id,
+                            summary_type="file",
+                            entity_id=file_id,
+                            summary_text=result.summary,
+                            database_url=settings.database_url,
+                            schema_name=schema_name
+                        )
+
+                    return {
+                        "schema_name": schema_name,
+                        "file_id": file_id,
+                        "summary": result.summary,
+                        "why": "File summary generated using LLM and stored in database"
+                    }
                 else:
-                    repo_row = await conn.fetchrow(
-                        "SELECT repo_id FROM file WHERE id = $1", file_id
-                    )
-                    repo_id = repo_row["repo_id"] if repo_row else None
+                    return {
+                        "schema_name": schema_name,
+                        "error": f"Failed to generate summary: {result.error}",
+                        "why": "LLM generation failed or returned empty response"
+                    }
 
-                if repo_id:
-                    await store_summary_as_document(
-                        repo_id=repo_id,
-                        summary_type="file",
-                        entity_id=file_id,
-                        summary_text=result.summary,
-                        database_url=settings.database_url
-                    )
-
-                return {
-                    "file_id": file_id,
-                    "summary": result.summary,
-                    "why": "File summary generated using LLM and stored in database"
-                }
-            else:
-                return {
-                    "error": f"Failed to generate summary: {result.error}",
-                    "why": "LLM generation failed or returned empty response"
-                }
-
-        return {
-            "error": "No summary found for this file",
-            "why": "Summary has not been generated yet. Set generate=true to create one."
-        }
+            return {
+                "schema_name": schema_name,
+                "error": "No summary found for this file",
+                "why": "Summary has not been generated yet. Set generate=true to create one."
+            }
 
     finally:
         await conn.close()
@@ -1438,39 +1562,30 @@ async def migration_assess(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo name/ID
+        # Resolve repo to schema
         try:
-            import uuid
-            uuid.UUID(repo)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
-
-        if is_uuid:
-            repo_id = repo
-        else:
-            repo_id = await conn.fetchval(
-                "SELECT id FROM repo WHERE name = $1", repo
-            )
-
-        if not repo_id:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
             return {
-                "error": f"Repository not found: {repo}",
-                "why": "Repository does not exist in database"
+                "error": str(e),
+                "why": "Repository not found in any schema"
             }
 
-        # Perform assessment
+        # Perform assessment (pass schema_name for isolation)
         result = await assess_migration(
             repo_id=repo_id,
             source_db=source_db,
             target_db=target_db,
             database_url=settings.database_url,
+            schema_name=schema_name,
             connect=connect,
             regenerate=regenerate,
             top_k_evidence=top_k_evidence
         )
 
         return {
+            "schema_name": schema_name,  # For debugging
+            "repo_name": repo,
             "score": result.score,
             "tier": result.tier,
             "summary": result.summary,
@@ -1485,6 +1600,7 @@ async def migration_assess(
             "why": {
                 "cached": result.cached,
                 "content_hash": result.content_hash,
+                "schema": schema_name,
                 "approach": "Analyzed code patterns, SQL dialect usage, and schema artifacts"
             }
         }
@@ -1511,72 +1627,72 @@ async def migration_inventory(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo
+        # Resolve repo to schema
         try:
-            import uuid
-            uuid.UUID(repo)
-            repo_id = repo
-        except (ValueError, AttributeError):
-            repo_id = await conn.fetchval("SELECT id FROM repo WHERE name = $1", repo)
-
-        if not repo_id:
-            return {"error": f"Repository not found: {repo}"}
-
-        # Get latest assessment
-        assessment = await conn.fetchrow(
-            """
-            SELECT id, source_db, score, tier
-            FROM migration_assessment
-            WHERE repo_id = $1
-              AND (source_db = $2 OR $2 = 'auto')
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            repo_id, source_db
-        )
-
-        if not assessment:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
             return {
-                "error": "No assessment found",
-                "why": "Run migration_assess first"
+                "error": str(e),
+                "why": "Repository not found in any schema"
             }
 
-        # Get findings grouped by category
-        findings = await conn.fetch(
-            """
-            SELECT category, severity, title, description, evidence, rule_id
-            FROM migration_finding
-            WHERE assessment_id = $1
-            ORDER BY
-                CASE severity
-                    WHEN 'critical' THEN 0
-                    WHEN 'high' THEN 1
-                    WHEN 'medium' THEN 2
-                    WHEN 'low' THEN 3
-                    ELSE 4
-                END,
-                category
-            """,
-            assessment['id']
-        )
+        async with schema_context(conn, schema_name):
+            # Get latest assessment
+            assessment = await conn.fetchrow(
+                """
+                SELECT id, source_db, score, tier
+                FROM migration_assessment
+                WHERE repo_id = $1
+                  AND (source_db = $2 OR $2 = 'auto')
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                repo_id, source_db
+            )
 
-        # Group by category
-        by_category = {}
-        for finding in findings:
-            cat = finding['category']
-            if cat not in by_category:
-                by_category[cat] = []
+            if not assessment:
+                return {
+                    "error": "No assessment found",
+                    "why": "Run migration_assess first"
+                }
 
-            by_category[cat].append({
-                "title": finding['title'],
-                "severity": finding['severity'],
-                "description": finding['description'],
-                "evidence_count": len(finding['evidence'] or []),
-                "sample_evidence": (finding['evidence'] or [])[:2],
-                "rule_id": finding['rule_id']
-            })
+            # Get findings grouped by category
+            findings = await conn.fetch(
+                """
+                SELECT category, severity, title, description, evidence, rule_id
+                FROM migration_finding
+                WHERE assessment_id = $1
+                ORDER BY
+                    CASE severity
+                        WHEN 'critical' THEN 0
+                        WHEN 'high' THEN 1
+                        WHEN 'medium' THEN 2
+                        WHEN 'low' THEN 3
+                        ELSE 4
+                    END,
+                    category
+                """,
+                assessment['id']
+            )
+
+            # Group by category
+            by_category = {}
+            for finding in findings:
+                cat = finding['category']
+                if cat not in by_category:
+                    by_category[cat] = []
+
+                by_category[cat].append({
+                    "title": finding['title'],
+                    "severity": finding['severity'],
+                    "description": finding['description'],
+                    "evidence_count": len(finding['evidence'] or []),
+                    "sample_evidence": (finding['evidence'] or [])[:2],
+                    "rule_id": finding['rule_id']
+                })
 
         return {
+            "schema_name": schema_name,
             "source_db": assessment['source_db'],
             "score": assessment['score'],
             "tier": assessment['tier'],
@@ -1608,74 +1724,74 @@ async def migration_risks(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo
+        # Resolve repo to schema
         try:
-            import uuid
-            uuid.UUID(repo)
-            repo_id = repo
-        except (ValueError, AttributeError):
-            repo_id = await conn.fetchval("SELECT id FROM repo WHERE name = $1", repo)
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
 
-        if not repo_id:
-            return {"error": f"Repository not found: {repo}"}
+        async with schema_context(conn, schema_name):
+            # Get latest assessment
+            assessment = await conn.fetchrow(
+                """
+                SELECT id FROM migration_assessment
+                WHERE repo_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                repo_id
+            )
 
-        # Get latest assessment
-        assessment = await conn.fetchrow(
-            """
-            SELECT id FROM migration_assessment
-            WHERE repo_id = $1
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            repo_id
-        )
+            if not assessment:
+                return {"error": "No assessment found"}
 
-        if not assessment:
-            return {"error": "No assessment found"}
+            # Severity order
+            severity_levels = {'info': 0, 'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
+            min_level = severity_levels.get(min_severity, 2)
 
-        # Severity order
-        severity_levels = {'info': 0, 'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
-        min_level = severity_levels.get(min_severity, 2)
+            # Get high-risk findings
+            findings = await conn.fetch(
+                """
+                SELECT category, severity, title, description, evidence, mapping
+                FROM migration_finding
+                WHERE assessment_id = $1
+                ORDER BY
+                    CASE severity
+                        WHEN 'critical' THEN 0
+                        WHEN 'high' THEN 1
+                        WHEN 'medium' THEN 2
+                        WHEN 'low' THEN 3
+                        ELSE 4
+                    END
+                """,
+                assessment['id']
+            )
 
-        # Get high-risk findings
-        findings = await conn.fetch(
-            """
-            SELECT category, severity, title, description, evidence, mapping
-            FROM migration_finding
-            WHERE assessment_id = $1
-            ORDER BY
-                CASE severity
-                    WHEN 'critical' THEN 0
-                    WHEN 'high' THEN 1
-                    WHEN 'medium' THEN 2
-                    WHEN 'low' THEN 3
-                    ELSE 4
-                END
-            """,
-            assessment['id']
-        )
+            risks = []
+            for finding in findings:
+                if severity_levels.get(finding['severity'], 0) >= min_level:
+                    evidence = finding['evidence'] or []
 
-        risks = []
-        for finding in findings:
-            if severity_levels.get(finding['severity'], 0) >= min_level:
-                evidence = finding['evidence'] or []
+                    # Extract impacted files
+                    impacted_files = list(set([e.get('path') for e in evidence if e.get('path')]))
 
-                # Extract impacted files
-                impacted_files = list(set([e.get('path') for e in evidence if e.get('path')]))
-
-                risks.append({
-                    "title": finding['title'],
-                    "severity": finding['severity'],
-                    "category": finding['category'],
-                    "description": finding['description'],
-                    "impacted_files": impacted_files[:10],
-                    "total_occurrences": len(evidence),
-                    "postgres_equivalent": finding['mapping'].get('postgres_equivalent'),
-                    "complexity": finding['mapping'].get('complexity'),
-                    "sample_locations": evidence[:3]
-                })
+                    risks.append({
+                        "title": finding['title'],
+                        "severity": finding['severity'],
+                        "category": finding['category'],
+                        "description": finding['description'],
+                        "impacted_files": impacted_files[:10],
+                        "total_occurrences": len(evidence),
+                        "postgres_equivalent": finding['mapping'].get('postgres_equivalent'),
+                        "complexity": finding['mapping'].get('complexity'),
+                        "sample_locations": evidence[:3]
+                    })
 
         return {
+            "schema_name": schema_name,
             "total_risks": len(risks),
             "min_severity": min_severity,
             "risks": risks,
@@ -1702,31 +1818,30 @@ async def migration_plan_outline(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo
+        # Resolve repo to schema
         try:
-            import uuid
-            uuid.UUID(repo)
-            repo_id = repo
-        except (ValueError, AttributeError):
-            repo_id = await conn.fetchval("SELECT id FROM repo WHERE name = $1", repo)
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
 
-        if not repo_id:
-            return {"error": f"Repository not found: {repo}"}
+        async with schema_context(conn, schema_name):
+            # Get latest assessment
+            assessment = await conn.fetchrow(
+                """
+                SELECT score, tier, report_json
+                FROM migration_assessment
+                WHERE repo_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                repo_id
+            )
 
-        # Get latest assessment
-        assessment = await conn.fetchrow(
-            """
-            SELECT score, tier, report_json
-            FROM migration_assessment
-            WHERE repo_id = $1
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            repo_id
-        )
-
-        if not assessment:
-            return {"error": "No assessment found"}
+            if not assessment:
+                return {"error": "No assessment found"}
 
         report_json = assessment['report_json']
 
@@ -1810,6 +1925,7 @@ async def migration_plan_outline(
         })
 
         return {
+            "schema_name": schema_name,
             "score": assessment['score'],
             "tier": assessment['tier'],
             "total_phases": len(phases),
@@ -1833,3 +1949,322 @@ def _estimate_timeline(tier: str) -> str:
         "extreme": "12+ months"
     }
     return timelines.get(tier, "6-12 months")
+
+
+# ============================================================================
+# DAEMON CONTROL TOOLS
+# ============================================================================
+
+@tool("repo_add")
+async def repo_add(
+    name: str,
+    path: str,
+    auto_index: bool = True,
+    auto_embed: bool = True,
+    auto_watch: bool = False
+) -> dict[str, Any]:
+    """Add a new repository to the daemon registry.
+
+    Creates a dedicated schema for the repository and optionally enqueues
+    a full index job.
+
+    Args:
+        name: Repository name (used for schema: codegraph_<name>)
+        path: Absolute path to repository root
+        auto_index: Whether to automatically enqueue full index
+        auto_embed: Whether to automatically generate embeddings
+        auto_watch: Whether to watch for file changes
+
+    Returns:
+        Repository registration confirmation
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Derive schema name
+        schema_name = f"codegraph_{name}"
+
+        # Check if repo already exists
+        existing = await conn.fetchval(
+            "SELECT 1 FROM codegraph_control.repo_registry WHERE name = $1",
+            name
+        )
+
+        if existing:
+            return {
+                "error": f"Repository '{name}' already exists",
+                "why": "Use a different name or update the existing repository"
+            }
+
+        # Create schema
+        await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+        # Initialize schema with DDL
+        from codegraph_mcp.db.ddl import DDL_PATH
+        ddl = DDL_PATH.read_text()
+
+        await conn.execute(f'SET search_path TO "{schema_name}", public')
+        await conn.execute(ddl)
+
+        # Insert into registry
+        await conn.execute("""
+            INSERT INTO codegraph_control.repo_registry
+                (name, schema_name, root_path, enabled, auto_index, auto_embed, auto_watch)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        """, name, schema_name, path, True, auto_index, auto_embed, auto_watch)
+
+        # Enqueue full index if requested
+        job_id = None
+        if auto_index:
+            job_id = await conn.fetchval("""
+                INSERT INTO codegraph_control.job_queue
+                    (repo_name, schema_name, job_type, payload, priority, dedup_key)
+                VALUES ($1, $2, 'FULL_INDEX', '{}'::jsonb, 7, $3)
+                RETURNING id
+            """, name, schema_name, f"{name}:full_index")
+
+        return {
+            "success": True,
+            "repo_name": name,
+            "schema_name": schema_name,
+            "root_path": path,
+            "job_id": str(job_id) if job_id else None,
+            "why": f"Repository '{name}' added to registry with schema '{schema_name}'"
+                   + (f" and full index job enqueued" if job_id else "")
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("enqueue_reindex_file")
+async def enqueue_reindex_file(
+    repo: str,
+    path: str,
+    op: str = "UPSERT",
+    reason: str = "manual",
+    priority: int = 5
+) -> dict[str, Any]:
+    """Enqueue a single file for reindexing.
+
+    Args:
+        repo: Repository name
+        path: File path relative to repo root
+        op: Operation type ("UPSERT" or "DELETE")
+        reason: Reason for reindex (for tracking)
+        priority: Job priority 1-10 (higher = more urgent)
+
+    Returns:
+        Job enqueue confirmation
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Get repo info
+        repo_info = await conn.fetchrow(
+            "SELECT schema_name FROM codegraph_control.repo_registry WHERE name = $1",
+            repo
+        )
+
+        if not repo_info:
+            return {
+                "error": f"Repository '{repo}' not found in registry",
+                "why": "Use repo_add to register the repository first"
+            }
+
+        schema_name = repo_info["schema_name"]
+
+        # Enqueue job with deduplication
+        dedup_key = f"{repo}:{path}:{op}"
+
+        job_id = await conn.fetchval("""
+            INSERT INTO codegraph_control.job_queue
+                (repo_name, schema_name, job_type, payload, priority, dedup_key)
+            VALUES ($1, $2, 'REINDEX_FILE', $3::jsonb, $4, $5)
+            ON CONFLICT DO NOTHING
+            RETURNING id
+        """, repo, schema_name, f'{{"path": "{path}", "op": "{op}", "reason": "{reason}"}}',
+            priority, dedup_key)
+
+        if job_id:
+            return {
+                "success": True,
+                "job_id": str(job_id),
+                "repo": repo,
+                "path": path,
+                "op": op,
+                "priority": priority,
+                "why": f"File reindex job enqueued for {path}"
+            }
+        else:
+            return {
+                "success": False,
+                "why": "Job already exists in queue (deduplicated)"
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("enqueue_reindex_many")
+async def enqueue_reindex_many(
+    repo: str,
+    paths: list[dict[str, str]],
+    reason: str = "manual",
+    priority: int = 5
+) -> dict[str, Any]:
+    """Enqueue multiple files for reindexing.
+
+    Args:
+        repo: Repository name
+        paths: List of dicts with 'path' and optional 'op' keys
+        reason: Reason for reindex (for tracking)
+        priority: Job priority 1-10 (higher = more urgent)
+
+    Returns:
+        Job enqueue confirmation
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Get repo info
+        repo_info = await conn.fetchrow(
+            "SELECT schema_name FROM codegraph_control.repo_registry WHERE name = $1",
+            repo
+        )
+
+        if not repo_info:
+            return {
+                "error": f"Repository '{repo}' not found in registry",
+                "why": "Use repo_add to register the repository first"
+            }
+
+        schema_name = repo_info["schema_name"]
+
+        # Enqueue batch job
+        import json
+        payload = {
+            "paths": paths,
+            "reason": reason
+        }
+
+        job_id = await conn.fetchval("""
+            INSERT INTO codegraph_control.job_queue
+                (repo_name, schema_name, job_type, payload, priority)
+            VALUES ($1, $2, 'REINDEX_MANY', $3::jsonb, $4)
+            RETURNING id
+        """, repo, schema_name, json.dumps(payload), priority)
+
+        return {
+            "success": True,
+            "job_id": str(job_id),
+            "repo": repo,
+            "file_count": len(paths),
+            "priority": priority,
+            "why": f"Batch reindex job enqueued for {len(paths)} files"
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("daemon_status")
+async def daemon_status(
+    repo: str | None = None,
+    limit: int = 10
+) -> dict[str, Any]:
+    """Get daemon and job queue status.
+
+    Args:
+        repo: Optional repository filter
+        limit: Maximum recent jobs to return
+
+    Returns:
+        Daemon status with queue statistics and recent jobs
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Get queue stats
+        if repo:
+            stats = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+                    COUNT(*) FILTER (WHERE status = 'CLAIMED') as claimed,
+                    COUNT(*) FILTER (WHERE status = 'DONE') as done,
+                    COUNT(*) FILTER (WHERE status = 'FAILED') as failed
+                FROM codegraph_control.job_queue
+                WHERE repo_name = $1
+            """, repo)
+        else:
+            stats = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+                    COUNT(*) FILTER (WHERE status = 'CLAIMED') as claimed,
+                    COUNT(*) FILTER (WHERE status = 'DONE') as done,
+                    COUNT(*) FILTER (WHERE status = 'FAILED') as failed
+                FROM codegraph_control.job_queue
+            """)
+
+        # Get recent jobs
+        if repo:
+            recent_jobs = await conn.fetch("""
+                SELECT id, job_type, status, created_at, started_at, completed_at, error
+                FROM codegraph_control.job_queue
+                WHERE repo_name = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+            """, repo, limit)
+        else:
+            recent_jobs = await conn.fetch("""
+                SELECT id, repo_name, job_type, status, created_at, started_at, completed_at, error
+                FROM codegraph_control.job_queue
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, limit)
+
+        # Get daemon instances
+        daemons = await conn.fetch("""
+            SELECT instance_id, status, started_at, last_heartbeat
+            FROM codegraph_control.daemon_instance
+            ORDER BY last_heartbeat DESC
+        """)
+
+        return {
+            "queue_stats": {
+                "pending": stats["pending"] or 0,
+                "claimed": stats["claimed"] or 0,
+                "done": stats["done"] or 0,
+                "failed": stats["failed"] or 0
+            },
+            "recent_jobs": [
+                {
+                    "job_id": str(job["id"]),
+                    "repo_name": job.get("repo_name"),
+                    "job_type": job["job_type"],
+                    "status": job["status"],
+                    "created_at": str(job["created_at"]),
+                    "started_at": str(job["started_at"]) if job["started_at"] else None,
+                    "completed_at": str(job["completed_at"]) if job["completed_at"] else None,
+                    "error": job["error"]
+                }
+                for job in recent_jobs
+            ],
+            "daemons": [
+                {
+                    "instance_id": d["instance_id"],
+                    "status": d["status"],
+                    "started_at": str(d["started_at"]),
+                    "last_heartbeat": str(d["last_heartbeat"])
+                }
+                for d in daemons
+            ],
+            "why": f"Daemon status and job queue statistics" + (f" for repo '{repo}'" if repo else "")
+        }
+
+    finally:
+        await conn.close()

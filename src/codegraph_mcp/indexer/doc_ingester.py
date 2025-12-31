@@ -14,7 +14,8 @@ from .doc_parser import parse_document
 async def ingest_documents(
     repo_id: str,
     repo_root: Path,
-    database_url: str
+    database_url: str,
+    schema_name: str | None = None
 ) -> dict[str, int]:
     """Ingest documentation files into the database.
 
@@ -22,6 +23,7 @@ async def ingest_documents(
         repo_id: Repository UUID
         repo_root: Repository root path
         database_url: Database connection string
+        schema_name: Optional schema name for schema isolation
 
     Returns:
         Dictionary with counts of ingested documents
@@ -30,6 +32,9 @@ async def ingest_documents(
     stats = {"documents": 0, "updated": 0, "skipped": 0}
 
     try:
+        # Set search path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         for file_path, doc_type in scan_docs(repo_root):
             try:
                 # Parse document
@@ -97,7 +102,8 @@ async def store_summary_as_document(
     summary_type: str,
     entity_id: str,
     summary_text: str,
-    database_url: str
+    database_url: str,
+    schema_name: str | None = None
 ) -> None:
     """Store a generated summary as a searchable document.
 
@@ -107,9 +113,13 @@ async def store_summary_as_document(
         entity_id: UUID of the entity (file_id, symbol_id, etc.)
         summary_text: Summary content
         database_url: Database connection string
+        schema_name: Optional schema name for schema isolation
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         # Create a title based on summary type
         title = f"{summary_type.capitalize()} Summary: {entity_id[:8]}"
 
@@ -149,3 +159,32 @@ async def store_summary_as_document(
 
     finally:
         await conn.close()
+
+
+# Alias for processor compatibility
+async def ingest_docs(
+    repo_id: str,
+    repo_path: str | Path,
+    database_url: str,
+    schema_name: str | None = None
+) -> dict[str, int]:
+    """Schema-aware wrapper for document ingestion (used by daemon processors).
+
+    Args:
+        repo_id: Repository UUID
+        repo_path: Path to repository root
+        database_url: Database connection string
+        schema_name: Schema name for isolation
+
+    Returns:
+        Statistics dict with ingestion counts
+    """
+    if isinstance(repo_path, str):
+        repo_path = Path(repo_path)
+
+    return await ingest_documents(
+        repo_id=repo_id,
+        repo_root=repo_path,
+        database_url=database_url,
+        schema_name=schema_name
+    )

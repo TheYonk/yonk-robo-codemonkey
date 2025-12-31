@@ -10,6 +10,7 @@ from codegraph_mcp.retrieval.vector_search import vector_search
 from codegraph_mcp.retrieval.fts_search import fts_search_chunks
 from codegraph_mcp.embeddings.ollama import ollama_embed
 from codegraph_mcp.embeddings.vllm_openai import vllm_embed
+from codegraph_mcp.db.schema_manager import schema_context
 
 
 @dataclass
@@ -43,6 +44,7 @@ async def hybrid_search(
     embeddings_base_url: str,
     embeddings_api_key: str = "",
     repo_id: str | None = None,
+    schema_name: str | None = None,
     tags_any: list[str] | None = None,
     tags_all: list[str] | None = None,
     vector_top_k: int = 30,
@@ -62,6 +64,7 @@ async def hybrid_search(
         embeddings_base_url: Provider base URL
         embeddings_api_key: API key (for vLLM)
         repo_id: Optional repository UUID to filter by
+        schema_name: Optional schema name for isolation
         tags_any: Optional list of tags (match any)
         tags_all: Optional list of tags (match all)
         vector_top_k: Number of vector candidates to fetch
@@ -89,6 +92,7 @@ async def hybrid_search(
         query_embedding=query_embedding,
         database_url=database_url,
         repo_id=repo_id,
+        schema_name=schema_name,
         top_k=vector_top_k
     )
 
@@ -97,6 +101,7 @@ async def hybrid_search(
         query=query,
         database_url=database_url,
         repo_id=repo_id,
+        schema_name=schema_name,
         top_k=fts_top_k
     )
 
@@ -146,15 +151,29 @@ async def hybrid_search(
     conn = await asyncpg.connect(dsn=database_url)
     try:
         chunk_ids = list(candidates.keys())
-        tag_rows = await conn.fetch(
-            """
-            SELECT et.entity_id, t.name
-            FROM entity_tag et
-            JOIN tag t ON et.tag_id = t.id
-            WHERE et.entity_id = ANY($1) AND et.entity_type = 'CHUNK'
-            """,
-            chunk_ids
-        )
+
+        # Use schema context if provided
+        if schema_name:
+            async with schema_context(conn, schema_name):
+                tag_rows = await conn.fetch(
+                    """
+                    SELECT et.entity_id, t.name
+                    FROM entity_tag et
+                    JOIN tag t ON et.tag_id = t.id
+                    WHERE et.entity_id = ANY($1) AND et.entity_type = 'CHUNK'
+                    """,
+                    chunk_ids
+                )
+        else:
+            tag_rows = await conn.fetch(
+                """
+                SELECT et.entity_id, t.name
+                FROM entity_tag et
+                JOIN tag t ON et.tag_id = t.id
+                WHERE et.entity_id = ANY($1) AND et.entity_type = 'CHUNK'
+                """,
+                chunk_ids
+            )
 
         # Group tags by chunk_id
         chunk_tags = {}

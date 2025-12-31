@@ -94,14 +94,29 @@ STARTER_TAG_RULES = [
 ]
 
 
-async def seed_starter_tags(database_url: str) -> None:
+async def seed_starter_tags(
+    database_url: str | None = None,
+    conn: asyncpg.Connection | None = None,
+    schema_name: str | None = None
+) -> None:
     """Seed database with starter tags and rules.
 
     Args:
-        database_url: Database connection string
+        database_url: Database connection string (if conn not provided)
+        conn: Existing connection (if database_url not provided)
+        schema_name: Optional schema name for schema isolation
     """
-    conn = await asyncpg.connect(dsn=database_url)
+    own_conn = False
+    if not conn:
+        if not database_url:
+            raise ValueError("Either database_url or conn must be provided")
+        conn = await asyncpg.connect(dsn=database_url)
+        own_conn = True
+
     try:
+        # Set search path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         # Extract unique tag names
         tag_names = set(rule.tag_name for rule in STARTER_TAG_RULES)
 
@@ -149,24 +164,30 @@ async def seed_starter_tags(database_url: str) -> None:
         print(f"Seeded {len(tag_names)} tags and {len(STARTER_TAG_RULES)} rules")
 
     finally:
-        await conn.close()
+        if own_conn:
+            await conn.close()
 
 
 async def apply_tag_rules(
     database_url: str,
-    repo_id: str | None = None
+    repo_id: str | None = None,
+    schema_name: str | None = None
 ) -> int:
     """Apply tag rules to chunks and documents.
 
     Args:
         database_url: Database connection string
         repo_id: Optional repository UUID to limit tagging to
+        schema_name: Optional schema name for schema isolation
 
     Returns:
         Number of entity_tag rows created
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         # Fetch all tag rules
         rule_rows = await conn.fetch(
             """
@@ -330,7 +351,8 @@ async def apply_tag_rules(
 async def get_entity_tags(
     entity_id: str,
     entity_type: str,
-    database_url: str
+    database_url: str,
+    schema_name: str | None = None
 ) -> list[dict]:
     """Get all tags for an entity.
 
@@ -338,12 +360,16 @@ async def get_entity_tags(
         entity_id: Entity UUID
         entity_type: "CHUNK", "DOCUMENT", "SYMBOL", or "FILE"
         database_url: Database connection string
+        schema_name: Optional schema name for schema isolation
 
     Returns:
         List of tag dictionaries with name and confidence
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         rows = await conn.fetch(
             """
             SELECT t.name, et.confidence

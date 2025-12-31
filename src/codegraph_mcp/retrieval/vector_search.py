@@ -5,6 +5,7 @@ Provides similarity search over embedded chunks.
 from __future__ import annotations
 import asyncpg
 from dataclasses import dataclass
+from codegraph_mcp.db.schema_manager import schema_context
 
 
 @dataclass
@@ -24,6 +25,7 @@ async def vector_search(
     query_embedding: list[float],
     database_url: str,
     repo_id: str | None = None,
+    schema_name: str | None = None,
     top_k: int = 10
 ) -> list[VectorSearchResult]:
     """Search for similar chunks using vector similarity.
@@ -32,6 +34,7 @@ async def vector_search(
         query_embedding: Query embedding vector
         database_url: Database connection string
         repo_id: Optional repository UUID to filter by
+        schema_name: Optional schema name for isolation
         top_k: Number of results to return
 
     Returns:
@@ -44,7 +47,7 @@ async def vector_search(
 
         # Build query
         if repo_id:
-            query = """
+            sql_query = """
                 SELECT
                     c.id as chunk_id,
                     c.file_id,
@@ -63,7 +66,7 @@ async def vector_search(
             """
             params = (vec_str, repo_id, top_k)
         else:
-            query = """
+            sql_query = """
                 SELECT
                     c.id as chunk_id,
                     c.file_id,
@@ -81,7 +84,12 @@ async def vector_search(
             """
             params = (vec_str, top_k)
 
-        rows = await conn.fetch(query, *params)
+        # Execute query with schema context if provided
+        if schema_name:
+            async with schema_context(conn, schema_name):
+                rows = await conn.fetch(sql_query, *params)
+        else:
+            rows = await conn.fetch(sql_query, *params)
 
         results = []
         for row in rows:

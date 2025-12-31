@@ -34,6 +34,13 @@ def run() -> None:
     idx = sub.add_parser("index", help="Index a repository")
     idx.add_argument("--repo", required=True, help="Path to repository")
     idx.add_argument("--name", required=True, help="Repository name")
+    idx.add_argument("--force", action="store_true",
+                     help="Force reinitialize schema even if it exists")
+
+    # Repository management commands
+    repo = sub.add_parser("repo", help="Repository management commands")
+    reposub = repo.add_subparsers(dest="repocmd", required=True)
+    reposub.add_parser("ls", help="List all indexed repositories")
 
     # Embedding commands
     emb = sub.add_parser("embed", help="Generate embeddings for chunks")
@@ -89,6 +96,11 @@ def run() -> None:
     features_list.add_argument("--prefix", default="", help="Name prefix filter")
     features_list.add_argument("--limit", type=int, default=50, help="Max features to show")
 
+    # Daemon command
+    daemon = sub.add_parser("daemon", help="Daemon management commands")
+    daemon_sub = daemon.add_subparsers(dest="daemon_cmd", required=True)
+    daemon_sub.add_parser("run", help="Run daemon continuously")
+
     args = parser.parse_args()
 
     try:
@@ -101,8 +113,12 @@ def run() -> None:
             asyncio.run(index_repo(
                 args.repo,
                 args.name,
-                settings.database_url
+                settings.database_url,
+                args.force
             ))
+        elif args.cmd == "repo":
+            if args.repocmd == "ls":
+                asyncio.run(list_repos(settings.database_url))
         elif args.cmd == "embed":
             asyncio.run(embed_repo(
                 args.repo_id,
@@ -151,6 +167,10 @@ def run() -> None:
                 args.regenerate,
                 args.max_modules
             ))
+        elif args.cmd == "daemon":
+            if args.daemon_cmd == "run":
+                from codegraph_mcp.daemon.main import main
+                main()  # main() already calls asyncio.run internally
         elif args.cmd == "features":
             if args.features_cmd == "build":
                 asyncio.run(build_features(
@@ -273,19 +293,22 @@ async def db_ping(database_url: str) -> None:
         await conn.close()
 
 
-async def index_repo(repo_path: str, repo_name: str, database_url: str) -> None:
+async def index_repo(repo_path: str, repo_name: str, database_url: str, force: bool = False) -> None:
     """Index a repository.
 
     Args:
         repo_path: Path to repository root
         repo_name: Name for the repository
         database_url: PostgreSQL connection string
+        force: If True, reinitialize schema even if it exists
     """
     print(f"Indexing repository: {repo_name}")
     print(f"Path: {repo_path}")
+    if force:
+        print("Force mode: Will reinitialize schema if it exists")
 
     try:
-        stats = await index_repository(repo_path, repo_name, database_url)
+        stats = await index_repository(repo_path, repo_name, database_url, force=force)
 
         print(f"\n✓ Indexing complete")
         print(f"  Files indexed: {stats['files']}")
@@ -296,6 +319,41 @@ async def index_repo(repo_path: str, repo_name: str, database_url: str) -> None:
         raise RuntimeError(f"Repository not found: {e}")
     except Exception as e:
         raise RuntimeError(f"Indexing failed: {e}")
+
+
+async def list_repos(database_url: str) -> None:
+    """List all indexed repositories with their schemas.
+
+    Args:
+        database_url: PostgreSQL connection string
+    """
+    from codegraph_mcp.db.schema_manager import list_repo_schemas
+
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        repos = await list_repo_schemas(conn)
+
+        if not repos:
+            print("No repositories indexed yet.")
+            return
+
+        print(f"\nIndexed Repositories ({len(repos)}):")
+        print("=" * 100)
+
+        for repo in repos:
+            print(f"\nRepository: {repo['repo_name']}")
+            print(f"  Schema:          {repo['schema_name']}")
+            print(f"  Repo ID:         {repo['repo_id']}")
+            print(f"  Path:            {repo['root_path']}")
+            print(f"  Last Indexed:    {repo['last_indexed_at'] or 'Never'}")
+            print(f"  Files:           {repo['file_count']}")
+            print(f"  Symbols:         {repo['symbol_count']}")
+            print(f"  Chunks:          {repo['chunk_count']}")
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to list repositories: {e}")
+    finally:
+        await conn.close()
 
 
 async def embed_repo(

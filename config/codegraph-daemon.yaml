@@ -1,0 +1,114 @@
+# CodeGraph Daemon Configuration
+# This file configures the always-on background daemon that:
+# - Watches repositories for changes
+# - Processes indexing/embedding job queues
+# - Keeps indexes fresh automatically
+
+# ============================================================================
+# Database Configuration
+# ============================================================================
+database:
+  # Connection string for control database
+  # The daemon uses codegraph_control schema for job queues and registry
+  control_dsn: "postgresql://postgres:postgres@localhost:5433/codegraph"
+  pool_size: 10
+  pool_timeout: 30
+
+# ============================================================================
+# Embeddings Configuration
+# ============================================================================
+embeddings:
+  enabled: true
+  provider: "ollama"  # "ollama" or "vllm"
+  dimension: 1536
+  backfill_on_startup: false  # Enqueue EMBED_MISSING for all repos on startup
+
+  # Ollama configuration (used if provider=ollama)
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "nomic-embed-text"
+    timeout: 60
+    batch_size: 32
+
+  # vLLM configuration (used if provider=vllm)
+  # vllm:
+  #   base_url: "http://localhost:8000"
+  #   model: "BAAI/bge-large-en-v1.5"
+  #   api_key: "local-key"
+  #   timeout: 60
+  #   batch_size: 32
+
+# ============================================================================
+# LLM Configuration (for summaries)
+# ============================================================================
+llm:
+  enabled: false  # Enable for automatic summary generation
+  provider: "ollama"
+  model: "llama3.2:3b"
+  base_url: "http://localhost:11434"
+  temperature: 0.7
+  max_tokens: 500
+
+# ============================================================================
+# Worker Pool Configuration
+# ============================================================================
+workers:
+  # Number of concurrent workers per job type
+  reindex_workers: 2      # File indexing (symbols, chunks, edges)
+  embed_workers: 2        # Embedding generation
+  docs_workers: 1         # Documentation ingestion
+  summary_workers: 0      # Summary generation (disabled by default)
+
+  # Concurrency limits
+  max_concurrent_per_repo: 2  # Prevent repo thrashing
+  global_max_concurrent: 8    # Total concurrent jobs across all repos
+
+  # Polling and heartbeat
+  poll_interval_sec: 5        # How often to check for new jobs
+  heartbeat_interval_sec: 30  # Health check interval
+
+# ============================================================================
+# File System Watcher Configuration
+# ============================================================================
+watcher:
+  enabled: true
+  debounce_ms: 500  # Coalesce rapid changes
+  ignore_patterns:
+    - "*.pyc"
+    - "__pycache__"
+    - ".git"
+    - ".venv"
+    - "venv"
+    - "node_modules"
+    - ".DS_Store"
+    - "*.swp"
+    - "*.swo"
+    - ".vscode"
+    - ".idea"
+    - "*.log"
+    - "dist"
+    - "build"
+
+# ============================================================================
+# Job Queue Configuration
+# ============================================================================
+jobs:
+  claim_batch_size: 10           # Jobs claimed per poll
+  max_retries: 5                 # Max retry attempts before FAILED
+  retry_backoff_base_sec: 60     # Exponential backoff base (2^n * base)
+  cleanup_retention_days: 7      # Keep completed jobs for N days
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  # file: "logs/daemon.log"  # Optional: log to file
+  json_logs: false
+
+# ============================================================================
+# Feature Flags
+# ============================================================================
+enable_summaries: false          # Generate file/symbol summaries automatically
+enable_tag_rules_sync: true      # Apply tag rules after indexing
