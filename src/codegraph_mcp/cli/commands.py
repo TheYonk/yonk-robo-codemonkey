@@ -66,6 +66,29 @@ def run() -> None:
     status_group.add_argument("--repo-id", help="Repository UUID")
     status_group.add_argument("--name", help="Repository name")
 
+    # Review command
+    review = sub.add_parser("review", help="Generate comprehensive architecture review")
+    review.add_argument("--repo", required=True, help="Path to repository")
+    review.add_argument("--name", required=True, help="Repository name")
+    review.add_argument("--regenerate", action="store_true",
+                       help="Force regeneration even if cached")
+    review.add_argument("--max-modules", type=int, default=25,
+                       help="Maximum modules to include (default: 25)")
+
+    # Features command
+    features = sub.add_parser("features", help="Feature index management")
+    features_sub = features.add_subparsers(dest="features_cmd", required=True)
+
+    features_build = features_sub.add_parser("build", help="Build feature index")
+    features_build.add_argument("--repo-id", required=True, help="Repository UUID")
+    features_build.add_argument("--regenerate", action="store_true",
+                               help="Force regeneration")
+
+    features_list = features_sub.add_parser("list", help="List features")
+    features_list.add_argument("--repo-id", required=True, help="Repository UUID")
+    features_list.add_argument("--prefix", default="", help="Name prefix filter")
+    features_list.add_argument("--limit", type=int, default=50, help="Max features to show")
+
     args = parser.parse_args()
 
     try:
@@ -120,6 +143,28 @@ def run() -> None:
                 args.repo_id if hasattr(args, "repo_id") else None,
                 args.name if hasattr(args, "name") else None
             ))
+        elif args.cmd == "review":
+            asyncio.run(generate_review(
+                args.repo,
+                args.name,
+                settings.database_url,
+                args.regenerate,
+                args.max_modules
+            ))
+        elif args.cmd == "features":
+            if args.features_cmd == "build":
+                asyncio.run(build_features(
+                    args.repo_id,
+                    settings.database_url,
+                    args.regenerate
+                ))
+            elif args.features_cmd == "list":
+                asyncio.run(list_features_cmd(
+                    args.repo_id,
+                    settings.database_url,
+                    args.prefix,
+                    args.limit
+                ))
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
         sys.exit(130)
@@ -540,6 +585,145 @@ async def show_status(
             print(f"  Symbols: {symbol_count}")
             print(f"  Chunks: {chunk_count}")
             print(f"  Edges: {edge_count}")
+
+    finally:
+        await conn.close()
+
+
+async def generate_review(
+    repo_path: str,
+    repo_name: str,
+    database_url: str,
+    regenerate: bool,
+    max_modules: int
+) -> None:
+    """Generate comprehensive architecture review.
+
+    Args:
+        repo_path: Path to repository root
+        repo_name: Repository name
+        database_url: PostgreSQL connection string
+        regenerate: Force regeneration
+        max_modules: Maximum modules to include
+    """
+    from codegraph_mcp.reports.generator import generate_comprehensive_review
+
+    # Get repo_id
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        repo_id = await conn.fetchval(
+            "SELECT id FROM repo WHERE name = $1",
+            repo_name
+        )
+
+        if not repo_id:
+            raise RuntimeError(
+                f"Repository not found in database. Please index it first:\n"
+                f"  codegraph index --repo {repo_path} --name {repo_name}"
+            )
+    finally:
+        await conn.close()
+
+    print(f"Generating comprehensive review for: {repo_name}")
+
+    result = await generate_comprehensive_review(
+        repo_id=repo_id,
+        database_url=database_url,
+        regenerate=regenerate,
+        max_modules=max_modules
+    )
+
+    print(f"\n✓ Review {'regenerated' if not result.cached else 'retrieved from cache'}")
+    print(f"  Generated at: {result.generated_at}")
+    print(f"  Content hash: {result.content_hash}")
+    print(f"\n{result.report_text}")
+
+
+async def build_features(
+    repo_id: str,
+    database_url: str,
+    regenerate: bool
+) -> None:
+    """Build feature index.
+
+    Args:
+        repo_id: Repository UUID
+        database_url: PostgreSQL connection string
+        regenerate: Force regeneration
+    """
+    from codegraph_mcp.reports.feature_index_builder import build_feature_index
+
+    print(f"Building feature index for repo: {repo_id}")
+
+    result = await build_feature_index(
+        repo_id=repo_id,
+        database_url=database_url,
+        regenerate=regenerate
+    )
+
+    if result["success"]:
+        print(f"\n✓ Feature index {'rebuilt' if result['regenerated'] else 'built'}")
+        print(f"  Features indexed: {result['features_count']}")
+        if "sources" in result:
+            print(f"  Sources:")
+            for source, count in result["sources"].items():
+                print(f"    {source}: {count} features")
+    else:
+        raise RuntimeError(f"Failed to build feature index: {result.get('error', 'Unknown error')}")
+
+
+async def list_features_cmd(
+    repo_id: str,
+    database_url: str,
+    prefix: str,
+    limit: int
+) -> None:
+    """List features.
+
+    Args:
+        repo_id: Repository UUID
+        database_url: PostgreSQL connection string
+        prefix: Name prefix filter
+        limit: Maximum features to show
+    """
+    conn = await asyncpg.connect(dsn=database_url)
+
+    try:
+        # Get features
+        if prefix:
+            features = await conn.fetch(
+                """
+                SELECT name, description
+                FROM feature_index
+                WHERE repo_id = $1 AND name LIKE $2
+                ORDER BY name
+                LIMIT $3
+                """,
+                repo_id, f"{prefix}%", limit
+            )
+        else:
+            features = await conn.fetch(
+                """
+                SELECT name, description
+                FROM feature_index
+                WHERE repo_id = $1
+                ORDER BY name
+                LIMIT $2
+                """,
+                repo_id, limit
+            )
+
+        if not features:
+            print(f"No features found{f' with prefix {prefix}' if prefix else ''}")
+            print("Run 'codegraph features build --repo-id <uuid>' to build the index")
+            return
+
+        print(f"\nFeatures ({len(features)} total):\n")
+        for feature in features:
+            print(f"  • {feature['name']}")
+            if feature['description']:
+                print(f"    {feature['description']}")
+            print()
 
     finally:
         await conn.close()

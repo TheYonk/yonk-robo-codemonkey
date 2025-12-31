@@ -19,6 +19,9 @@ from codegraph_mcp.summaries.generator import (
     generate_module_summary as _generate_module_summary
 )
 from codegraph_mcp.indexer.doc_ingester import store_summary_as_document
+from codegraph_mcp.reports.generator import generate_comprehensive_review
+from codegraph_mcp.reports.feature_context import get_feature_context
+from codegraph_mcp.reports.feature_index_builder import build_feature_index as _build_feature_index
 from codegraph_mcp.config import Settings
 
 TOOL_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {}
@@ -864,6 +867,291 @@ async def index_status(
         else:
             result["index_state"] = None
             result["why"] = "Repository indexed but index_state not initialized. Run sync or watch to track freshness."
+
+        return result
+
+    finally:
+        await conn.close()
+
+
+@tool("comprehensive_review")
+async def comprehensive_review(
+    repo: str,
+    regenerate: bool = False,
+    max_modules: int = 25,
+    max_files_per_module: int = 20,
+    include_sections: list[str] | None = None
+) -> dict[str, Any]:
+    """Generate comprehensive architecture report for a repository.
+
+    Args:
+        repo: Repository name or UUID
+        regenerate: Force regeneration even if cached
+        max_modules: Maximum modules to include
+        max_files_per_module: Maximum files per module
+        include_sections: Sections to include
+
+    Returns:
+        Comprehensive report with JSON and markdown
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo name/ID
+        try:
+            import uuid
+            uuid.UUID(repo)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo_id = repo
+        else:
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1", repo
+            )
+
+        if not repo_id:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": "Repository does not exist in database"
+            }
+
+        # Generate report
+        result = await generate_comprehensive_review(
+            repo_id=repo_id,
+            database_url=settings.database_url,
+            regenerate=regenerate,
+            max_modules=max_modules,
+            max_files_per_module=max_files_per_module,
+            include_sections=include_sections
+        )
+
+        return {
+            "repo_id": repo_id,
+            "generated_at": result.generated_at,
+            "cached": result.cached,
+            "report_markdown": result.report_text,
+            "report_json": result.report_json,
+            "why": {
+                "content_hash": result.content_hash,
+                "cached": result.cached,
+                "sections": list(result.report_json.get("sections", {}).keys())
+            }
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("feature_context")
+async def feature_context(
+    repo: str,
+    query: str,
+    filters: dict[str, Any] | None = None,
+    top_k_files: int = 25,
+    budget_tokens: int = 12000,
+    depth: int = 2,
+    regenerate_summaries: bool = False
+) -> dict[str, Any]:
+    """Ask about a feature/concept and get all relevant files, summaries, and docs.
+
+    Args:
+        repo: Repository name or UUID
+        query: Feature/concept query string
+        filters: Optional filters (tags_any, tags_all, language, path_prefix)
+        top_k_files: Number of top files to return
+        budget_tokens: Token budget for context
+        depth: Graph expansion depth
+        regenerate_summaries: Whether to regenerate summaries
+
+    Returns:
+        Comprehensive context for the feature
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo name/ID
+        try:
+            import uuid
+            uuid.UUID(repo)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo_id = repo
+        else:
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1", repo
+            )
+
+        if not repo_id:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": "Repository does not exist in database"
+            }
+
+        # Get feature context
+        result = await get_feature_context(
+            repo_id=repo_id,
+            query=query,
+            database_url=settings.database_url,
+            embeddings_provider=settings.embeddings_provider,
+            embeddings_model=settings.embeddings_model,
+            embeddings_base_url=settings.embeddings_base_url,
+            embeddings_api_key=settings.vllm_api_key,
+            filters=filters,
+            top_k_files=top_k_files,
+            budget_tokens=budget_tokens,
+            depth=depth,
+            regenerate_summaries=regenerate_summaries
+        )
+
+        return {
+            "query": result.query,
+            "top_files": result.top_files,
+            "relevant_docs": result.relevant_docs,
+            "key_flows": result.key_flows,
+            "architecture_notes": result.architecture_notes,
+            "why": result.why
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("list_features")
+async def list_features(
+    repo: str,
+    prefix: str = "",
+    limit: int = 50
+) -> dict[str, Any]:
+    """List known features/concepts for a repository.
+
+    Args:
+        repo: Repository name or UUID
+        prefix: Optional name prefix filter
+        limit: Maximum features to return
+
+    Returns:
+        List of features with descriptions
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo name/ID
+        try:
+            import uuid
+            uuid.UUID(repo)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo_id = repo
+        else:
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1", repo
+            )
+
+        if not repo_id:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": "Repository does not exist in database"
+            }
+
+        # Get features
+        if prefix:
+            features = await conn.fetch(
+                """
+                SELECT id, name, description, source
+                FROM feature_index
+                WHERE repo_id = $1 AND name LIKE $2
+                ORDER BY name
+                LIMIT $3
+                """,
+                repo_id, f"{prefix}%", limit
+            )
+        else:
+            features = await conn.fetch(
+                """
+                SELECT id, name, description, source
+                FROM feature_index
+                WHERE repo_id = $1
+                ORDER BY name
+                LIMIT $2
+                """,
+                repo_id, limit
+            )
+
+        return {
+            "features": [
+                {
+                    "id": str(f["id"]),
+                    "name": f["name"],
+                    "description": f["description"],
+                    "source": f["source"]
+                }
+                for f in features
+            ],
+            "total_count": len(features),
+            "why": f"Features from feature_index table{f' with prefix {prefix}' if prefix else ''}"
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("build_feature_index")
+async def build_feature_index(
+    repo: str,
+    regenerate: bool = False
+) -> dict[str, Any]:
+    """Build or update feature index for a repository.
+
+    Args:
+        repo: Repository name or UUID
+        regenerate: Force regeneration even if exists
+
+    Returns:
+        Stats about features indexed
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo name/ID
+        try:
+            import uuid
+            uuid.UUID(repo)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo_id = repo
+        else:
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1", repo
+            )
+
+        if not repo_id:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": "Repository does not exist in database"
+            }
+
+        # Build index
+        result = await _build_feature_index(
+            repo_id=repo_id,
+            database_url=settings.database_url,
+            regenerate=regenerate
+        )
 
         return result
 

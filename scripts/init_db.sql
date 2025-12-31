@@ -22,6 +22,32 @@ CREATE TABLE IF NOT EXISTS repo_index_state (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS repo_report (
+  repo_id UUID PRIMARY KEY REFERENCES repo(id) ON DELETE CASCADE,
+  report_json JSONB NOT NULL,
+  report_text TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS feature_index (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  evidence JSONB,
+  source TEXT NOT NULL,
+  fts tsvector,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(repo_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS feature_index_embedding (
+  feature_id UUID PRIMARY KEY REFERENCES feature_index(id) ON DELETE CASCADE,
+  embedding vector(1536) NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS file (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
@@ -167,6 +193,9 @@ CREATE INDEX IF NOT EXISTS idx_symbol_fts ON symbol USING GIN (fts);
 CREATE INDEX IF NOT EXISTS idx_entity_tag_lookup ON entity_tag(repo_id, entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_entity_tag_by_tag ON entity_tag(tag_id, repo_id);
 
+CREATE INDEX IF NOT EXISTS idx_feature_index_repo ON feature_index(repo_id);
+CREATE INDEX IF NOT EXISTS idx_feature_index_fts ON feature_index USING GIN (fts);
+
 -- FTS triggers
 CREATE OR REPLACE FUNCTION set_chunk_fts() RETURNS trigger AS $$
 BEGIN
@@ -208,3 +237,18 @@ DROP TRIGGER IF EXISTS trg_symbol_fts ON symbol;
 CREATE TRIGGER trg_symbol_fts
 BEFORE INSERT OR UPDATE OF name, fqn, signature, docstring ON symbol
 FOR EACH ROW EXECUTE FUNCTION set_symbol_fts();
+
+CREATE OR REPLACE FUNCTION set_feature_index_fts() RETURNS trigger AS $$
+BEGIN
+  NEW.fts := to_tsvector('simple',
+      coalesce(NEW.name,'') || ' ' ||
+      coalesce(NEW.description,'')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_feature_index_fts ON feature_index;
+CREATE TRIGGER trg_feature_index_fts
+BEFORE INSERT OR UPDATE OF name, description ON feature_index
+FOR EACH ROW EXECUTE FUNCTION set_feature_index_fts();
