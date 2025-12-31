@@ -633,5 +633,60 @@ TOOL_SCHEMAS = {
             },
             "required": ["repo"]
         }
+    },
+
+    "list_repos": {
+        "description": "**REPOSITORY DISCOVERY** - List all indexed codebases with stats and summaries. USE THIS FIRST when: (1) you don't know which repository to search, (2) user asks 'what codebases are available', (3) multi-repo environment and unclear which contains the code. Returns: repo names, file/symbol counts, embedding status, and what each codebase does. Essential starting point for new conversations.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+
+    "suggest_tool": {
+        "description": "**TOOL RECOMMENDATION** - Analyzes a query and suggests which MCP tool(s) to use. USE THIS when: (1) uncertain which tool is best for a task, (2) query is complex and might need multiple tools, (3) want optimized tool selection. Returns: recommended tool with confidence level, reasoning, matched keywords, alternative tools, and suggested multi-step workflow. Helps agents make better tool choices.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user_query": {
+                    "type": "string",
+                    "description": "The user's question or request (e.g., 'how does authentication work?', 'find all database queries')"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Optional additional context about what the user is trying to accomplish"
+                }
+            },
+            "required": ["user_query"]
+        }
+    },
+
+    "universal_search": {
+        "description": "**DEEP COMPREHENSIVE SEARCH** - Multi-strategy search with LLM summarization. USE THIS when: (1) need maximum coverage ('tell me everything about X'), (2) complex topics requiring multiple search perspectives, (3) want LLM-analyzed summary of findings, (4) exploring unfamiliar code areas. Runs hybrid_search + doc_search + semantic_search in parallel, deduplicates, re-ranks (40% hybrid, 30% docs, 30% semantic), and uses LLM to summarize. Returns: top files across all strategies + LLM summary. Most comprehensive but slower than single-strategy searches.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query (e.g., 'authentication and session management', 'database migration logic')"
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name to search (use list_repos if unsure)"
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of final results to return per strategy (default 10). Higher = more comprehensive but slower.",
+                    "default": 10
+                },
+                "deep_mode": {
+                    "type": "boolean",
+                    "description": "Whether to use LLM summarization (default True). Disable for faster results without summary.",
+                    "default": True
+                }
+            },
+            "required": ["query", "repo"]
+        }
     }
 }

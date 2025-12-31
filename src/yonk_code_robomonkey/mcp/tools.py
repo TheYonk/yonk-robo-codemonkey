@@ -2268,3 +2268,544 @@ async def daemon_status(
 
     finally:
         await conn.close()
+
+
+# ============================================================================
+# REPOSITORY DISCOVERY & META-SEARCH TOOLS
+# ============================================================================
+
+@tool("list_repos")
+async def list_repos() -> dict[str, Any]:
+    """List all indexed code repositories with summaries.
+
+    Returns information about all indexed codebases including:
+    - Repository name and schema
+    - Last updated timestamp
+    - File/symbol/chunk counts
+    - Summary of what the codebase does
+
+    Use this when you don't know which repository to search or need
+    an overview of available codebases.
+
+    Returns:
+        List of repositories with metadata and summaries
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Get all registered repositories
+        repos = await conn.fetch("""
+            SELECT name, schema_name, root_path, enabled,
+                   created_at, updated_at, last_seen_at, config
+            FROM robomonkey_control.repo_registry
+            WHERE enabled = true
+            ORDER BY updated_at DESC
+        """)
+
+        repo_list = []
+        for repo in repos:
+            schema_name = repo["schema_name"]
+
+            # Get stats for this repo
+            async with schema_context(conn, schema_name):
+                stats = await conn.fetchrow("""
+                    SELECT
+                        (SELECT COUNT(*) FROM file) as file_count,
+                        (SELECT COUNT(*) FROM symbol) as symbol_count,
+                        (SELECT COUNT(*) FROM chunk) as chunk_count,
+                        (SELECT COUNT(*) FROM chunk_embedding) as embedding_count
+                """)
+
+                # Try to get comprehensive review summary if it exists
+                summary_doc = await conn.fetchval("""
+                    SELECT content FROM document
+                    WHERE doc_type = 'comprehensive_review'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """)
+
+            # Extract overview from summary if available
+            overview = "No summary available"
+            if summary_doc:
+                # Extract first few sentences from markdown
+                lines = summary_doc.split('\n')
+                for line in lines:
+                    if line.strip() and not line.startswith('#'):
+                        overview = line.strip()[:500]
+                        break
+
+            repo_list.append({
+                "name": repo["name"],
+                "schema": schema_name,
+                "root_path": repo["root_path"],
+                "last_updated": str(repo["updated_at"]) if repo["updated_at"] else None,
+                "last_seen": str(repo["last_seen_at"]) if repo["last_seen_at"] else None,
+                "stats": {
+                    "files": stats["file_count"] or 0,
+                    "symbols": stats["symbol_count"] or 0,
+                    "chunks": stats["chunk_count"] or 0,
+                    "embeddings": stats["embedding_count"] or 0,
+                    "indexed_percent": (
+                        round((stats["embedding_count"] or 0) / max(stats["chunk_count"] or 1, 1) * 100, 1)
+                    )
+                },
+                "overview": overview
+            })
+
+        return {
+            "total_repos": len(repo_list),
+            "repositories": repo_list,
+            "why": "List of all indexed repositories with stats and summaries"
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("suggest_tool")
+async def suggest_tool(
+    user_query: str,
+    context: str | None = None
+) -> dict[str, Any]:
+    """Suggest the best MCP tool(s) to use for a given question or task.
+
+    Analyzes the user's intent and recommends which tool(s) would be most
+    effective. Helps agents select the right tool for the job.
+
+    Args:
+        user_query: The user's question or request
+        context: Optional additional context about what the user is trying to do
+
+    Returns:
+        Recommended tool(s) with reasoning
+    """
+    # Tool categories and their use cases
+    tool_map = {
+        # Search & Discovery
+        "list_repos": {
+            "keywords": ["which repo", "what repos", "what codebases", "don't know which", "list repos"],
+            "intent": "repository_discovery",
+            "description": "When user doesn't know which repository to search"
+        },
+        "hybrid_search": {
+            "keywords": ["find code", "search for", "where is", "locate", "show me"],
+            "intent": "code_search",
+            "description": "General code search - finding implementations, examples, patterns"
+        },
+        "doc_search": {
+            "keywords": ["documentation", "readme", "how to", "setup", "guide", "instructions"],
+            "intent": "documentation_search",
+            "description": "Searching README files and documentation"
+        },
+        "universal_search": {
+            "keywords": ["comprehensive", "deep search", "everything about", "all information"],
+            "intent": "deep_search",
+            "description": "Comprehensive multi-strategy search with LLM summarization"
+        },
+
+        # Symbol Analysis
+        "symbol_lookup": {
+            "keywords": ["definition of", "find function", "find class", "locate method"],
+            "intent": "symbol_definition",
+            "description": "Finding exact function/class definitions"
+        },
+        "symbol_context": {
+            "keywords": ["how is used", "callers", "callees", "dependencies", "context around"],
+            "intent": "symbol_usage",
+            "description": "Understanding how a function/class is used"
+        },
+        "callers": {
+            "keywords": ["what calls", "who uses", "called by", "references to"],
+            "intent": "find_callers",
+            "description": "Finding all callers of a function"
+        },
+        "callees": {
+            "keywords": ["what does call", "dependencies", "calls what"],
+            "intent": "find_callees",
+            "description": "Finding what a function calls"
+        },
+
+        # Architecture & Analysis
+        "comprehensive_review": {
+            "keywords": ["architecture", "overview", "structure", "how does work", "technical stack"],
+            "intent": "architecture_analysis",
+            "description": "High-level codebase architecture and structure"
+        },
+        "feature_context": {
+            "keywords": ["how does feature", "implementation of", "how is implemented"],
+            "intent": "feature_implementation",
+            "description": "Understanding specific feature implementations"
+        },
+
+        # Database
+        "db_review": {
+            "keywords": ["database schema", "tables", "database structure", "data model"],
+            "intent": "database_analysis",
+            "description": "Understanding database schema and structure"
+        },
+        "db_feature_context": {
+            "keywords": ["database feature", "db queries for", "table usage"],
+            "intent": "database_feature",
+            "description": "How features interact with database"
+        },
+
+        # Migration
+        "migration_assess": {
+            "keywords": ["migration", "upgrade", "port to", "convert to"],
+            "intent": "migration_planning",
+            "description": "Planning migrations or upgrades"
+        }
+    }
+
+    query_lower = user_query.lower()
+    if context:
+        query_lower += " " + context.lower()
+
+    # Score each tool
+    scored_tools = []
+    for tool_name, tool_info in tool_map.items():
+        score = 0
+        matched_keywords = []
+
+        for keyword in tool_info["keywords"]:
+            if keyword in query_lower:
+                score += 10
+                matched_keywords.append(keyword)
+
+        if score > 0:
+            scored_tools.append({
+                "tool": tool_name,
+                "score": score,
+                "matched_keywords": matched_keywords,
+                "description": tool_info["description"],
+                "intent": tool_info["intent"]
+            })
+
+    # Sort by score
+    scored_tools.sort(key=lambda x: x["score"], reverse=True)
+
+    # If no keywords matched, provide default recommendations
+    if not scored_tools:
+        # Analyze for general patterns
+        if "?" in user_query:
+            scored_tools.append({
+                "tool": "list_repos",
+                "score": 5,
+                "matched_keywords": [],
+                "description": "Start by listing available repositories",
+                "intent": "exploratory"
+            })
+            scored_tools.append({
+                "tool": "hybrid_search",
+                "score": 5,
+                "matched_keywords": [],
+                "description": "General search across code",
+                "intent": "exploratory"
+            })
+
+    # Provide recommendation
+    if scored_tools:
+        primary_tool = scored_tools[0]
+        alternatives = scored_tools[1:3] if len(scored_tools) > 1 else []
+
+        return {
+            "recommended_tool": primary_tool["tool"],
+            "confidence": "high" if primary_tool["score"] >= 20 else "medium" if primary_tool["score"] >= 10 else "low",
+            "reasoning": primary_tool["description"],
+            "matched_keywords": primary_tool["matched_keywords"],
+            "alternative_tools": [
+                {
+                    "tool": alt["tool"],
+                    "reasoning": alt["description"]
+                }
+                for alt in alternatives
+            ],
+            "suggested_workflow": _suggest_workflow(primary_tool["intent"]),
+            "why": f"Based on keywords and intent analysis of: '{user_query[:100]}...'"
+        }
+    else:
+        return {
+            "recommended_tool": "hybrid_search",
+            "confidence": "low",
+            "reasoning": "Default to general code search when intent is unclear",
+            "matched_keywords": [],
+            "alternative_tools": [
+                {"tool": "list_repos", "reasoning": "Start by exploring available repositories"},
+                {"tool": "comprehensive_review", "reasoning": "Get architecture overview"}
+            ],
+            "why": "Could not determine specific intent from query"
+        }
+
+
+def _suggest_workflow(intent: str) -> list[str]:
+    """Suggest a workflow of tools based on intent."""
+    workflows = {
+        "repository_discovery": [
+            "1. Use list_repos to see available codebases",
+            "2. Use comprehensive_review on chosen repo for overview",
+            "3. Use hybrid_search for specific queries"
+        ],
+        "code_search": [
+            "1. Use hybrid_search to find relevant code",
+            "2. Use symbol_lookup for exact definitions",
+            "3. Use symbol_context to understand usage"
+        ],
+        "symbol_definition": [
+            "1. Use symbol_lookup to find definition",
+            "2. Use symbol_context to see usage",
+            "3. Use callers to see who uses it"
+        ],
+        "architecture_analysis": [
+            "1. Use comprehensive_review for overview",
+            "2. Use feature_context for specific features",
+            "3. Use hybrid_search for implementation details"
+        ],
+        "deep_search": [
+            "1. Use universal_search for comprehensive results",
+            "2. Review the LLM summary and top files",
+            "3. Use symbol_context or hybrid_search for details"
+        ]
+    }
+    return workflows.get(intent, [
+        "1. Start with hybrid_search for general exploration",
+        "2. Use symbol_lookup for specific symbols",
+        "3. Use comprehensive_review for architecture understanding"
+    ])
+
+
+@tool("universal_search")
+async def universal_search(
+    query: str,
+    repo: str,
+    top_k: int = 10,
+    deep_mode: bool = True
+) -> dict[str, Any]:
+    """Comprehensive multi-strategy search with LLM-powered summarization.
+
+    Combines multiple search strategies (doc_search, hybrid_search, semantic search)
+    and uses an LLM to analyze and summarize the results. Returns the most relevant
+    files and insights.
+
+    This is a "deep search" tool for when you need comprehensive understanding
+    of a topic across the entire codebase.
+
+    Args:
+        query: Search query
+        repo: Repository name
+        top_k: Number of final results to return (default 10)
+        deep_mode: Whether to use LLM summarization (default True)
+
+    Returns:
+        Combined search results with LLM summary and top files
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo to schema
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": str(e),
+                "why": "Repository not found in any schema"
+            }
+
+        # Run three search strategies in parallel
+        import asyncio
+
+        # 1. Hybrid search (vector + FTS)
+        hybrid_task = _hybrid_search(
+            query=query,
+            database_url=settings.database_url,
+            embeddings_provider=settings.embeddings_provider,
+            embeddings_model=settings.embeddings_model,
+            embeddings_base_url=settings.embeddings_base_url,
+            embeddings_api_key=settings.vllm_api_key,
+            repo_id=repo_id,
+            schema_name=schema_name,
+            vector_top_k=settings.vector_top_k,
+            fts_top_k=settings.fts_top_k,
+            final_top_k=top_k
+        )
+
+        # 2. Doc search
+        doc_task = fts_search_documents(
+            query=query,
+            database_url=settings.database_url,
+            repo_id=repo_id,
+            schema_name=schema_name,
+            top_k=top_k
+        )
+
+        # 3. Pure vector search (semantic)
+        # We'll reuse hybrid but with high vector weight
+        semantic_task = _hybrid_search(
+            query=query,
+            database_url=settings.database_url,
+            embeddings_provider=settings.embeddings_provider,
+            embeddings_model=settings.embeddings_model,
+            embeddings_base_url=settings.embeddings_base_url,
+            embeddings_api_key=settings.vllm_api_key,
+            repo_id=repo_id,
+            schema_name=schema_name,
+            vector_top_k=top_k * 2,
+            fts_top_k=5,  # Minimal FTS for semantic search
+            final_top_k=top_k
+        )
+
+        # Execute all searches concurrently
+        hybrid_results, doc_results, semantic_results = await asyncio.gather(
+            hybrid_task,
+            doc_task,
+            semantic_task
+        )
+
+        # Combine and deduplicate results
+        all_results = []
+        seen_chunks = set()
+
+        # Process hybrid results
+        for r in hybrid_results:
+            chunk_key = (r.file_id, r.start_line, r.end_line)
+            if chunk_key not in seen_chunks:
+                seen_chunks.add(chunk_key)
+                all_results.append({
+                    "source": "hybrid",
+                    "file_path": r.file_path,
+                    "start_line": r.start_line,
+                    "end_line": r.end_line,
+                    "content": r.content,
+                    "score": r.score,
+                    "vec_score": r.vec_score,
+                    "fts_score": r.fts_score
+                })
+
+        # Process doc results
+        for r in doc_results:
+            # Doc results have different structure
+            doc_id = r.get("id") or r.get("doc_id")
+            if doc_id not in seen_chunks:
+                seen_chunks.add(doc_id)
+                all_results.append({
+                    "source": "documentation",
+                    "file_path": r.get("path", "document"),
+                    "content": r.get("content", "")[:1000],
+                    "score": r.get("score", 0.0),
+                    "doc_type": r.get("doc_type", "unknown")
+                })
+
+        # Process semantic results (top scorers only)
+        for r in semantic_results[:5]:  # Just top 5 from semantic
+            chunk_key = (r.file_id, r.start_line, r.end_line)
+            if chunk_key not in seen_chunks:
+                seen_chunks.add(chunk_key)
+                all_results.append({
+                    "source": "semantic",
+                    "file_path": r.file_path,
+                    "start_line": r.start_line,
+                    "end_line": r.end_line,
+                    "content": r.content,
+                    "score": r.vec_score,  # Use pure vector score
+                    "vec_score": r.vec_score
+                })
+
+        # Re-rank combined results
+        # Weight: 40% hybrid, 30% docs, 30% semantic
+        for result in all_results:
+            source_weight = {
+                "hybrid": 0.4,
+                "documentation": 0.3,
+                "semantic": 0.3
+            }.get(result["source"], 0.3)
+
+            result["final_score"] = result.get("score", 0.0) * source_weight
+
+        # Sort by final score
+        all_results.sort(key=lambda x: x["final_score"], reverse=True)
+
+        # Take top K
+        top_results = all_results[:top_k]
+
+        # Extract unique files
+        unique_files = {}
+        for r in top_results:
+            file_path = r.get("file_path", "unknown")
+            if file_path not in unique_files:
+                unique_files[file_path] = {
+                    "path": file_path,
+                    "relevance_score": r["final_score"],
+                    "sources": [r["source"]],
+                    "snippets": 1
+                }
+            else:
+                unique_files[file_path]["snippets"] += 1
+                if r["source"] not in unique_files[file_path]["sources"]:
+                    unique_files[file_path]["sources"].append(r["source"])
+
+        top_files = sorted(
+            unique_files.values(),
+            key=lambda x: x["relevance_score"],
+            reverse=True
+        )[:top_k]
+
+        # LLM Summarization (if deep_mode enabled)
+        llm_summary = None
+        if deep_mode and top_results:
+            try:
+                # Prepare context for LLM
+                context_text = f"Query: {query}\n\nTop {len(top_results)} relevant code snippets:\n\n"
+                for i, r in enumerate(top_results[:10], 1):  # Limit to 10 for LLM
+                    context_text += f"\n--- Result {i} ({r['source']}) ---\n"
+                    context_text += f"File: {r.get('file_path', 'unknown')}\n"
+                    context_text += f"Content: {r.get('content', '')[:500]}\n"
+
+                # Call LLM to summarize (using Ollama or vLLM)
+                import aiohttp
+                import json
+
+                if settings.embeddings_provider == "ollama":
+                    llm_url = f"{settings.embeddings_base_url}/api/generate"
+                    llm_model = "llama3.2:latest"  # Use a chat model
+
+                    prompt = f"""{context_text}
+
+Based on these search results, provide a concise summary answering the query: "{query}"
+
+Include:
+1. Direct answer to the question
+2. Key files involved
+3. Main implementation patterns found"""
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            llm_url,
+                            json={
+                                "model": llm_model,
+                                "prompt": prompt,
+                                "stream": False,
+                                "options": {"temperature": 0.3}
+                            }
+                        ) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                llm_summary = data.get("response", "").strip()
+            except Exception as e:
+                # LLM summarization is optional - don't fail if it doesn't work
+                llm_summary = f"Summary unavailable: {str(e)}"
+
+        return {
+            "query": query,
+            "repo": repo,
+            "schema_name": schema_name,
+            "total_results_found": len(all_results),
+            "strategies_used": ["hybrid_search", "doc_search", "semantic_search"],
+            "top_results": top_results,
+            "top_files": top_files,
+            "llm_summary": llm_summary,
+            "why": f"Combined {len(all_results)} results from 3 search strategies, re-ranked and summarized"
+        }
+
+    finally:
+        await conn.close()
