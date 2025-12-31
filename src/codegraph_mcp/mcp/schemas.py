@@ -452,5 +452,95 @@ TOOL_SCHEMAS = {
             },
             "required": ["repo"]
         }
+    },
+
+    "db_review": {
+        "description": "Generate comprehensive database architecture report analyzing Postgres schema, stored routines, and application DB calls",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name or UUID"
+                },
+                "target_db_url": {
+                    "type": "string",
+                    "description": "PostgreSQL connection string for database to analyze (e.g., 'postgresql://user:pass@host:port/dbname')"
+                },
+                "regenerate": {
+                    "type": "boolean",
+                    "description": "Force regeneration even if cached (default: false)",
+                    "default": false
+                },
+                "schemas": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of schema names to analyze (default: all non-system schemas)"
+                },
+                "max_routines": {
+                    "type": "integer",
+                    "description": "Maximum routines to include in report (default: 50)",
+                    "default": 50
+                },
+                "max_app_calls": {
+                    "type": "integer",
+                    "description": "Maximum app database calls to discover (default: 100)",
+                    "default": 100
+                }
+            },
+            "required": ["repo", "target_db_url"]
+        }
+    },
+
+    "db_feature_context": {
+        "description": "Find all code and database objects related to a database feature, table, or query pattern",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name or UUID"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Database feature/pattern to search (e.g., 'user authentication', 'orders table', 'SELECT', 'migrations')"
+                },
+                "target_db_url": {
+                    "type": "string",
+                    "description": "Optional PostgreSQL connection string to include schema object information"
+                },
+                "filters": {
+                    "type": "object",
+                    "description": "Optional filters",
+                    "properties": {
+                        "tags_any": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Match any of these tags (database tag is always included)"
+                        },
+                        "tags_all": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Match all of these tags"
+                        },
+                        "language": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter by language"
+                        },
+                        "path_prefix": {
+                            "type": "string",
+                            "description": "Filter by path prefix"
+                        }
+                    }
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of top results to return (default: 25)",
+                    "default": 25
+                }
+            },
+            "required": ["repo", "query"]
+        }
     }
 }

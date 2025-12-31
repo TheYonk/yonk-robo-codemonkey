@@ -22,6 +22,7 @@ from codegraph_mcp.indexer.doc_ingester import store_summary_as_document
 from codegraph_mcp.reports.generator import generate_comprehensive_review
 from codegraph_mcp.reports.feature_context import get_feature_context
 from codegraph_mcp.reports.feature_index_builder import build_feature_index as _build_feature_index
+from codegraph_mcp.db_introspect.report_generator import generate_db_architecture_report
 from codegraph_mcp.config import Settings
 
 TOOL_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {}
@@ -1154,6 +1155,254 @@ async def build_feature_index(
         )
 
         return result
+
+    finally:
+        await conn.close()
+
+
+@tool("db_review")
+async def db_review(
+    repo: str,
+    target_db_url: str,
+    regenerate: bool = False,
+    schemas: list[str] | None = None,
+    max_routines: int = 50,
+    max_app_calls: int = 100
+) -> dict[str, Any]:
+    """Generate comprehensive database architecture report.
+
+    Analyzes a Postgres database schema, stored routines, and application
+    database calls to produce a comprehensive architecture review.
+
+    Args:
+        repo: Repository name or UUID
+        target_db_url: PostgreSQL connection string for database to analyze
+        regenerate: Force regeneration even if cached
+        schemas: List of schema names to analyze (None = all non-system schemas)
+        max_routines: Maximum routines to include in report
+        max_app_calls: Maximum app calls to discover
+
+    Returns:
+        Comprehensive DB report with JSON and markdown
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo name/ID
+        try:
+            import uuid
+            uuid.UUID(repo)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo_id = repo
+        else:
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1", repo
+            )
+
+        if not repo_id:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": "Repository does not exist in database"
+            }
+
+        # Generate DB report
+        result = await generate_db_architecture_report(
+            repo_id=repo_id,
+            target_db_url=target_db_url,
+            database_url=settings.database_url,
+            regenerate=regenerate,
+            schemas=schemas,
+            max_routines=max_routines,
+            max_app_calls=max_app_calls
+        )
+
+        return {
+            "repo_id": repo_id,
+            "cached": result.cached,
+            "updated_at": str(result.updated_at),
+            "report_markdown": result.report_text,
+            "report_json": result.report_json,
+            "why": {
+                "cached": result.cached,
+                "content_hash": result.content_hash,
+                "sections": list(result.report_json.keys()) if isinstance(result.report_json, dict) else []
+            }
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("db_feature_context")
+async def db_feature_context(
+    repo: str,
+    query: str,
+    target_db_url: str | None = None,
+    filters: dict[str, Any] | None = None,
+    top_k: int = 25
+) -> dict[str, Any]:
+    """Find all code and database objects related to a database feature/pattern.
+
+    Searches for SQL queries, ORM calls, schema objects, and code that relates
+    to a specific database feature, table, or query pattern.
+
+    Args:
+        repo: Repository name or UUID
+        query: Database feature/pattern to search for (e.g., "user authentication", "orders table", "SELECT")
+        target_db_url: Optional PostgreSQL connection string to include schema info
+        filters: Optional filters (tags_any, tags_all, language, path_prefix)
+        top_k: Number of top results to return
+
+    Returns:
+        Database feature context with files, SQL snippets, and schema objects
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo name/ID
+        try:
+            import uuid
+            uuid.UUID(repo)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo_id = repo
+        else:
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1", repo
+            )
+
+        if not repo_id:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": "Repository does not exist in database"
+            }
+
+        # Search for database-tagged chunks and documents
+        if filters is None:
+            filters = {}
+
+        # Add database tag filter
+        tags_any = filters.get("tags_any", [])
+        if "database" not in tags_any:
+            tags_any.append("database")
+        filters["tags_any"] = tags_any
+
+        # Perform hybrid search
+        from codegraph_mcp.retrieval.hybrid_search import hybrid_search as _hybrid_search
+
+        search_results = await _hybrid_search(
+            query=query,
+            database_url=settings.database_url,
+            embeddings_provider=settings.embeddings_provider,
+            embeddings_model=settings.embeddings_model,
+            embeddings_base_url=settings.embeddings_base_url,
+            embeddings_api_key=settings.vllm_api_key,
+            repo_id=repo_id,
+            tags_any=filters.get("tags_any"),
+            tags_all=filters.get("tags_all"),
+            vector_top_k=30,
+            fts_top_k=30,
+            final_top_k=top_k
+        )
+
+        # Extract unique files and organize results
+        files_map = {}
+        for result in search_results:
+            file_path = result.file_path
+            if file_path not in files_map:
+                files_map[file_path] = {
+                    "file_path": file_path,
+                    "file_id": str(result.file_id),
+                    "language": None,
+                    "chunks": [],
+                    "matched_tags": set()
+                }
+
+            files_map[file_path]["chunks"].append({
+                "content": result.content,
+                "start_line": result.start_line,
+                "end_line": result.end_line,
+                "score": result.score
+            })
+            files_map[file_path]["matched_tags"].update(result.matched_tags)
+
+        # Get language for each file
+        for file_info in files_map.values():
+            lang = await conn.fetchval(
+                "SELECT language FROM file WHERE id = $1",
+                file_info["file_id"]
+            )
+            file_info["language"] = lang
+            file_info["matched_tags"] = sorted(file_info["matched_tags"])
+
+        # Search for DB-related documents (like DB reports)
+        db_docs = await conn.fetch(
+            """
+            SELECT d.title, d.content, d.type
+            FROM document d
+            WHERE d.repo_id = $1
+              AND d.type IN ('DB_REPORT', 'GENERATED_SUMMARY')
+              AND d.fts @@ websearch_to_tsquery('simple', $2)
+            ORDER BY ts_rank_cd(d.fts, websearch_to_tsquery('simple', $2)) DESC
+            LIMIT 3
+            """,
+            repo_id, query
+        )
+
+        # Include schema objects if target_db_url provided
+        schema_objects = []
+        if target_db_url:
+            try:
+                from codegraph_mcp.db_introspect.schema_extractor import extract_db_schema
+                schema = await extract_db_schema(target_db_url, schemas=None)
+
+                # Search for matching tables, views, functions
+                query_lower = query.lower()
+
+                for table in schema.tables:
+                    if query_lower in table['name'].lower():
+                        schema_objects.append({
+                            "type": "table",
+                            "name": f"{table['schema']}.{table['name']}",
+                            "columns": len(table['columns'])
+                        })
+
+                for func in schema.functions[:20]:
+                    if query_lower in func['name'].lower():
+                        schema_objects.append({
+                            "type": "function",
+                            "name": f"{func['schema']}.{func['name']}",
+                            "language": func['language']
+                        })
+            except Exception as e:
+                # If schema extraction fails, continue without schema info
+                pass
+
+        return {
+            "query": query,
+            "files": sorted(files_map.values(), key=lambda f: len(f["chunks"]), reverse=True),
+            "related_docs": [
+                {
+                    "title": doc["title"],
+                    "type": doc["type"],
+                    "excerpt": doc["content"][:300] + "..." if len(doc["content"]) > 300 else doc["content"]
+                }
+                for doc in db_docs
+            ],
+            "schema_objects": schema_objects,
+            "total_files": len(files_map),
+            "total_schema_objects": len(schema_objects),
+            "why": f"Found {len(files_map)} files with database-related code matching '{query}'"
+        }
 
     finally:
         await conn.close()
