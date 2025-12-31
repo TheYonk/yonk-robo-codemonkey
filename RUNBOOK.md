@@ -64,53 +64,122 @@ robomonkey db init  # Initializes main schema
 Create or edit `config/robomonkey-daemon.yaml`:
 
 ```yaml
-daemon_id: "robomonkey-daemon-001"
-
+# Database Configuration
 database:
+  # Control schema DSN (REQUIRED)
   control_dsn: "postgresql://postgres:postgres@localhost:5433/robomonkey"
+
+  # Schema prefix for per-repo isolation
+  schema_prefix: "robomonkey_"
+
+  # Connection pool size
   pool_size: 10
 
+# Embeddings Configuration
 embeddings:
+  # Enable/disable automatic embedding generation
   enabled: true
-  provider: "ollama"  # or "vllm"
-  dimension: 1536
-  backfill_on_startup: false
+
+  # Backfill embeddings for existing chunks on startup
+  backfill_on_startup: true
+
+  # Provider: "ollama" or "vllm"
+  provider: "ollama"
+
+  # Model configuration
+  model: "snowflake-arctic-embed2:latest"
+  dimension: 1024
+  max_chunk_length: 8192
+  batch_size: 100
+
+  # Provider-specific settings
   ollama:
     base_url: "http://localhost:11434"
-    model: "nomic-embed-text"
-    batch_size: 32
 
+  vllm:
+    base_url: "http://localhost:8000"
+    api_key: "local-key"
+
+# Job Workers Configuration
 workers:
+  # Global concurrency limits
+  global_max_concurrent: 4
+  max_concurrent_per_repo: 2
+
+  # Worker counts by type
   reindex_workers: 2
   embed_workers: 2
   docs_workers: 1
-  max_concurrent_per_repo: 2
-  global_max_concurrent: 8
+
+  # Polling interval (seconds)
   poll_interval_sec: 5
 
-watcher:
+  # Legacy fields (for backward compatibility)
+  count: 2
+  enabled_job_types:
+    - EMBED_REPO
+    - EMBED_MISSING
+    - INDEX_REPO
+    - WATCH_REPO
+
+# Repository Watching
+watching:
+  # Enable file system watching for indexed repos
   enabled: true
-  debounce_ms: 500
-  ignore_patterns: ["*.pyc", "__pycache__", ".git", "node_modules"]
 
-jobs:
-  heartbeat_interval_sec: 30
-  max_retries: 5
-  retry_base_delay_sec: 60
-  cleanup_after_days: 7
+  # Debounce interval (seconds) - wait this long after last change
+  debounce_seconds: 2
 
+  # Patterns to ignore (in addition to .gitignore)
+  ignore_patterns:
+    - "*.pyc"
+    - "__pycache__"
+    - ".git"
+    - "node_modules"
+    - ".venv"
+
+# Daemon Health & Monitoring
+monitoring:
+  # Heartbeat interval (seconds)
+  heartbeat_interval: 30
+
+  # Consider daemon dead after this many seconds without heartbeat
+  dead_threshold: 120
+
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+
+# Logging Configuration
 logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
   level: "INFO"
-  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
-enable_summaries: true
-enable_tag_rules_sync: true
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Development Mode Settings
+dev_mode:
+  # Enable development mode features
+  enabled: false
+
+  # Auto-reload on code changes
+  auto_reload: false
+
+  # Verbose logging
+  verbose: false
 ```
+
+**Configuration Notes:**
+- The daemon auto-generates a unique `daemon_id` based on process ID
+- Embedding `dimension` must match your model (1024 for snowflake-arctic-embed2, 1536 for nomic-embed-text)
+- `backfill_on_startup: true` will automatically embed any chunks missing embeddings when daemon starts
 
 Override config path:
 ```bash
-export CODEGRAPH_CONFIG=/path/to/your/config.yaml
+export ROBOMONKEY_CONFIG=/path/to/your/config.yaml
 ```
+
+Default config path: `config/robomonkey-daemon.yaml`
 
 ### 3. Start Daemon
 
@@ -119,7 +188,7 @@ export CODEGRAPH_CONFIG=/path/to/your/config.yaml
 robomonkey daemon run
 
 # Or with custom config
-CODEGRAPH_CONFIG=/custom/path.yaml robomonkey daemon run
+ROBOMONKEY_CONFIG=/custom/path.yaml robomonkey daemon run
 
 # Start in background (production)
 nohup robomonkey daemon run > daemon.log 2>&1 &
@@ -561,7 +630,7 @@ Start the daemon in foreground.
 robomonkey daemon run
 
 # With custom config
-CODEGRAPH_CONFIG=/path/to/config.yaml robomonkey daemon run
+ROBOMONKEY_CONFIG=/path/to/config.yaml robomonkey daemon run
 ```
 
 **What it does:**
@@ -671,8 +740,8 @@ psql -d robomonkey -c "INSERT INTO robomonkey_control.job_queue (repo_name, sche
 ```bash
 # Create config file
 cp config/robomonkey-daemon.yaml.example config/robomonkey-daemon.yaml
-# Or set CODEGRAPH_CONFIG
-export CODEGRAPH_CONFIG=/path/to/config.yaml
+# Or set ROBOMONKEY_CONFIG
+export ROBOMONKEY_CONFIG=/path/to/config.yaml
 ```
 
 **Error: "Could not connect to database"**
@@ -892,7 +961,7 @@ After=network.target postgresql.service
 Type=simple
 User=robomonkey
 WorkingDirectory=/opt/robomonkey
-Environment="CODEGRAPH_CONFIG=/etc/robomonkey/daemon.yaml"
+Environment="ROBOMONKEY_CONFIG=/etc/robomonkey/daemon.yaml"
 ExecStart=/opt/robomonkey/.venv/bin/robomonkey daemon run
 Restart=always
 RestartSec=10
@@ -926,7 +995,7 @@ services:
   robomonkey-daemon:
     build: .
     environment:
-      CODEGRAPH_CONFIG: /config/daemon.yaml
+      ROBOMONKEY_CONFIG: /config/daemon.yaml
     volumes:
       - ./config:/config
       - ./repos:/repos:ro
@@ -958,8 +1027,8 @@ workers:
 
 Start both:
 ```bash
-CODEGRAPH_CONFIG=daemon-001.yaml robomonkey daemon run &
-CODEGRAPH_CONFIG=daemon-002.yaml robomonkey daemon run &
+ROBOMONKEY_CONFIG=daemon-001.yaml robomonkey daemon run &
+ROBOMONKEY_CONFIG=daemon-002.yaml robomonkey daemon run &
 ```
 
 Both will claim jobs atomically using PostgreSQL locks.

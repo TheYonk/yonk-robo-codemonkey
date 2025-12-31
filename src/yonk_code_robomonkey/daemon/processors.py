@@ -221,7 +221,7 @@ class EmbedMissingProcessor(JobProcessor):
         schema_name = repo["schema_name"]
 
         # Count missing embeddings
-        async with await asyncpg.connect(dsn=self.config.database.control_dsn) as conn:
+        async with self.control_pool.acquire() as conn:
             await conn.execute(f'SET search_path TO "{schema_name}", public')
 
             missing_chunks = await conn.fetchval(
@@ -260,11 +260,7 @@ class EmbedMissingProcessor(JobProcessor):
             database_url=self.config.database.control_dsn,
             schema_name=schema_name,
             embeddings_provider=self.config.embeddings.provider,
-            embeddings_model=(
-                self.config.embeddings.ollama.model
-                if self.config.embeddings.provider == "ollama"
-                else self.config.embeddings.vllm.model
-            ),
+            embeddings_model=self.config.embeddings.model,
             embeddings_base_url=(
                 self.config.embeddings.ollama.base_url
                 if self.config.embeddings.provider == "ollama"
@@ -275,7 +271,9 @@ class EmbedMissingProcessor(JobProcessor):
                 if self.config.embeddings.provider == "vllm"
                 else ""
             ),
-            only_missing=True
+            only_missing=True,
+            batch_size=self.config.embeddings.batch_size,
+            max_chunk_length=self.config.embeddings.max_chunk_length
         )
 
         logger.info(f"EMBED_MISSING complete for {job.repo_name}: {stats}")
