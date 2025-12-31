@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "yonk-code-robomonkey": {
+      "type": "stdio",
+      "command": "/home/yonk/code-retro/codegraph-mcp/.venv/bin/python",
+      "args": [
+        "-m",
+        "yonk_code_robomonkey.mcp.server"
+      ],
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
+        "EMBEDDINGS_PROVIDER": "ollama",
+        "EMBEDDINGS_MODEL": "snowflake-arctic-embed2:latest",
+        "EMBEDDINGS_BASE_URL": "http://localhost:11434",
+        "EMBEDDINGS_DIMENSION": "1024"
+      }
+    }
+  }
+}
