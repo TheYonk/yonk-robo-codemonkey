@@ -2,7 +2,7 @@
 """Test schema isolation for migration assessment and hybrid search."""
 import asyncio
 import json
-from codegraph_mcp.mcp.tools import migration_assess, hybrid_search
+from yonk_code_robomonkey.mcp.tools import migration_assess, hybrid_search
 
 async def test_migration_assess():
     """Test migration_assess on both repos."""

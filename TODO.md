@@ -1,10 +1,10 @@
-# TODO — CodeGraph MCP (Postgres Hybrid)
+# TODO — RoboMonkey MCP (Postgres Hybrid)
 
 ## Phase 0 — Repo + DB Boot ✓ COMPLETE
 - [x] docker-compose up postgres (pgvector/pgvector:pg16 on port 5433)
 - [x] Implement `scripts/init_db.sql` (use DDL in this repo)
-- [x] Add `codegraph db init` CLI command to apply DDL
-- [x] Add `codegraph db ping` CLI command
+- [x] Add `robomonkey db init` CLI command to apply DDL
+- [x] Add `robomonkey db ping` CLI command
 - [x] Smoke test connects + can run `SELECT 1` (tests/test_ddl_smoke.py)
 
 ## Phase 1 — Indexing MVP (Symbols + Chunks) ✓ COMPLETE
@@ -17,7 +17,7 @@
   - [x] file header chunk (imports + module docs)
 - [x] Store: repo, file, symbol, chunk (transactional per-file updates)
 - [x] Test: index a small repo and verify counts (tests/test_index_smoke.py)
-- [x] CLI: `codegraph index --repo /path --name repoName`
+- [x] CLI: `robomonkey index --repo /path --name repoName`
 
 ## Phase 2 — Embeddings (pgvector) ✓ COMPLETE
 - [x] Implement embeddings client:
@@ -26,7 +26,7 @@
 - [x] Hash chunks; embed only changed/new
 - [x] Store chunk embeddings + create vector index
 - [x] Test: semantic search returns plausible chunks (tests/test_hybrid_search.py)
-- [x] CLI: `codegraph embed --repo_id <uuid>`
+- [x] CLI: `robomonkey embed --repo_id <uuid>`
 
 ## Phase 3 — Full Text Search (FTS) ✓ COMPLETE
 - [x] Maintain tsvector fields for chunk + document (+ optional symbol)
@@ -88,7 +88,7 @@
 - [x] per-file transactional reindex (delete + rebuild via reindexer.py)
 - [x] embeddings only updated for changed chunks/docs (content_hash tracking)
 - [x] git sync mode: sync from git diff or patch files
-- [x] CLI: `codegraph watch --repo /path`, `codegraph sync --repo /path --base REF`
+- [x] CLI: `robomonkey watch --repo /path`, `robomonkey sync --repo /path --base REF`
 - [x] repo_index_state table for freshness tracking
 
 ## Migration Assessment Feature ✓ COMPLETE
@@ -152,8 +152,8 @@ Implemented schema-per-repo isolation for testing migration assessment with mult
 - [x] Configuration support (SCHEMA_PREFIX, USE_SCHEMAS env vars)
 - [x] Indexing pipeline updated for schema isolation
 - [x] CLI commands:
-  - [x] `codegraph index --force` flag for schema reinitialization
-  - [x] `codegraph repo ls` to list all indexed repos with schema info
+  - [x] `robomonkey index --force` flag for schema reinitialization
+  - [x] `robomonkey repo ls` to list all indexed repos with schema info
 
 ### MCP Tools Updated for Schema Isolation (5 of 16 tools)
 - [x] migration_assess - Uses resolve_repo_to_schema() and passes schema_name
@@ -184,8 +184,8 @@ Implemented schema-per-repo isolation for testing migration assessment with mult
 
 ### Testing & Validation
 - [x] Test repositories indexed:
-  - [x] legacy1 (Oracle/Java) → schema codegraph_legacy1
-  - [x] pg_go_app (PostgreSQL/Go) → schema codegraph_pg_go_app
+  - [x] legacy1 (Oracle/Java) → schema robomonkey_legacy1
+  - [x] pg_go_app (PostgreSQL/Go) → schema robomonkey_pg_go_app
 - [x] Migration assessment tested on both repos
 - [x] Cross-schema isolation validated:
   - [x] Search for "NVL" in pg_go_app returns 0 results ✓

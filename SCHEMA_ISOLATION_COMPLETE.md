@@ -87,24 +87,24 @@ async def symbol_summary(
 ## Files Modified
 
 ### Core Infrastructure (3 files)
-1. `src/codegraph_mcp/config.py` - Schema configuration
-2. `src/codegraph_mcp/db/schema_manager.py` (NEW) - Schema lifecycle management
-3. `src/codegraph_mcp/indexer/indexer.py` - Schema-aware indexing
+1. `src/robomonkey_mcp/config.py` - Schema configuration
+2. `src/robomonkey_mcp/db/schema_manager.py` (NEW) - Schema lifecycle management
+3. `src/robomonkey_mcp/indexer/indexer.py` - Schema-aware indexing
 
 ### MCP Tools (1 file)
-4. `src/codegraph_mcp/mcp/tools.py` - Updated 12 of 16 tools
+4. `src/robomonkey_mcp/mcp/tools.py` - Updated 12 of 16 tools
 
 ### Migration Assessment (2 files)
-5. `src/codegraph_mcp/migration/assessor.py` - Schema parameter added
-6. `src/codegraph_mcp/migration/detector.py` - Schema parameter added
+5. `src/robomonkey_mcp/migration/assessor.py` - Schema parameter added
+6. `src/robomonkey_mcp/migration/detector.py` - Schema parameter added
 
 ### Retrieval Functions (3 files)
-7. `src/codegraph_mcp/retrieval/hybrid_search.py` - Schema support
-8. `src/codegraph_mcp/retrieval/vector_search.py` - Schema context
-9. `src/codegraph_mcp/retrieval/fts_search.py` - Schema context
+7. `src/robomonkey_mcp/retrieval/hybrid_search.py` - Schema support
+8. `src/robomonkey_mcp/retrieval/vector_search.py` - Schema context
+9. `src/robomonkey_mcp/retrieval/fts_search.py` - Schema context
 
 ### CLI (1 file)
-10. `src/codegraph_mcp/cli/commands.py` - `--force` flag, `repo ls` command
+10. `src/robomonkey_mcp/cli/commands.py` - `--force` flag, `repo ls` command
 
 ---
 
@@ -124,13 +124,13 @@ $ python test_schema_isolation.py
 ### Indexed Repositories
 ```
 Repository: legacy1
-  Schema:          codegraph_legacy1
+  Schema:          robomonkey_legacy1
   Files:           4
   Symbols:         39
   Chunks:          43
 
 Repository: pg_go_app
-  Schema:          codegraph_pg_go_app
+  Schema:          robomonkey_pg_go_app
   Files:           6,578
   Symbols:         5,949
   Chunks:          12,352

@@ -1,6 +1,6 @@
-# CodeGraph MCP Installation Guide
+# RoboMonkey MCP Installation Guide
 
-Complete guide for setting up CodeGraph MCP on a new server.
+Complete guide for setting up RoboMonkey MCP on a new server.
 
 ## Table of Contents
 - [Prerequisites](#prerequisites)
@@ -32,8 +32,8 @@ Complete guide for setting up CodeGraph MCP on a new server.
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/yourusername/codegraph-mcp.git
-cd codegraph-mcp
+git clone https://github.com/yourusername/robomonkey-mcp.git
+cd robomonkey-mcp
 
 # 2. Install Ollama and pull embedding model
 curl -fsSL https://ollama.ai/install.sh | sh
@@ -52,14 +52,14 @@ cp .env.example .env
 nano .env  # Edit DATABASE_URL and other settings
 
 # 6. Initialize database
-codegraph db init
-codegraph db ping
+robomonkey db init
+robomonkey db ping
 
 # 7. Index your first repository
-codegraph index --repo /path/to/your/repo --name myrepo
+robomonkey index --repo /path/to/your/repo --name myrepo
 
 # 8. Generate embeddings
-python scripts/embed_repo_direct.py myrepo codegraph_myrepo
+python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
 ```
 
 ---
@@ -86,7 +86,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: codegraph
+      POSTGRES_DB: robomonkey
     ports:
       - "5433:5432"
     volumes:
@@ -133,12 +133,12 @@ ollama pull snowflake-arctic-embed2:latest
 ollama list
 ```
 
-### Step 3: Setup CodeGraph
+### Step 3: Setup RoboMonkey
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/codegraph-mcp.git
-cd codegraph-mcp
+git clone https://github.com/yourusername/robomonkey-mcp.git
+cd robomonkey-mcp
 
 # Create virtual environment
 python3 -m venv .venv
@@ -148,7 +148,7 @@ source .venv/bin/activate
 pip install -e .
 
 # Verify installation
-codegraph --help
+robomonkey --help
 ```
 
 ### Step 4: Configure Environment
@@ -165,7 +165,7 @@ nano .env
 
 ```env
 # Database (adjust port if using native postgres)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5433/codegraph
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/robomonkey
 
 # Embeddings
 EMBEDDINGS_PROVIDER=ollama
@@ -177,17 +177,17 @@ EMBEDDING_BATCH_SIZE=100
 
 # Schema isolation (recommended)
 USE_SCHEMAS=true
-SCHEMA_PREFIX=codegraph_
+SCHEMA_PREFIX=robomonkey_
 ```
 
 ### Step 5: Initialize Database
 
 ```bash
 # Initialize database schema
-codegraph db init
+robomonkey db init
 
 # Verify connection
-codegraph db ping
+robomonkey db ping
 ```
 
 **Expected output:**
@@ -201,10 +201,10 @@ codegraph db ping
 
 ```bash
 # Index a repository
-codegraph index --repo /path/to/your/repo --name myrepo
+robomonkey index --repo /path/to/your/repo --name myrepo
 
 # Check status
-codegraph status --name myrepo
+robomonkey status --name myrepo
 ```
 
 **What gets indexed:**
@@ -217,15 +217,15 @@ codegraph status --name myrepo
 
 ```bash
 # Get repository info
-codegraph repo ls
+robomonkey repo ls
 
 # Generate embeddings
-python scripts/embed_repo_direct.py myrepo codegraph_myrepo
+python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
 ```
 
 **Progress output:**
 ```
-Starting embeddings for myrepo (schema: codegraph_myrepo)
+Starting embeddings for myrepo (schema: robomonkey_myrepo)
 ============================================================
 Using model: snowflake-arctic-embed2:latest
 Max chunk length: 8192 chars
@@ -250,7 +250,7 @@ The daemon provides automatic background processing (embedding generation, file 
 ```bash
 # Check daemon configuration
 python -c "
-from codegraph_mcp.daemon.config import DaemonConfig
+from robomonkey_mcp.daemon.config import DaemonConfig
 config = DaemonConfig.from_env()
 print(f'Workers: {config.num_workers}')
 print(f'Watch enabled: {config.watch_enabled}')
@@ -262,28 +262,28 @@ print(f'Poll interval: {config.poll_interval_seconds}s')
 
 ```bash
 # Start daemon in foreground (for testing)
-codegraph daemon run
+robomonkey daemon run
 
 # Or start in background
-nohup codegraph daemon run > daemon.log 2>&1 &
+nohup robomonkey daemon run > daemon.log 2>&1 &
 echo $! > daemon.pid
 ```
 
 ### Step 3: Create Systemd Service (Linux)
 
-Create `/etc/systemd/system/codegraph-daemon.service`:
+Create `/etc/systemd/system/robomonkey-daemon.service`:
 
 ```ini
 [Unit]
-Description=CodeGraph MCP Daemon
+Description=RoboMonkey MCP Daemon
 After=network.target postgresql.service
 
 [Service]
 Type=simple
 User=youruser
-WorkingDirectory=/path/to/codegraph-mcp
-Environment=PATH=/path/to/codegraph-mcp/.venv/bin:/usr/bin
-ExecStart=/path/to/codegraph-mcp/.venv/bin/codegraph daemon run
+WorkingDirectory=/path/to/robomonkey-mcp
+Environment=PATH=/path/to/robomonkey-mcp/.venv/bin:/usr/bin
+ExecStart=/path/to/robomonkey-mcp/.venv/bin/robomonkey daemon run
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -296,29 +296,29 @@ WantedBy=multi-user.target
 **Enable and start:**
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable codegraph-daemon
-sudo systemctl start codegraph-daemon
+sudo systemctl enable robomonkey-daemon
+sudo systemctl start robomonkey-daemon
 
 # Check status
-sudo systemctl status codegraph-daemon
+sudo systemctl status robomonkey-daemon
 
 # View logs
-sudo journalctl -u codegraph-daemon -f
+sudo journalctl -u robomonkey-daemon -f
 ```
 
 ### Step 4: Verify Daemon is Working
 
 ```bash
 # Check control schema for daemon registration
-psql postgresql://postgres:postgres@localhost:5433/codegraph -c "
-SET search_path TO codegraph_control;
+psql postgresql://postgres:postgres@localhost:5433/robomonkey -c "
+SET search_path TO robomonkey_control;
 SELECT instance_id, status, started_at, last_heartbeat 
 FROM daemon_instance;
 "
 
 # Check job queue
-psql postgresql://postgres:postgres@localhost:5433/codegraph -c "
-SET search_path TO codegraph_control;
+psql postgresql://postgres:postgres@localhost:5433/robomonkey -c "
+SET search_path TO robomonkey_control;
 SELECT id, repo_name, job_type, status, created_at 
 FROM job_queue 
 ORDER BY created_at DESC 
@@ -336,7 +336,7 @@ The MCP server provides tools for IDE integration.
 
 ```bash
 # Start MCP server in stdio mode
-python -m codegraph_mcp.mcp.server
+python -m robomonkey_mcp.mcp.server
 
 # The server will wait for JSON-RPC input
 # Press Ctrl+C to exit
@@ -364,11 +364,11 @@ The MCP server configuration varies by IDE. See [D. IDE Integration](#d-ide-inte
 ```json
 {
   "mcpServers": {
-    "codegraph": {
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
-      "args": ["-m", "codegraph_mcp.mcp.server"],
+    "robomonkey": {
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
+      "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
       }
     }
   }
@@ -389,11 +389,11 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 ```json
 {
   "mcpServers": {
-    "codegraph": {
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
-      "args": ["-m", "codegraph_mcp.mcp.server"],
+    "robomonkey": {
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
+      "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
       }
     }
   }
@@ -409,11 +409,11 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 ```json
 {
   "cline.mcpServers": {
-    "codegraph": {
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
-      "args": ["-m", "codegraph_mcp.mcp.server"],
+    "robomonkey": {
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
+      "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
       }
     }
   }
@@ -427,11 +427,11 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 ```json
 {
   "mcpServers": {
-    "codegraph": {
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
-      "args": ["-m", "codegraph_mcp.mcp.server"],
+    "robomonkey": {
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
+      "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
       }
     }
   }
@@ -446,11 +446,11 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 {
   "mcpServers": [
     {
-      "name": "codegraph",
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
-      "args": ["-m", "codegraph_mcp.mcp.server"],
+      "name": "robomonkey",
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
+      "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
       }
     }
   ]
@@ -465,13 +465,13 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 
 ```bash
 # List repositories
-codegraph repo ls
+robomonkey repo ls
 
 # Check database connection
-codegraph db ping
+robomonkey db ping
 
 # View repository status
-codegraph status --name myrepo
+robomonkey status --name myrepo
 ```
 
 ### Test 2: Embeddings
@@ -482,8 +482,8 @@ python -c "
 import asyncio, asyncpg
 
 async def check():
-    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/codegraph')
-    await conn.execute('SET search_path TO codegraph_myrepo')
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/robomonkey')
+    await conn.execute('SET search_path TO robomonkey_myrepo')
     total = await conn.fetchval('SELECT COUNT(*) FROM chunk')
     embedded = await conn.fetchval('SELECT COUNT(*) FROM chunk_embedding')
     print(f'Embeddings: {embedded}/{total} ({100*embedded/total:.1f}%)')
@@ -499,13 +499,13 @@ asyncio.run(check())
 # Test hybrid search directly
 python -c "
 import asyncio
-from codegraph_mcp.retrieval.hybrid_search import hybrid_search
+from robomonkey_mcp.retrieval.hybrid_search import hybrid_search
 
 async def test():
     results = await hybrid_search(
         query='authentication function',
         repo_name='myrepo',
-        database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+        database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
         top_k=5
     )
     for r in results:
@@ -521,14 +521,14 @@ Start the server and send a test request:
 
 ```bash
 # In terminal 1: Start server
-python -m codegraph_mcp.mcp.server
+python -m robomonkey_mcp.mcp.server
 
 # In terminal 2: Send test request
 echo '{
   "jsonrpc": "2.0",
   "id": 1,
   "method": "tools/list"
-}' | python -m codegraph_mcp.mcp.server
+}' | python -m robomonkey_mcp.mcp.server
 ```
 
 ---

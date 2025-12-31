@@ -10,9 +10,9 @@ import asyncpg
 import os
 from pathlib import Path
 
-from codegraph_mcp.db_introspect.schema_extractor import extract_db_schema
-from codegraph_mcp.db_introspect.routine_analyzer import analyze_routine
-from codegraph_mcp.db_introspect.app_call_discoverer import discover_db_calls
+from yonk_code_robomonkey.db_introspect.schema_extractor import extract_db_schema
+from yonk_code_robomonkey.db_introspect.routine_analyzer import analyze_routine
+from yonk_code_robomonkey.db_introspect.app_call_discoverer import discover_db_calls
 
 
 # Test database URL - can be overridden with environment variable

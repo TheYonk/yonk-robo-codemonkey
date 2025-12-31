@@ -7,11 +7,11 @@ import asyncpg
 from pathlib import Path
 from uuid import UUID
 
-from codegraph_mcp.config import settings
-from codegraph_mcp.indexer.indexer import index_repository
-from codegraph_mcp.migration.ruleset import load_migration_rules
-from codegraph_mcp.migration.detector import detect_source_databases
-from codegraph_mcp.migration.assessor import assess_migration
+from yonk_code_robomonkey.config import settings
+from yonk_code_robomonkey.indexer.indexer import index_repository
+from yonk_code_robomonkey.migration.ruleset import load_migration_rules
+from yonk_code_robomonkey.migration.detector import detect_source_databases
+from yonk_code_robomonkey.migration.assessor import assess_migration
 
 
 @pytest_asyncio.fixture

@@ -1,4 +1,4 @@
-# CodeGraph MCP (Postgres Hybrid) — Master Doc
+# RoboMonkey MCP (Postgres Hybrid) — Master Doc
 
 ## Purpose
 Build a local-first MCP server that indexes code + docs into Postgres (relational graph + FTS + pgvector) and provides hybrid retrieval and context packaging for LLM coding clients (Cline, Codex, Claude).

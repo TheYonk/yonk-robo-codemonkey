@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CodeGraph MCP is a local-first MCP (Model Context Protocol) server that indexes code and documentation into Postgres with pgvector, providing hybrid retrieval (vector + full-text search + tags) and context packaging for LLM coding clients like Cline, Claude Desktop, and Codex.
+RoboMonkey MCP is a local-first MCP (Model Context Protocol) server that indexes code and documentation into Postgres with pgvector, providing hybrid retrieval (vector + full-text search + tags) and context packaging for LLM coding clients like Cline, Claude Desktop, and Codex.
 
 **Tech Stack:**
 - Python 3.11+
@@ -30,21 +30,21 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
 
 # 4. Initialize database
-codegraph db init
-codegraph db ping
+robomonkey db init
+robomonkey db ping
 ```
 
 ### Common Commands
 
 **Database:**
-- `codegraph db init` - Initialize database schema (runs scripts/init_db.sql)
-- `codegraph db ping` - Check Postgres connection and pgvector installation
+- `robomonkey db init` - Initialize database schema (runs scripts/init_db.sql)
+- `robomonkey db ping` - Check Postgres connection and pgvector installation
 
 **Indexing:**
-- `codegraph index --repo /path/to/repo --name myrepo` - Index a repository
+- `robomonkey index --repo /path/to/repo --name myrepo` - Index a repository
 
 **MCP Server:**
-- `python -m codegraph_mcp.mcp.server` - Run MCP server in stdio mode
+- `python -m robomonkey_mcp.mcp.server` - Run MCP server in stdio mode
 
 **Testing:**
 - `pytest` - Run all tests
@@ -221,7 +221,7 @@ Tests are in `tests/` directory:
 - This is a **phased delivery** project. Check TODO.md for current phase and open tasks.
 - The codebase prioritizes **test-driven development**. Run tests frequently.
 - **Embeddings dimension must match** across .env config and init_db.sql (default 1536).
-- **No pgvector installed?** Check `codegraph db ping` output, ensure docker-compose uses postgres:16 with pgvector.
+- **No pgvector installed?** Check `robomonkey db ping` output, ensure docker-compose uses postgres:16 with pgvector.
 - Tree-sitter parsers are language-specific. See `indexer/treesitter/parsers.py` for supported languages.
 - For incremental indexing, delete per-file entities first, then insert new (see indexing pipeline).
 - MCP server runs on stdio - test with Claude Desktop, Cline, or other MCP clients.

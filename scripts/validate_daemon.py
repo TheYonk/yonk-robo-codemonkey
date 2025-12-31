@@ -40,20 +40,20 @@ async def cleanup_test_data(conn: asyncpg.Connection):
         await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
 
     # Delete test repos from registry
-    if await conn.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'codegraph_control')"):
+    if await conn.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'robomonkey_control')"):
         await conn.execute("""
-            DELETE FROM codegraph_control.repo_registry
+            DELETE FROM robomonkey_control.repo_registry
             WHERE name IN ($1, $2)
         """, TEST_REPO_1["name"], TEST_REPO_2["name"])
 
         await conn.execute("""
-            DELETE FROM codegraph_control.job_queue
+            DELETE FROM robomonkey_control.job_queue
             WHERE repo_name IN ($1, $2)
         """, TEST_REPO_1["name"], TEST_REPO_2["name"])
 
         # Delete test daemon instances
         await conn.execute("""
-            DELETE FROM codegraph_control.daemon_instance
+            DELETE FROM robomonkey_control.daemon_instance
             WHERE instance_id = 'test_daemon'
         """)
 
@@ -66,7 +66,7 @@ async def test_control_schema(conn: asyncpg.Connection):
 
     # Always drop and recreate to ensure latest DDL
     print("  ⚠ Dropping existing control schema...")
-    await conn.execute("DROP SCHEMA IF EXISTS codegraph_control CASCADE")
+    await conn.execute("DROP SCHEMA IF EXISTS robomonkey_control CASCADE")
 
     print("  Creating control schema...")
     # Read and execute DDL
@@ -85,16 +85,16 @@ async def test_control_schema(conn: asyncpg.Connection):
         exists = await conn.fetchval(f"""
             SELECT EXISTS(
                 SELECT 1 FROM information_schema.tables
-                WHERE table_schema = 'codegraph_control'
+                WHERE table_schema = 'robomonkey_control'
                 AND table_name = '{table}'
             )
         """)
 
         if not exists:
-            print(f"  ✗ FAIL: Table codegraph_control.{table} does not exist")
+            print(f"  ✗ FAIL: Table robomonkey_control.{table} does not exist")
             return False
 
-        print(f"  ✓ Table codegraph_control.{table} exists")
+        print(f"  ✓ Table robomonkey_control.{table} exists")
 
     # Verify helper functions exist
     functions = ["claim_jobs", "complete_job", "fail_job", "update_heartbeat"]
@@ -103,16 +103,16 @@ async def test_control_schema(conn: asyncpg.Connection):
             SELECT EXISTS(
                 SELECT 1 FROM pg_proc p
                 JOIN pg_namespace n ON p.pronamespace = n.oid
-                WHERE n.nspname = 'codegraph_control'
+                WHERE n.nspname = 'robomonkey_control'
                 AND p.proname = '{func}'
             )
         """)
 
         if not exists:
-            print(f"  ✗ FAIL: Function codegraph_control.{func} does not exist")
+            print(f"  ✗ FAIL: Function robomonkey_control.{func} does not exist")
             return False
 
-        print(f"  ✓ Function codegraph_control.{func} exists")
+        print(f"  ✓ Function robomonkey_control.{func} exists")
 
     print("  ✅ PASS: Control schema fully initialized")
     return True
@@ -137,7 +137,7 @@ async def test_repo_registration(conn: asyncpg.Connection):
     await conn.execute(ddl)
 
     await conn.execute("""
-        INSERT INTO codegraph_control.repo_registry
+        INSERT INTO robomonkey_control.repo_registry
             (name, schema_name, root_path, enabled, auto_index, auto_embed, auto_watch)
         VALUES ($1, $2, $3, true, true, true, false)
     """, TEST_REPO_1["name"], TEST_REPO_1["schema_name"], TEST_REPO_1["root_path"])
@@ -151,7 +151,7 @@ async def test_repo_registration(conn: asyncpg.Connection):
     await conn.execute(ddl)
 
     await conn.execute("""
-        INSERT INTO codegraph_control.repo_registry
+        INSERT INTO robomonkey_control.repo_registry
             (name, schema_name, root_path, enabled, auto_index, auto_embed, auto_watch)
         VALUES ($1, $2, $3, true, true, true, false)
     """, TEST_REPO_2["name"], TEST_REPO_2["schema_name"], TEST_REPO_2["root_path"])
@@ -160,7 +160,7 @@ async def test_repo_registration(conn: asyncpg.Connection):
 
     # Verify registrations
     count = await conn.fetchval("""
-        SELECT COUNT(*) FROM codegraph_control.repo_registry
+        SELECT COUNT(*) FROM robomonkey_control.repo_registry
         WHERE name IN ($1, $2)
     """, TEST_REPO_1["name"], TEST_REPO_2["name"])
 
@@ -179,7 +179,7 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
     # Enqueue a test job
     print("  Enqueuing FULL_INDEX job...")
     job_id = await conn.fetchval("""
-        INSERT INTO codegraph_control.job_queue
+        INSERT INTO robomonkey_control.job_queue
             (repo_name, schema_name, job_type, payload, priority, dedup_key)
         VALUES ($1, $2, 'FULL_INDEX', '{}'::jsonb, 5, $3)
         RETURNING id
@@ -191,7 +191,7 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
     print("  Testing deduplication...")
     try:
         dup_id = await conn.fetchval("""
-            INSERT INTO codegraph_control.job_queue
+            INSERT INTO robomonkey_control.job_queue
                 (repo_name, schema_name, job_type, payload, priority, dedup_key)
             VALUES ($1, $2, 'FULL_INDEX', '{}'::jsonb, 5, $3)
             RETURNING id
@@ -206,7 +206,7 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
     # Test job claiming
     print("  Testing job claiming...")
     claimed_jobs = await conn.fetch("""
-        SELECT * FROM codegraph_control.claim_jobs(
+        SELECT * FROM robomonkey_control.claim_jobs(
             'test_worker',
             ARRAY['FULL_INDEX']::TEXT[],
             1
@@ -227,7 +227,7 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
     # Test job completion
     print("  Testing job completion...")
     success = await conn.fetchval("""
-        SELECT codegraph_control.complete_job($1, 'test_worker')
+        SELECT robomonkey_control.complete_job($1, 'test_worker')
     """, str(claimed_job["id"]))
 
     if not success:
@@ -236,7 +236,7 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
 
     # Verify job is DONE
     status = await conn.fetchval("""
-        SELECT status FROM codegraph_control.job_queue WHERE id = $1
+        SELECT status FROM robomonkey_control.job_queue WHERE id = $1
     """, claimed_job["id"])
 
     if status != "DONE":
@@ -248,7 +248,7 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
     # Test job failure with retry
     print("  Testing job failure and retry...")
     fail_job_id = await conn.fetchval("""
-        INSERT INTO codegraph_control.job_queue
+        INSERT INTO robomonkey_control.job_queue
             (repo_name, schema_name, job_type, payload, priority)
         VALUES ($1, $2, 'REINDEX_FILE', '{}'::jsonb, 5)
         RETURNING id
@@ -256,7 +256,7 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
 
     # Claim it
     await conn.execute("""
-        SELECT * FROM codegraph_control.claim_jobs(
+        SELECT * FROM robomonkey_control.claim_jobs(
             'test_worker',
             ARRAY['REINDEX_FILE']::TEXT[],
             1
@@ -265,13 +265,13 @@ async def test_job_queue_operations(conn: asyncpg.Connection):
 
     # Fail it
     await conn.fetchval("""
-        SELECT codegraph_control.fail_job($1, 'test_worker', 'Test error', '{}'::jsonb)
+        SELECT robomonkey_control.fail_job($1, 'test_worker', 'Test error', '{}'::jsonb)
     """, str(fail_job_id))
 
     # Check it's rescheduled
     job = await conn.fetchrow("""
         SELECT status, attempts, run_after > now() as is_delayed
-        FROM codegraph_control.job_queue
+        FROM robomonkey_control.job_queue
         WHERE id = $1
     """, fail_job_id)
 
@@ -362,7 +362,7 @@ async def test_daemon_heartbeat(conn: asyncpg.Connection):
     # Register test daemon instance
     print("  Registering daemon instance...")
     await conn.execute("""
-        INSERT INTO codegraph_control.daemon_instance (instance_id, config, status)
+        INSERT INTO robomonkey_control.daemon_instance (instance_id, config, status)
         VALUES ('test_daemon', '{}'::jsonb, 'RUNNING')
     """)
 
@@ -373,7 +373,7 @@ async def test_daemon_heartbeat(conn: asyncpg.Connection):
     await asyncio.sleep(2)  # Wait 2 seconds
 
     await conn.execute("""
-        SELECT codegraph_control.update_heartbeat('test_daemon')
+        SELECT robomonkey_control.update_heartbeat('test_daemon')
     """)
 
     # Verify heartbeat updated
@@ -383,7 +383,7 @@ async def test_daemon_heartbeat(conn: asyncpg.Connection):
             status,
             EXTRACT(EPOCH FROM (last_heartbeat - started_at)) as uptime_seconds,
             EXTRACT(EPOCH FROM (now() - last_heartbeat)) as heartbeat_age_seconds
-        FROM codegraph_control.daemon_instance
+        FROM robomonkey_control.daemon_instance
         WHERE instance_id = 'test_daemon'
     """)
 

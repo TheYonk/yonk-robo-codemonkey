@@ -4,8 +4,8 @@ import pytest_asyncio
 import os
 from pathlib import Path
 import asyncpg
-from codegraph_mcp.tagging.rules import seed_starter_tags, apply_tag_rules, get_entity_tags
-from codegraph_mcp.indexer.indexer import index_repository
+from yonk_code_robomonkey.tagging.rules import seed_starter_tags, apply_tag_rules, get_entity_tags
+from yonk_code_robomonkey.indexer.indexer import index_repository
 
 
 @pytest.fixture

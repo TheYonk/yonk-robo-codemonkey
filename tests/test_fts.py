@@ -3,8 +3,8 @@ import pytest
 import pytest_asyncio
 import os
 from pathlib import Path
-from codegraph_mcp.retrieval.fts_search import fts_search_chunks, fts_search
-from codegraph_mcp.indexer.indexer import index_repository
+from yonk_code_robomonkey.retrieval.fts_search import fts_search_chunks, fts_search
+from yonk_code_robomonkey.indexer.indexer import index_repository
 
 
 @pytest.fixture

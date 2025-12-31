@@ -1,6 +1,6 @@
-# CodeGraph MCP Documentation Index
+# RoboMonkey MCP Documentation Index
 
-Welcome to CodeGraph MCP! This index helps you find the right documentation for your needs.
+Welcome to RoboMonkey MCP! This index helps you find the right documentation for your needs.
 
 ---
 
@@ -22,7 +22,7 @@ Welcome to CodeGraph MCP! This index helps you find the right documentation for 
 ## 📦 Setting Up on a Server
 
 ### [INSTALL.md](INSTALL.md)
-**Complete installation guide** for setting up CodeGraph MCP on a new server.
+**Complete installation guide** for setting up RoboMonkey MCP on a new server.
 
 **Covers:**
 - ✅ **A. CLI Setup** - Installing and configuring the command-line interface
@@ -40,18 +40,18 @@ Welcome to CodeGraph MCP! This index helps you find the right documentation for 
 
 ---
 
-## 📖 Using CodeGraph MCP
+## 📖 Using RoboMonkey MCP
 
 ### [USER_GUIDE.md](USER_GUIDE.md)
 **Comprehensive usage guide** with examples and troubleshooting.
 
 **Covers:**
-- ✅ **E. Usage Examples** - How to use CodeGraph MCP and test if it's working
+- ✅ **E. Usage Examples** - How to use RoboMonkey MCP and test if it's working
 - ✅ **F. Clearing Data** - How to reset and start over
 - ✅ **G. Troubleshooting** - Where logs are, how to debug issues
 
 **Read this if:**
-- You have CodeGraph installed and want to use it effectively
+- You have RoboMonkey installed and want to use it effectively
 - You're getting errors and need to debug
 - You want advanced usage patterns
 - You need to clear data or reset
@@ -66,9 +66,9 @@ Welcome to CodeGraph MCP! This index helps you find the right documentation for 
 
 | File | Purpose | Location |
 |------|---------|----------|
-| `.env` | Main configuration | `codegraph-mcp/.env` |
-| `.env.example` | Configuration template | `codegraph-mcp/.env.example` |
-| `docker-compose.yml` | Database setup | `codegraph-mcp/docker-compose.yml` |
+| `.env` | Main configuration | `robomonkey-mcp/.env` |
+| `.env.example` | Configuration template | `robomonkey-mcp/.env.example` |
+| `docker-compose.yml` | Database setup | `robomonkey-mcp/docker-compose.yml` |
 | `claude_desktop_config.json` | Claude Desktop integration | `~/Library/Application Support/Claude/` (Mac) |
 | `mcp-servers.json` | Claude Code integration | `~/.config/claude-code/` |
 
@@ -76,40 +76,40 @@ Welcome to CodeGraph MCP! This index helps you find the right documentation for 
 
 ```bash
 # Database
-codegraph db init          # Initialize database
-codegraph db ping          # Check connection
+robomonkey db init          # Initialize database
+robomonkey db ping          # Check connection
 
 # Indexing
-codegraph index --repo /path/to/repo --name myrepo
-codegraph status --name myrepo
-codegraph repo ls
+robomonkey index --repo /path/to/repo --name myrepo
+robomonkey status --name myrepo
+robomonkey repo ls
 
 # Embeddings
-python scripts/embed_repo_direct.py myrepo codegraph_myrepo
+python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
 
 # Daemon
-codegraph daemon run       # Start daemon
-systemctl status codegraph-daemon  # Check daemon status
+robomonkey daemon run       # Start daemon
+systemctl status robomonkey-daemon  # Check daemon status
 
 # Docker
 docker-compose up -d       # Start database
 docker-compose down        # Stop database
 docker ps                  # List running containers
-docker logs codegraph-postgres  # View database logs
+docker logs robomonkey-postgres  # View database logs
 ```
 
 ### Common File Paths
 
 **Mac/Linux:**
-- CodeGraph: `~/codegraph-mcp/`
-- Virtual environment: `~/codegraph-mcp/.venv/`
-- Python: `~/codegraph-mcp/.venv/bin/python`
+- RoboMonkey: `~/robomonkey-mcp/`
+- Virtual environment: `~/robomonkey-mcp/.venv/`
+- Python: `~/robomonkey-mcp/.venv/bin/python`
 - Claude config: `~/Library/Application Support/Claude/`
 
 **Windows:**
-- CodeGraph: `C:\Users\YourName\codegraph-mcp\`
-- Virtual environment: `C:\Users\YourName\codegraph-mcp\.venv\`
-- Python: `C:\Users\YourName\codegraph-mcp\.venv\Scripts\python.exe`
+- RoboMonkey: `C:\Users\YourName\robomonkey-mcp\`
+- Virtual environment: `C:\Users\YourName\robomonkey-mcp\.venv\`
+- Python: `C:\Users\YourName\robomonkey-mcp\.venv\Scripts\python.exe`
 - Claude config: `%APPDATA%\Claude\`
 
 ---
@@ -157,7 +157,7 @@ docker logs codegraph-postgres  # View database logs
 ### "Where are the logs?"
 → See [USER_GUIDE.md - Logs](USER_GUIDE.md#where-are-the-logs)
 
-### "I'm a developer working on CodeGraph"
+### "I'm a developer working on RoboMonkey"
 → Check [CLAUDE.md](CLAUDE.md) and [TODO.md](TODO.md)
 
 ---
@@ -210,7 +210,7 @@ docker logs codegraph-postgres  # View database logs
 2. **Gather diagnostic information:**
    ```bash
    # Check database
-   codegraph db ping
+   robomonkey db ping
    
    # Check Docker
    docker ps
@@ -225,10 +225,10 @@ docker logs codegraph-postgres  # View database logs
 3. **Check the logs:**
    ```bash
    # Database
-   docker logs codegraph-postgres
+   docker logs robomonkey-postgres
    
    # Daemon (if using systemd)
-   sudo journalctl -u codegraph-daemon -n 50
+   sudo journalctl -u robomonkey-daemon -n 50
    ```
 
 ### Where to Get Help
@@ -269,6 +269,6 @@ Improvements welcome! When contributing:
 
 ---
 
-**Happy coding with CodeGraph MCP!** 🚀
+**Happy coding with RoboMonkey MCP!** 🚀
 
 Start with [QUICKSTART.md](QUICKSTART.md) if you're new, or jump to [INSTALL.md](INSTALL.md) for server deployment.

@@ -1,7 +1,7 @@
 [project]
-name = "codegraph-mcp"
+name = "yonk-code-robomonkey"
 version = "0.1.0"
-description = "Local-first CodeGraph MCP server with Postgres+pgvector+FTS+tags+docs"
+description = "Local-first RoboMonkey MCP server with Postgres+pgvector+FTS+tags+docs"
 requires-python = ">=3.11"
 dependencies = [
   "asyncpg>=0.29.0",
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-codegraph = "codegraph_mcp.cli.main:main"
+robomonkey = "yonk_code_robomonkey.cli.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

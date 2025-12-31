@@ -22,7 +22,7 @@ logging.basicConfig(
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from codegraph_mcp.embeddings.embedder import embed_repo
+from yonk_code_robomonkey.embeddings.embedder import embed_repo
 
 
 async def main():
@@ -38,7 +38,7 @@ async def main():
     print("=" * 60)
 
     # Import settings to show configuration
-    from codegraph_mcp.config import settings
+    from yonk_code_robomonkey.config import settings
     print(f"Using model: {settings.embeddings_model}")
     print(f"Max chunk length: {settings.max_chunk_length} chars")
     print(f"Batch size: {settings.embedding_batch_size}")

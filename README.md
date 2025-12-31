@@ -1,10 +1,10 @@
-# CodeGraph MCP
+# RoboMonkey MCP
 
 Local-first MCP server that indexes code and documentation into Postgres with pgvector, providing hybrid retrieval (vector + full-text search + tags) for LLM coding clients.
 
 ## 🚀 Quick Start
 
-**New to CodeGraph?** Start here:
+**New to RoboMonkey?** Start here:
 
 ### [📘 Complete Documentation](docs/DOCUMENTATION_INDEX.md)
 
@@ -17,9 +17,9 @@ Local-first MCP server that indexes code and documentation into Postgres with pg
 
 ---
 
-## What is CodeGraph MCP?
+## What is RoboMonkey MCP?
 
-CodeGraph MCP is an AI-powered code search and analysis tool that:
+RoboMonkey MCP is an AI-powered code search and analysis tool that:
 
 ✅ **Indexes your codebase** - Analyzes code structure, symbols, and relationships  
 ✅ **Generates AI embeddings** - Understands code semantically, not just keywords  
@@ -46,7 +46,7 @@ CodeGraph MCP is an AI-powered code search and analysis tool that:
 - **Context packing:** Smart token budgeting for LLM context
 
 ### Developer Experience
-- **CLI tools:** `codegraph index`, `codegraph status`, `codegraph embed`
+- **CLI tools:** `robomonkey index`, `robomonkey status`, `robomonkey embed`
 - **Background daemon:** Automatic embedding generation, file watching
 - **MCP server:** Seamless IDE integration
 - **Schema per repo:** Clean isolation, easy cleanup
@@ -77,7 +77,7 @@ CodeGraph MCP is an AI-powered code search and analysis tool that:
         │         │         │
 ┌───────▼──┐ ┌────▼────┐ ┌─▼────────┐
 │ Schema 1 │ │ Schema 2│ │ Schema N │
-│codegraph_│ │codegraph│ │codegraph_│
+│robomonkey_│ │robomonkey│ │robomonkey_│
 │ repo1    │ │ _repo2  │ │  repoN   │
 ├──────────┤ ├─────────┤ ├──────────┤
 │• file    │ │• file   │ │• file    │
@@ -114,8 +114,8 @@ CodeGraph MCP is an AI-powered code search and analysis tool that:
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/yourusername/codegraph-mcp.git
-cd codegraph-mcp
+git clone https://github.com/yourusername/robomonkey-mcp.git
+cd robomonkey-mcp
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -132,13 +132,13 @@ cp .env.example .env
 nano .env  # Edit settings
 
 # 5. Initialize
-codegraph db init
+robomonkey db init
 
 # 6. Index a repository
-codegraph index --repo /path/to/repo --name myrepo
+robomonkey index --repo /path/to/repo --name myrepo
 
 # 7. Generate embeddings
-python scripts/embed_repo_direct.py myrepo codegraph_myrepo
+python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
 ```
 
 **👉 For detailed installation:** See [docs/INSTALL.md](docs/INSTALL.md)  
@@ -151,12 +151,12 @@ python scripts/embed_repo_direct.py myrepo codegraph_myrepo
 ### Search Code
 
 ```python
-from codegraph_mcp.retrieval.hybrid_search import hybrid_search
+from robomonkey_mcp.retrieval.hybrid_search import hybrid_search
 
 results = await hybrid_search(
     query="authentication login function",
     repo_name="myrepo",
-    database_url="postgresql://postgres:postgres@localhost:5433/codegraph",
+    database_url="postgresql://postgres:postgres@localhost:5433/robomonkey",
     top_k=10
 )
 ```
@@ -164,12 +164,12 @@ results = await hybrid_search(
 ### Find Callers
 
 ```python
-from codegraph_mcp.retrieval.graph_expand import find_callers
+from robomonkey_mcp.retrieval.graph_expand import find_callers
 
 callers = await find_callers(
     symbol_fqn="mymodule.authenticate_user",
     repo_name="myrepo",
-    database_url="postgresql://postgres:postgres@localhost:5433/codegraph"
+    database_url="postgresql://postgres:postgres@localhost:5433/robomonkey"
 )
 ```
 
@@ -190,7 +190,7 @@ Key settings in `.env`:
 
 ```env
 # Database
-DATABASE_URL=postgresql://postgres:postgres@localhost:5433/codegraph
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/robomonkey
 
 # Embeddings (adjust for your model)
 EMBEDDINGS_MODEL=snowflake-arctic-embed2:latest

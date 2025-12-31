@@ -1,11 +1,11 @@
-# CodeGraph MCP Configuration
+# RoboMonkey MCP Configuration
 
-This document provides configuration examples for using CodeGraph MCP with various clients.
+This document provides configuration examples for using RoboMonkey MCP with various clients.
 
 ## Prerequisites
 
 1. **Database**: PostgreSQL 16+ with pgvector extension running
-2. **Indexed Repository**: Run `codegraph index --repo /path/to/repo --name myrepo` first
+2. **Indexed Repository**: Run `robomonkey index --repo /path/to/repo --name myrepo` first
 3. **Environment**: Copy `.env.example` to `.env` and configure your database URL and embeddings provider
 
 ## Claude Desktop Configuration
@@ -18,14 +18,14 @@ Add this to your Claude Desktop config file:
 ```json
 {
   "mcpServers": {
-    "codegraph": {
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
+    "robomonkey": {
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
       "args": [
         "-m",
-        "codegraph_mcp.mcp.server"
+        "robomonkey_mcp.mcp.server"
       ],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph",
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
         "EMBEDDINGS_PROVIDER": "ollama",
         "EMBEDDINGS_MODEL": "nomic-embed-text",
         "EMBEDDINGS_BASE_URL": "http://localhost:11434",
@@ -41,7 +41,7 @@ Add this to your Claude Desktop config file:
 ```
 
 ### Notes for Claude Desktop:
-- Replace `/path/to/codegraph-mcp` with the actual path to your installation
+- Replace `/path/to/robomonkey-mcp` with the actual path to your installation
 - Ensure the virtual environment is activated and dependencies are installed
 - Restart Claude Desktop after adding the configuration
 
@@ -54,14 +54,14 @@ Add this to your Cline MCP settings:
 ```json
 {
   "cline.mcpServers": {
-    "codegraph": {
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
+    "robomonkey": {
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
       "args": [
         "-m",
-        "codegraph_mcp.mcp.server"
+        "robomonkey_mcp.mcp.server"
       ],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph",
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
         "EMBEDDINGS_PROVIDER": "ollama",
         "EMBEDDINGS_MODEL": "nomic-embed-text",
         "EMBEDDINGS_BASE_URL": "http://localhost:11434",
@@ -88,7 +88,7 @@ If you're using vLLM for embeddings:
 ```json
 {
   "env": {
-    "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph",
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
     "EMBEDDINGS_PROVIDER": "vllm",
     "EMBEDDINGS_MODEL": "BAAI/bge-small-en-v1.5",
     "VLLM_BASE_URL": "http://localhost:8000",
@@ -146,8 +146,8 @@ Once configured, you can ask Claude to use the tools:
 
 ### Server not starting
 1. Check that PostgreSQL is running: `docker-compose up -d`
-2. Verify database is initialized: `codegraph db ping`
-3. Check Python environment: `source .venv/bin/activate && python -m codegraph_mcp.mcp.server`
+2. Verify database is initialized: `robomonkey db ping`
+3. Check Python environment: `source .venv/bin/activate && python -m robomonkey_mcp.mcp.server`
 
 ### Tools not appearing
 1. Restart the MCP client (Claude Desktop or VS Code)
@@ -155,8 +155,8 @@ Once configured, you can ask Claude to use the tools:
 3. Verify the server path and Python environment are correct
 
 ### Empty search results
-1. Ensure the repository is indexed: `codegraph index --repo /path --name myrepo`
-2. Generate embeddings: `codegraph embed --only-missing`
+1. Ensure the repository is indexed: `robomonkey index --repo /path --name myrepo`
+2. Generate embeddings: `robomonkey embed --only-missing`
 3. Sync tags: Call `tag_rules_sync` tool
 
 ## Advanced Configuration
@@ -164,7 +164,7 @@ Once configured, you can ask Claude to use the tools:
 ### Custom Database Port
 If using a different PostgreSQL port:
 ```json
-"DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/codegraph"
+"DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/robomonkey"
 ```
 
 ### Adjusting Search Parameters
@@ -182,7 +182,7 @@ If using a different PostgreSQL port:
 
 ## Next Steps
 
-- Index your repositories: `codegraph index --repo /path --name myrepo`
-- Generate embeddings: `codegraph embed`
+- Index your repositories: `robomonkey index --repo /path --name myrepo`
+- Generate embeddings: `robomonkey embed`
 - Sync starter tags: Use the `tag_rules_sync` tool
 - Start using the MCP tools in Claude Desktop or Cline!

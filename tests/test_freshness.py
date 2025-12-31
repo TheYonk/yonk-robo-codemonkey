@@ -14,9 +14,9 @@ import tempfile
 import shutil
 from dotenv import load_dotenv
 
-from codegraph_mcp.indexer.indexer import index_repository
-from codegraph_mcp.indexer.reindexer import reindex_file
-from codegraph_mcp.config import Settings
+from yonk_code_robomonkey.indexer.indexer import index_repository
+from yonk_code_robomonkey.indexer.reindexer import reindex_file
+from yonk_code_robomonkey.config import Settings
 
 
 @pytest.fixture(scope="module")

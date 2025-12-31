@@ -1,6 +1,6 @@
-# CodeGraph MCP User Guide
+# RoboMonkey MCP User Guide
 
-Complete guide for using CodeGraph MCP for code search and analysis.
+Complete guide for using RoboMonkey MCP for code search and analysis.
 
 ## Table of Contents
 - [E. Usage Examples](#e-usage-examples)
@@ -11,7 +11,7 @@ Complete guide for using CodeGraph MCP for code search and analysis.
 
 ## E. Usage Examples
 
-### Testing if CodeGraph is Working
+### Testing if RoboMonkey is Working
 
 #### Test 1: CLI Commands
 
@@ -20,7 +20,7 @@ Complete guide for using CodeGraph MCP for code search and analysis.
 source .venv/bin/activate
 
 # Check database connection
-codegraph db ping
+robomonkey db ping
 ```
 
 **Expected output:**
@@ -33,13 +33,13 @@ codegraph db ping
 #### Test 2: List Repositories
 
 ```bash
-codegraph repo ls
+robomonkey repo ls
 ```
 
 **Expected output:**
 ```
 Indexed Repositories:
-  - myrepo (codegraph_myrepo)
+  - myrepo (robomonkey_myrepo)
     Files: 1,234
     Symbols: 5,678
     Last indexed: 2025-01-15 10:30:45
@@ -51,13 +51,13 @@ Indexed Repositories:
 # Search using Python script
 python -c "
 import asyncio
-from codegraph_mcp.retrieval.hybrid_search import hybrid_search
+from robomonkey_mcp.retrieval.hybrid_search import hybrid_search
 
 async def test_search():
     results = await hybrid_search(
         query='authentication login function',
         repo_name='myrepo',
-        database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+        database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
         top_k=5
     )
     
@@ -78,10 +78,10 @@ python -c "
 import asyncio, asyncpg
 
 async def check_embeddings():
-    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/codegraph')
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/robomonkey')
     
     # Check each repository
-    repos = await conn.fetch('SELECT name, schema_name FROM codegraph_control.repository')
+    repos = await conn.fetch('SELECT name, schema_name FROM robomonkey_control.repository')
     
     for repo in repos:
         await conn.execute(f'SET search_path TO {repo[\"schema_name\"]}, public')
@@ -115,7 +115,7 @@ User: "Search for authentication functions in myrepo"
 User: "Find where database connections are established"
 ```
 
-**Expected:** Cline will use CodeGraph MCP to search and show relevant code.
+**Expected:** Cline will use RoboMonkey MCP to search and show relevant code.
 
 ---
 
@@ -125,38 +125,38 @@ User: "Find where database connections are established"
 
 ```bash
 # Step 1: Index code structure
-codegraph index --repo /path/to/repo --name myproject
+robomonkey index --repo /path/to/repo --name myproject
 
 # Step 2: Generate embeddings
-python scripts/embed_repo_direct.py myproject codegraph_myproject
+python scripts/embed_repo_direct.py myproject robomonkey_myproject
 
 # Step 3: Verify
-codegraph status --name myproject
+robomonkey status --name myproject
 ```
 
 #### Pattern 2: Update an Existing Repository
 
 ```bash
 # Option A: Full reindex
-codegraph index --repo /path/to/repo --name myproject
+robomonkey index --repo /path/to/repo --name myproject
 
 # Option B: Use daemon with watch mode
 # Edit .env: WATCH_MODE=true
 # Then restart daemon
-sudo systemctl restart codegraph-daemon
+sudo systemctl restart robomonkey-daemon
 ```
 
 #### Pattern 3: Search Across Multiple Repositories
 
 ```python
 import asyncio
-from codegraph_mcp.retrieval.hybrid_search import hybrid_search
+from robomonkey_mcp.retrieval.hybrid_search import hybrid_search
 
 async def search_all_repos():
     # Get list of repos
     import asyncpg
-    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/codegraph')
-    repos = await conn.fetch('SELECT name FROM codegraph_control.repository')
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/robomonkey')
+    repos = await conn.fetch('SELECT name FROM robomonkey_control.repository')
     await conn.close()
     
     # Search each repo
@@ -166,7 +166,7 @@ async def search_all_repos():
         results = await hybrid_search(
             query=query,
             repo_name=repo['name'],
-            database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+            database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
             top_k=3
         )
         
@@ -180,14 +180,14 @@ asyncio.run(search_all_repos())
 
 ```python
 import asyncio
-from codegraph_mcp.retrieval.graph_expand import find_callers, find_callees
+from robomonkey_mcp.retrieval.graph_expand import find_callers, find_callees
 
 async def analyze_function():
     # Find what calls a function
     callers = await find_callers(
         symbol_fqn='mymodule.authenticate_user',
         repo_name='myrepo',
-        database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+        database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
         max_depth=2
     )
     
@@ -199,7 +199,7 @@ async def analyze_function():
     callees = await find_callees(
         symbol_fqn='mymodule.authenticate_user',
         repo_name='myrepo',
-        database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+        database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
         max_depth=2
     )
     
@@ -215,13 +215,13 @@ asyncio.run(analyze_function())
 ```python
 import asyncio
 import json
-from codegraph_mcp.retrieval.hybrid_search import hybrid_search
+from robomonkey_mcp.retrieval.hybrid_search import hybrid_search
 
 async def export_search_results():
     results = await hybrid_search(
         query='API endpoint handler',
         repo_name='myrepo',
-        database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+        database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
         top_k=50
     )
     
@@ -260,13 +260,13 @@ python -c "
 import asyncio, asyncpg
 
 async def remove_repo():
-    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/codegraph')
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/robomonkey')
     
     repo_name = 'myrepo'  # Change this
     
     # Get schema name
     schema_name = await conn.fetchval(
-        'SELECT schema_name FROM codegraph_control.repository WHERE name = \$1',
+        'SELECT schema_name FROM robomonkey_control.repository WHERE name = \$1',
         repo_name
     )
     
@@ -276,7 +276,7 @@ async def remove_repo():
         
         # Remove from control schema
         await conn.execute(
-            'DELETE FROM codegraph_control.repository WHERE name = \$1',
+            'DELETE FROM robomonkey_control.repository WHERE name = \$1',
             repo_name
         )
         
@@ -294,11 +294,11 @@ asyncio.run(remove_repo())
 
 ```bash
 # Stop daemon if running
-sudo systemctl stop codegraph-daemon  # or kill daemon process
+sudo systemctl stop robomonkey-daemon  # or kill daemon process
 
 # Connect to database and drop everything
-psql postgresql://postgres:postgres@localhost:5433/codegraph << 'SQL'
--- Drop all codegraph schemas
+psql postgresql://postgres:postgres@localhost:5433/robomonkey << 'SQL'
+-- Drop all robomonkey schemas
 DO $$ 
 DECLARE
     schema_name text;
@@ -306,7 +306,7 @@ BEGIN
     FOR schema_name IN 
         SELECT nspname 
         FROM pg_namespace 
-        WHERE nspname LIKE 'codegraph_%'
+        WHERE nspname LIKE 'robomonkey_%'
     LOOP
         EXECUTE 'DROP SCHEMA IF EXISTS ' || quote_ident(schema_name) || ' CASCADE';
         RAISE NOTICE 'Dropped schema: %', schema_name;
@@ -315,10 +315,10 @@ END $$;
 SQL
 
 # Reinitialize database
-codegraph db init
+robomonkey db init
 
 # Verify clean state
-codegraph repo ls
+robomonkey repo ls
 ```
 
 ### Option 3: Clear Only Embeddings (Keep Indexed Code)
@@ -328,12 +328,12 @@ python -c "
 import asyncio, asyncpg
 
 async def clear_embeddings():
-    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/codegraph')
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/robomonkey')
     
     repo_name = 'myrepo'  # Change this
     
     schema_name = await conn.fetchval(
-        'SELECT schema_name FROM codegraph_control.repository WHERE name = \$1',
+        'SELECT schema_name FROM robomonkey_control.repository WHERE name = \$1',
         repo_name
     )
     
@@ -355,18 +355,18 @@ asyncio.run(clear_embeddings())
 "
 
 # Regenerate embeddings
-python scripts/embed_repo_direct.py myrepo codegraph_myrepo
+python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
 ```
 
 ### Option 4: Reset PostgreSQL Database (Nuclear Option)
 
 ```bash
 # Stop everything
-sudo systemctl stop codegraph-daemon
+sudo systemctl stop robomonkey-daemon
 docker-compose down
 
 # Remove database volume
-docker volume rm codegraph-mcp_pgdata
+docker volume rm robomonkey-mcp_pgdata
 
 # Start fresh
 docker-compose up -d
@@ -375,8 +375,8 @@ docker-compose up -d
 sleep 5
 
 # Reinitialize
-codegraph db init
-codegraph db ping
+robomonkey db init
+robomonkey db ping
 ```
 
 ---
@@ -390,13 +390,13 @@ codegraph db ping
 **Systemd (Linux):**
 ```bash
 # View live logs
-sudo journalctl -u codegraph-daemon -f
+sudo journalctl -u robomonkey-daemon -f
 
 # View recent logs
-sudo journalctl -u codegraph-daemon -n 100
+sudo journalctl -u robomonkey-daemon -n 100
 
 # Search logs
-sudo journalctl -u codegraph-daemon | grep ERROR
+sudo journalctl -u robomonkey-daemon | grep ERROR
 ```
 
 **Background process:**
@@ -405,7 +405,7 @@ sudo journalctl -u codegraph-daemon | grep ERROR
 tail -f daemon.log
 
 # If started with custom log location
-tail -f /var/log/codegraph/daemon.log
+tail -f /var/log/robomonkey/daemon.log
 ```
 
 #### MCP Server Logs
@@ -413,10 +413,10 @@ tail -f /var/log/codegraph/daemon.log
 **Claude Code:**
 ```bash
 # macOS
-tail -f ~/Library/Logs/Claude/mcp-server-codegraph.log
+tail -f ~/Library/Logs/Claude/mcp-server-robomonkey.log
 
 # Linux
-tail -f ~/.config/claude-code/logs/mcp-server-codegraph.log
+tail -f ~/.config/claude-code/logs/mcp-server-robomonkey.log
 ```
 
 **Claude Desktop:**
@@ -438,7 +438,7 @@ type %APPDATA%\Claude\logs\mcp.log
 
 **Docker:**
 ```bash
-docker logs codegraph-postgres -f
+docker logs robomonkey-postgres -f
 ```
 
 **Native:**
@@ -457,7 +457,7 @@ tail -f /usr/local/var/log/postgresql@16.log
 echo "LOG_LEVEL=DEBUG" >> .env
 
 # Run commands with verbose output
-codegraph index --repo /path/to/repo --name myrepo --verbose
+robomonkey index --repo /path/to/repo --name myrepo --verbose
 ```
 
 ---
@@ -479,7 +479,7 @@ docker ps | grep postgres
 pg_isready -h localhost -p 5433
 
 # Check connection manually
-psql postgresql://postgres:postgres@localhost:5433/codegraph
+psql postgresql://postgres:postgres@localhost:5433/robomonkey
 
 # Check DATABASE_URL in .env
 grep DATABASE_URL .env
@@ -494,7 +494,7 @@ docker-compose up -d
 docker-compose restart
 
 # Check logs
-docker logs codegraph-postgres
+docker logs robomonkey-postgres
 ```
 
 #### Issue 2: "pgvector extension not available"
@@ -507,7 +507,7 @@ ERROR: extension "vector" is not available
 **Debug:**
 ```bash
 # Check if pgvector is installed
-psql postgresql://postgres:postgres@localhost:5433/codegraph -c "\dx"
+psql postgresql://postgres:postgres@localhost:5433/robomonkey -c "\dx"
 ```
 
 **Solutions:**
@@ -517,7 +517,7 @@ docker-compose down
 docker-compose up -d
 
 # Or install manually in existing postgres
-docker exec -it codegraph-postgres psql -U postgres -d codegraph -c "CREATE EXTENSION IF NOT EXISTS vector;"
+docker exec -it robomonkey-postgres psql -U postgres -d robomonkey -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
 #### Issue 3: "Embeddings dimension mismatch"
@@ -535,8 +535,8 @@ curl -s http://localhost:11434/api/embeddings \
   | python -c "import json, sys; d=json.load(sys.stdin); print(f'Dimensions: {len(d[\"embedding\"])}')"
 
 # Check table dimensions
-psql postgresql://postgres:postgres@localhost:5433/codegraph << 'SQL'
-SET search_path TO codegraph_myrepo;
+psql postgresql://postgres:postgres@localhost:5433/robomonkey << 'SQL'
+SET search_path TO robomonkey_myrepo;
 SELECT atttypmod - 4 as dimensions 
 FROM pg_attribute 
 WHERE attrelid = 'chunk_embedding'::regclass 
@@ -556,8 +556,8 @@ python -c "
 import asyncio, asyncpg
 
 async def fix_schema():
-    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/codegraph')
-    await conn.execute('SET search_path TO codegraph_myrepo')
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/robomonkey')
+    await conn.execute('SET search_path TO robomonkey_myrepo')
     
     # Update to match your model
     dimension = 1024  # Change to 768 for nomic-embed-text
@@ -651,18 +651,18 @@ pip install asyncpg
 **Debug:**
 ```bash
 # Check if daemon is running
-ps aux | grep "codegraph daemon"
+ps aux | grep "robomonkey daemon"
 
 # Check daemon registration
-psql postgresql://postgres:postgres@localhost:5433/codegraph -c "
+psql postgresql://postgres:postgres@localhost:5433/robomonkey -c "
 SELECT instance_id, status, last_heartbeat 
-FROM codegraph_control.daemon_instance;
+FROM robomonkey_control.daemon_instance;
 "
 
 # Check job queue
-psql postgresql://postgres:postgres@localhost:5433/codegraph -c "
+psql postgresql://postgres:postgres@localhost:5433/robomonkey -c "
 SELECT id, repo_name, job_type, status, created_at 
-FROM codegraph_control.job_queue 
+FROM robomonkey_control.job_queue 
 ORDER BY created_at DESC 
 LIMIT 20;
 "
@@ -671,14 +671,14 @@ LIMIT 20;
 **Solutions:**
 ```bash
 # Restart daemon
-sudo systemctl restart codegraph-daemon
+sudo systemctl restart robomonkey-daemon
 
 # Or kill and restart manually
-pkill -f "codegraph daemon"
-nohup codegraph daemon run > daemon.log 2>&1 &
+pkill -f "robomonkey daemon"
+nohup robomonkey daemon run > daemon.log 2>&1 &
 
 # Check daemon logs
-sudo journalctl -u codegraph-daemon -n 50
+sudo journalctl -u robomonkey-daemon -n 50
 ```
 
 #### Issue 7: Search returns no results
@@ -694,8 +694,8 @@ python -c "
 import asyncio, asyncpg
 
 async def check_data():
-    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/codegraph')
-    await conn.execute('SET search_path TO codegraph_myrepo')
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5433/robomonkey')
+    await conn.execute('SET search_path TO robomonkey_myrepo')
     
     chunks = await conn.fetchval('SELECT COUNT(*) FROM chunk')
     embeddings = await conn.fetchval('SELECT COUNT(*) FROM chunk_embedding')
@@ -718,8 +718,8 @@ asyncio.run(check_data())
 "
 
 # Test full-text search
-psql postgresql://postgres:postgres@localhost:5433/codegraph << 'SQL'
-SET search_path TO codegraph_myrepo;
+psql postgresql://postgres:postgres@localhost:5433/robomonkey << 'SQL'
+SET search_path TO robomonkey_myrepo;
 SELECT file_path, content
 FROM chunk
 WHERE to_tsvector('english', content) @@ websearch_to_tsquery('english', 'function')
@@ -730,14 +730,14 @@ SQL
 **Solutions:**
 ```bash
 # Reindex repository
-codegraph index --repo /path/to/repo --name myrepo
+robomonkey index --repo /path/to/repo --name myrepo
 
 # Regenerate embeddings
-python scripts/embed_repo_direct.py myrepo codegraph_myrepo
+python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
 
 # Check search parameters
 python -c "
-from codegraph_mcp.config import settings
+from robomonkey_mcp.config import settings
 print(f'Vector top-k: {settings.vector_top_k}')
 print(f'FTS top-k: {settings.fts_top_k}')
 print(f'Final top-k: {settings.final_top_k}')
@@ -755,13 +755,13 @@ print(f'Final top-k: {settings.final_top_k}')
 echo "PGDEBUG=1" >> .env
 
 # Or set in PostgreSQL
-docker exec -it codegraph-postgres psql -U postgres -d codegraph -c "
+docker exec -it robomonkey-postgres psql -U postgres -d robomonkey -c "
 ALTER SYSTEM SET log_statement = 'all';
 SELECT pg_reload_conf();
 "
 
 # View query logs
-docker logs codegraph-postgres -f | grep "LOG:  statement:"
+docker logs robomonkey-postgres -f | grep "LOG:  statement:"
 ```
 
 #### Profile Search Performance
@@ -769,7 +769,7 @@ docker logs codegraph-postgres -f | grep "LOG:  statement:"
 ```python
 import asyncio
 import time
-from codegraph_mcp.retrieval.hybrid_search import hybrid_search
+from robomonkey_mcp.retrieval.hybrid_search import hybrid_search
 
 async def profile_search():
     query = "authentication function"
@@ -779,7 +779,7 @@ async def profile_search():
     results = await hybrid_search(
         query=query,
         repo_name='myrepo',
-        database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+        database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
         top_k=10
     )
     duration = time.time() - start
@@ -800,7 +800,7 @@ asyncio.run(profile_search())
 #### Check Index Statistics
 
 ```bash
-psql postgresql://postgres:postgres@localhost:5433/codegraph << 'SQL'
+psql postgresql://postgres:postgres@localhost:5433/robomonkey << 'SQL'
 -- Check all repositories
 SELECT 
     r.name as repo_name,
@@ -809,7 +809,7 @@ SELECT
      WHERE table_schema = r.schema_name) as tables,
     r.created_at,
     r.updated_at
-FROM codegraph_control.repository r
+FROM robomonkey_control.repository r
 ORDER BY r.created_at DESC;
 
 -- Check schema sizes
@@ -818,7 +818,7 @@ SELECT
     tablename,
     pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
 FROM pg_tables
-WHERE schemaname LIKE 'codegraph_%'
+WHERE schemaname LIKE 'robomonkey_%'
 ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
 LIMIT 20;
 SQL
@@ -828,7 +828,7 @@ SQL
 
 ## Getting Help
 
-- **GitHub Issues:** https://github.com/yourusername/codegraph-mcp/issues
+- **GitHub Issues:** https://github.com/yourusername/robomonkey-mcp/issues
 - **Documentation:** Check `RUNBOOK.md` for operational procedures
 - **Logs:** Always include relevant logs when reporting issues
 
@@ -865,8 +865,8 @@ SQL
    htop
    
    # PostgreSQL stats
-   docker stats codegraph-postgres
+   docker stats robomonkey-postgres
    
    # Disk usage
-   du -sh ~/.local/share/docker/volumes/codegraph-mcp_pgdata
+   du -sh ~/.local/share/docker/volumes/robomonkey-mcp_pgdata
    ```

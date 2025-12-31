@@ -1,0 +1,85 @@
+# RoboMonkey Daemon Configuration
+# This file configures the background daemon for automatic indexing and embedding
+
+# Database Configuration
+database:
+  # Control schema DSN (REQUIRED)
+  control_dsn: "postgresql://postgres:postgres@localhost:5433/robomonkey"
+  
+  # Schema prefix for per-repo isolation
+  schema_prefix: "robomonkey_"
+
+# Embeddings Configuration
+embeddings:
+  # Enable/disable automatic embedding generation
+  enabled: true
+  
+  # Backfill embeddings for existing chunks on startup
+  backfill_on_startup: true
+  
+  # Provider: "ollama" or "vllm"
+  provider: "ollama"
+  
+  # Model configuration
+  model: "snowflake-arctic-embed2:latest"
+  dimension: 1024
+  max_chunk_length: 8192
+  batch_size: 100
+  
+  # Provider-specific settings
+  ollama:
+    base_url: "http://localhost:11434"
+  
+  vllm:
+    base_url: "http://localhost:8000"
+    api_key: "local-key"
+
+# Job Workers Configuration
+workers:
+  # Number of concurrent job workers
+  count: 2
+  
+  # Job types to process
+  enabled_job_types:
+    - EMBED_REPO
+    - EMBED_MISSING
+    - INDEX_REPO
+    - WATCH_REPO
+
+# Repository Watching
+watching:
+  # Enable file system watching for indexed repos
+  enabled: true
+  
+  # Debounce interval (seconds) - wait this long after last change
+  debounce_seconds: 2
+  
+  # Patterns to ignore (in addition to .gitignore)
+  ignore_patterns:
+    - "*.pyc"
+    - "__pycache__"
+    - ".git"
+    - "node_modules"
+    - ".venv"
+
+# Daemon Health & Monitoring
+monitoring:
+  # Heartbeat interval (seconds)
+  heartbeat_interval: 30
+  
+  # Consider daemon dead after this many seconds without heartbeat
+  dead_threshold: 120
+  
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+
+# Development Mode Settings
+dev_mode:
+  # Enable development mode features
+  enabled: false
+  
+  # Auto-reload on code changes
+  auto_reload: false
+  
+  # Verbose logging
+  verbose: false

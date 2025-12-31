@@ -3,8 +3,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
-from codegraph_mcp.embeddings.ollama import ollama_embed
-from codegraph_mcp.embeddings.vllm_openai import vllm_embed
+from yonk_code_robomonkey.embeddings.ollama import ollama_embed
+from yonk_code_robomonkey.embeddings.vllm_openai import vllm_embed
 
 
 @pytest.mark.asyncio

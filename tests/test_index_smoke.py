@@ -4,14 +4,14 @@ import asyncpg
 from pathlib import Path
 from dotenv import load_dotenv
 
-from codegraph_mcp.indexer.indexer import index_repository
+from yonk_code_robomonkey.indexer.indexer import index_repository
 
 
 @pytest.fixture(scope="module")
 def database_url():
     """Load database URL from environment."""
     load_dotenv()
-    from codegraph_mcp.config import Settings
+    from yonk_code_robomonkey.config import Settings
     s = Settings()
     return s.database_url
 

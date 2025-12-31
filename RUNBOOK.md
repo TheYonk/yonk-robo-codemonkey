@@ -1,6 +1,6 @@
-# CodeGraph Daemon Runbook
+# RoboMonkey Daemon Runbook
 
-This runbook provides complete instructions for operating the CodeGraph daemon, a two-part architecture that separates interactive MCP tools from heavy background processing.
+This runbook provides complete instructions for operating the RoboMonkey daemon, a two-part architecture that separates interactive MCP tools from heavy background processing.
 
 ## Architecture Overview
 
@@ -48,26 +48,26 @@ This runbook provides complete instructions for operating the CodeGraph daemon, 
 
 ### 1. Initialize Control Schema
 
-The daemon uses a centralized `codegraph_control` schema for cross-repo coordination:
+The daemon uses a centralized `robomonkey_control` schema for cross-repo coordination:
 
 ```bash
 # Start database
 docker-compose up -d
 
 # The daemon will auto-initialize on first run, or manually:
-codegraph db init  # Initializes main schema
+robomonkey db init  # Initializes main schema
 # Control schema created automatically by daemon
 ```
 
 ### 2. Configure Daemon
 
-Create or edit `config/codegraph-daemon.yaml`:
+Create or edit `config/robomonkey-daemon.yaml`:
 
 ```yaml
-daemon_id: "codegraph-daemon-001"
+daemon_id: "robomonkey-daemon-001"
 
 database:
-  control_dsn: "postgresql://postgres:postgres@localhost:5433/codegraph"
+  control_dsn: "postgresql://postgres:postgres@localhost:5433/robomonkey"
   pool_size: 10
 
 embeddings:
@@ -116,13 +116,13 @@ export CODEGRAPH_CONFIG=/path/to/your/config.yaml
 
 ```bash
 # Start daemon in foreground (recommended for testing)
-codegraph daemon run
+robomonkey daemon run
 
 # Or with custom config
-CODEGRAPH_CONFIG=/custom/path.yaml codegraph daemon run
+CODEGRAPH_CONFIG=/custom/path.yaml robomonkey daemon run
 
 # Start in background (production)
-nohup codegraph daemon run > daemon.log 2>&1 &
+nohup robomonkey daemon run > daemon.log 2>&1 &
 ```
 
 **Daemon will:**
@@ -147,9 +147,9 @@ From your AI client (Cline, Claude Desktop, etc.), use the `repo_add` tool:
 ```
 
 **This will:**
-1. Create schema `codegraph_myapp`
+1. Create schema `robomonkey_myapp`
 2. Initialize tables in that schema
-3. Register repo in `codegraph_control.repo_registry`
+3. Register repo in `robomonkey_control.repo_registry`
 4. Enqueue `FULL_INDEX` job (if `auto_index=true`)
 
 The daemon picks up the job and indexes the repository automatically.
@@ -287,7 +287,7 @@ Get repository freshness metadata.
 
 ## CLI Commands Reference
 
-The `codegraph` CLI provides direct access to indexing, embedding, and management operations. These commands are useful for:
+The `robomonkey` CLI provides direct access to indexing, embedding, and management operations. These commands are useful for:
 - One-off operations without running the daemon
 - Testing and development
 - Scripting and automation
@@ -297,11 +297,11 @@ The `codegraph` CLI provides direct access to indexing, embedding, and managemen
 
 ### Database Commands
 
-#### `codegraph db init`
+#### `robomonkey db init`
 Initialize the main database schema.
 
 ```bash
-codegraph db init
+robomonkey db init
 ```
 
 **What it does:**
@@ -310,11 +310,11 @@ codegraph db init
 - Sets up FTS triggers
 - Creates indexes
 
-#### `codegraph db ping`
+#### `robomonkey db ping`
 Test database connection and verify pgvector.
 
 ```bash
-codegraph db ping
+robomonkey db ping
 ```
 
 **Output:**
@@ -326,20 +326,20 @@ codegraph db ping
 
 ### Indexing Commands
 
-#### `codegraph index`
+#### `robomonkey index`
 Index a repository directly (bypasses daemon queue).
 
 ```bash
-codegraph index --repo /path/to/repo --name myrepo [--force]
+robomonkey index --repo /path/to/repo --name myrepo [--force]
 ```
 
 **Parameters:**
 - `--repo` (required): Absolute path to repository root
-- `--name` (required): Repository name (used for schema: codegraph_<name>)
+- `--name` (required): Repository name (used for schema: robomonkey_<name>)
 - `--force`: Force reinitialize schema even if exists
 
 **What it does:**
-1. Creates schema `codegraph_<name>` if not exists
+1. Creates schema `robomonkey_<name>` if not exists
 2. Initializes tables in schema
 3. Scans repository files (respects .gitignore)
 4. Extracts symbols with tree-sitter
@@ -349,7 +349,7 @@ codegraph index --repo /path/to/repo --name myrepo [--force]
 
 **Example:**
 ```bash
-codegraph index --repo /home/user/myapp --name myapp
+robomonkey index --repo /home/user/myapp --name myapp
 ```
 
 **Output:**
@@ -362,15 +362,15 @@ Indexing repository: /home/user/myapp
 ✓ Repository indexed successfully
 ```
 
-**Note:** This does NOT generate embeddings. Use `codegraph embed` next or set `auto_embed: true` in daemon config.
+**Note:** This does NOT generate embeddings. Use `robomonkey embed` next or set `auto_embed: true` in daemon config.
 
 ### Embedding Commands
 
-#### `codegraph embed`
+#### `robomonkey embed`
 Generate embeddings for chunks (requires embeddings provider running).
 
 ```bash
-codegraph embed --repo_id <UUID> [--only-missing]
+robomonkey embed --repo_id <UUID> [--only-missing]
 ```
 
 **Parameters:**
@@ -389,10 +389,10 @@ codegraph embed --repo_id <UUID> [--only-missing]
 **Example:**
 ```bash
 # Get repo_id first
-psql -d codegraph -c "SELECT id, name FROM codegraph_myapp.repo"
+psql -d robomonkey -c "SELECT id, name FROM robomonkey_myapp.repo"
 
 # Generate embeddings
-codegraph embed --repo_id 123e4567-e89b-12d3-a456-426614174000 --only-missing
+robomonkey embed --repo_id 123e4567-e89b-12d3-a456-426614174000 --only-missing
 ```
 
 **Output:**
@@ -406,28 +406,28 @@ Embedding 600 chunks...
 
 ### Repository Management
 
-#### `codegraph repo ls`
+#### `robomonkey repo ls`
 List all indexed repositories.
 
 ```bash
-codegraph repo ls
+robomonkey repo ls
 ```
 
 **Output:**
 ```
 Indexed repositories:
-  • myapp (schema: codegraph_myapp)
+  • myapp (schema: robomonkey_myapp)
     Path: /home/user/myapp
     Files: 150, Symbols: 500, Chunks: 600
 ```
 
 ### Watch Mode Commands
 
-#### `codegraph watch`
+#### `robomonkey watch`
 Watch a repository for file changes and automatically reindex (single-repo daemon mode).
 
 ```bash
-codegraph watch --repo /path/to/repo --name myrepo [--debounce-ms 500] [--generate-summaries]
+robomonkey watch --repo /path/to/repo --name myrepo [--debounce-ms 500] [--generate-summaries]
 ```
 
 **Parameters:**
@@ -444,7 +444,7 @@ codegraph watch --repo /path/to/repo --name myrepo [--debounce-ms 500] [--genera
 
 **Example:**
 ```bash
-codegraph watch --repo /home/user/myapp --name myapp
+robomonkey watch --repo /home/user/myapp --name myapp
 ```
 
 **Output:**
@@ -459,15 +459,15 @@ Watching /home/user/myapp for changes...
 
 ### Git Sync Commands
 
-#### `codegraph sync`
+#### `robomonkey sync`
 Sync repository from git diff (incremental update).
 
 ```bash
 # From git diff
-codegraph sync --repo /path/to/repo --base main --head feature-branch
+robomonkey sync --repo /path/to/repo --base main --head feature-branch
 
 # From patch file
-codegraph sync --repo /path/to/repo --patch-file changes.patch
+robomonkey sync --repo /path/to/repo --patch-file changes.patch
 ```
 
 **Parameters:**
@@ -485,28 +485,28 @@ codegraph sync --repo /path/to/repo --patch-file changes.patch
 **Example:**
 ```bash
 # Sync changes between branches
-codegraph sync --repo /home/user/myapp --base origin/main --head HEAD
+robomonkey sync --repo /home/user/myapp --base origin/main --head HEAD
 
 # Sync from patch file
 git diff main > changes.patch
-codegraph sync --repo /home/user/myapp --patch-file changes.patch
+robomonkey sync --repo /home/user/myapp --patch-file changes.patch
 ```
 
 ### Status Commands
 
-#### `codegraph status`
+#### `robomonkey status`
 Show repository index status and freshness.
 
 ```bash
-codegraph status --name myrepo
+robomonkey status --name myrepo
 # or
-codegraph status --repo-id <UUID>
+robomonkey status --repo-id <UUID>
 ```
 
 **Output:**
 ```
 Repository: myapp
-  Schema: codegraph_myapp
+  Schema: robomonkey_myapp
   Last indexed: 2025-12-30 10:30:45
   Files: 150
   Symbols: 500
@@ -517,11 +517,11 @@ Repository: myapp
 
 ### Review Commands
 
-#### `codegraph review`
+#### `robomonkey review`
 Generate comprehensive architecture review.
 
 ```bash
-codegraph review --repo /path/to/repo --name myrepo [--regenerate] [--max-modules 25]
+robomonkey review --repo /path/to/repo --name myrepo [--regenerate] [--max-modules 25]
 ```
 
 **Parameters:**
@@ -538,34 +538,34 @@ codegraph review --repo /path/to/repo --name myrepo [--regenerate] [--max-module
 
 ### Feature Index Commands
 
-#### `codegraph features build`
+#### `robomonkey features build`
 Build feature index for repository.
 
 ```bash
-codegraph features build --repo-id <UUID> [--regenerate]
+robomonkey features build --repo-id <UUID> [--regenerate]
 ```
 
-#### `codegraph features list`
+#### `robomonkey features list`
 List features in repository.
 
 ```bash
-codegraph features list --repo-id <UUID> [--prefix auth] [--limit 50]
+robomonkey features list --repo-id <UUID> [--prefix auth] [--limit 50]
 ```
 
 ### Daemon Commands
 
-#### `codegraph daemon run`
+#### `robomonkey daemon run`
 Start the daemon in foreground.
 
 ```bash
-codegraph daemon run
+robomonkey daemon run
 
 # With custom config
-CODEGRAPH_CONFIG=/path/to/config.yaml codegraph daemon run
+CODEGRAPH_CONFIG=/path/to/config.yaml robomonkey daemon run
 ```
 
 **What it does:**
-- Loads configuration from `config/codegraph-daemon.yaml`
+- Loads configuration from `config/robomonkey-daemon.yaml`
 - Initializes control schema if needed
 - Starts worker pools (reindex, embed, docs)
 - Starts file system watchers (if enabled)
@@ -601,7 +601,7 @@ CODEGRAPH_CONFIG=/path/to/config.yaml codegraph daemon run
 
 ```bash
 # 1. Ensure daemon is running
-ps aux | grep "codegraph daemon"
+ps aux | grep "robomonkey daemon"
 
 # 2. Use MCP tool repo_add with your AI client
 # Tool: repo_add
@@ -630,7 +630,7 @@ ps aux | grep "codegraph daemon"
 
 **Automatic (Watch Mode):**
 ```yaml
-# In config/codegraph-daemon.yaml
+# In config/robomonkey-daemon.yaml
 watcher:
   enabled: true
   debounce_ms: 500
@@ -645,7 +645,7 @@ Then set `auto_watch: true` when adding repo.
 # Tool: repo_add with same name (will update, not duplicate)
 
 # Option 2: Direct SQL
-psql -d codegraph -c "INSERT INTO codegraph_control.job_queue (repo_name, schema_name, job_type, priority) VALUES ('myrepo', 'codegraph_myrepo', 'FULL_INDEX', 9)"
+psql -d robomonkey -c "INSERT INTO robomonkey_control.job_queue (repo_name, schema_name, job_type, priority) VALUES ('myrepo', 'robomonkey_myrepo', 'FULL_INDEX', 9)"
 ```
 
 ### Backfill Embeddings
@@ -658,7 +658,7 @@ embeddings:
 
 Or enqueue manually:
 ```bash
-psql -d codegraph -c "INSERT INTO codegraph_control.job_queue (repo_name, schema_name, job_type) VALUES ('myrepo', 'codegraph_myrepo', 'EMBED_MISSING')"
+psql -d robomonkey -c "INSERT INTO robomonkey_control.job_queue (repo_name, schema_name, job_type) VALUES ('myrepo', 'robomonkey_myrepo', 'EMBED_MISSING')"
 ```
 
 ---
@@ -670,7 +670,7 @@ psql -d codegraph -c "INSERT INTO codegraph_control.job_queue (repo_name, schema
 **Error: "Configuration file not found"**
 ```bash
 # Create config file
-cp config/codegraph-daemon.yaml.example config/codegraph-daemon.yaml
+cp config/robomonkey-daemon.yaml.example config/robomonkey-daemon.yaml
 # Or set CODEGRAPH_CONFIG
 export CODEGRAPH_CONFIG=/path/to/config.yaml
 ```
@@ -681,7 +681,7 @@ export CODEGRAPH_CONFIG=/path/to/config.yaml
 docker-compose ps
 
 # Test connection
-psql -h localhost -p 5433 -U postgres -d codegraph -c "SELECT 1"
+psql -h localhost -p 5433 -U postgres -d robomonkey -c "SELECT 1"
 
 # Update DATABASE_URL in .env or config
 ```
@@ -698,15 +698,15 @@ docker-compose up -d
 **Symptoms:** Jobs stuck in PENDING
 
 **Check:**
-1. Daemon is running: `ps aux | grep "codegraph daemon"`
-2. Daemon heartbeat: Query `codegraph_control.daemon_instance` table
-3. Job queue: `SELECT * FROM codegraph_control.job_queue WHERE status = 'PENDING' ORDER BY created_at DESC`
+1. Daemon is running: `ps aux | grep "robomonkey daemon"`
+2. Daemon heartbeat: Query `robomonkey_control.daemon_instance` table
+3. Job queue: `SELECT * FROM robomonkey_control.job_queue WHERE status = 'PENDING' ORDER BY created_at DESC`
 
 **Fix:**
 ```bash
 # Restart daemon
-pkill -f "codegraph daemon"
-codegraph daemon run
+pkill -f "robomonkey daemon"
+robomonkey daemon run
 ```
 
 ### Embeddings Not Generated
@@ -721,7 +721,7 @@ codegraph daemon run
 **Fix:**
 ```bash
 # Manual enqueue
-psql -d codegraph -c "INSERT INTO codegraph_control.job_queue (repo_name, schema_name, job_type, priority) VALUES ('myrepo', 'codegraph_myrepo', 'EMBED_MISSING', 8)"
+psql -d robomonkey -c "INSERT INTO robomonkey_control.job_queue (repo_name, schema_name, job_type, priority) VALUES ('myrepo', 'robomonkey_myrepo', 'EMBED_MISSING', 8)"
 ```
 
 ### High Memory Usage
@@ -757,7 +757,7 @@ psql -d codegraph -c "INSERT INTO codegraph_control.job_queue (repo_name, schema
 **Check:**
 ```sql
 SELECT job_type, error, attempts, max_attempts
-FROM codegraph_control.job_queue
+FROM robomonkey_control.job_queue
 WHERE status = 'FAILED'
 ORDER BY updated_at DESC;
 ```
@@ -765,11 +765,11 @@ ORDER BY updated_at DESC;
 **Fix:**
 ```sql
 -- Delete permanently failed jobs
-DELETE FROM codegraph_control.job_queue
+DELETE FROM robomonkey_control.job_queue
 WHERE status = 'FAILED' AND attempts >= max_attempts;
 
 -- Or reset specific job
-UPDATE codegraph_control.job_queue
+UPDATE robomonkey_control.job_queue
 SET status = 'PENDING', attempts = 0, run_after = now()
 WHERE id = '<job-uuid>';
 ```
@@ -780,20 +780,20 @@ WHERE id = '<job-uuid>';
 
 **Check:**
 ```sql
-SELECT name, schema_name FROM codegraph_control.repo_registry ORDER BY name;
+SELECT name, schema_name FROM robomonkey_control.repo_registry ORDER BY name;
 ```
 
-**Each repo MUST have unique schema name** (`codegraph_<repo_name>`).
+**Each repo MUST have unique schema name** (`robomonkey_<repo_name>`).
 
 **Fix duplicate names:**
 ```sql
 -- Rename repo
-UPDATE codegraph_control.repo_registry
-SET name = 'myrepo_v2', schema_name = 'codegraph_myrepo_v2'
+UPDATE robomonkey_control.repo_registry
+SET name = 'myrepo_v2', schema_name = 'robomonkey_myrepo_v2'
 WHERE name = 'myrepo';
 
 -- Then rename actual schema
-ALTER SCHEMA codegraph_myrepo RENAME TO codegraph_myrepo_v2;
+ALTER SCHEMA robomonkey_myrepo RENAME TO robomonkey_myrepo_v2;
 ```
 
 ---
@@ -843,10 +843,10 @@ embeddings:
 
 ### Key Metrics to Track
 
-1. **Queue Depth:** `SELECT COUNT(*) FROM codegraph_control.job_queue WHERE status = 'PENDING'`
-2. **Processing Rate:** `SELECT COUNT(*) FROM codegraph_control.job_queue WHERE status = 'DONE' AND completed_at > now() - interval '1 hour'`
-3. **Error Rate:** `SELECT COUNT(*) FROM codegraph_control.job_queue WHERE status = 'FAILED' AND updated_at > now() - interval '1 hour'`
-4. **Daemon Uptime:** `SELECT instance_id, started_at, last_heartbeat FROM codegraph_control.daemon_instance`
+1. **Queue Depth:** `SELECT COUNT(*) FROM robomonkey_control.job_queue WHERE status = 'PENDING'`
+2. **Processing Rate:** `SELECT COUNT(*) FROM robomonkey_control.job_queue WHERE status = 'DONE' AND completed_at > now() - interval '1 hour'`
+3. **Error Rate:** `SELECT COUNT(*) FROM robomonkey_control.job_queue WHERE status = 'FAILED' AND updated_at > now() - interval '1 hour'`
+4. **Daemon Uptime:** `SELECT instance_id, started_at, last_heartbeat FROM robomonkey_control.daemon_instance`
 
 ### Health Check Query
 
@@ -857,14 +857,14 @@ WITH stats AS (
     COUNT(*) FILTER (WHERE status = 'CLAIMED') as claimed,
     COUNT(*) FILTER (WHERE status = 'DONE') as done,
     COUNT(*) FILTER (WHERE status = 'FAILED') as failed
-  FROM codegraph_control.job_queue
+  FROM robomonkey_control.job_queue
 ),
 daemon_health AS (
   SELECT
     instance_id,
     status,
     EXTRACT(EPOCH FROM (now() - last_heartbeat)) as seconds_since_heartbeat
-  FROM codegraph_control.daemon_instance
+  FROM robomonkey_control.daemon_instance
 )
 SELECT * FROM stats, daemon_health;
 ```
@@ -881,19 +881,19 @@ SELECT * FROM stats, daemon_health;
 
 ### Systemd Service (Linux)
 
-Create `/etc/systemd/system/codegraph-daemon.service`:
+Create `/etc/systemd/system/robomonkey-daemon.service`:
 
 ```ini
 [Unit]
-Description=CodeGraph Daemon
+Description=RoboMonkey Daemon
 After=network.target postgresql.service
 
 [Service]
 Type=simple
-User=codegraph
-WorkingDirectory=/opt/codegraph
-Environment="CODEGRAPH_CONFIG=/etc/codegraph/daemon.yaml"
-ExecStart=/opt/codegraph/.venv/bin/codegraph daemon run
+User=robomonkey
+WorkingDirectory=/opt/robomonkey
+Environment="CODEGRAPH_CONFIG=/etc/robomonkey/daemon.yaml"
+ExecStart=/opt/robomonkey/.venv/bin/robomonkey daemon run
 Restart=always
 RestartSec=10
 
@@ -903,9 +903,9 @@ WantedBy=multi-user.target
 
 Enable and start:
 ```bash
-sudo systemctl enable codegraph-daemon
-sudo systemctl start codegraph-daemon
-sudo systemctl status codegraph-daemon
+sudo systemctl enable robomonkey-daemon
+sudo systemctl start robomonkey-daemon
+sudo systemctl status robomonkey-daemon
 ```
 
 ### Docker Deployment
@@ -917,13 +917,13 @@ WORKDIR /app
 COPY . /app
 RUN pip install -e .
 
-CMD ["codegraph", "daemon", "run"]
+CMD ["robomonkey", "daemon", "run"]
 ```
 
 ```yaml
 # docker-compose.yml addition
 services:
-  codegraph-daemon:
+  robomonkey-daemon:
     build: .
     environment:
       CODEGRAPH_CONFIG: /config/daemon.yaml
@@ -944,13 +944,13 @@ Run multiple daemons for horizontal scaling:
 
 ```yaml
 # daemon-001.yaml
-daemon_id: "codegraph-daemon-001"
+daemon_id: "robomonkey-daemon-001"
 workers:
   reindex_workers: 2
   embed_workers: 2
 
 # daemon-002.yaml
-daemon_id: "codegraph-daemon-002"
+daemon_id: "robomonkey-daemon-002"
 workers:
   reindex_workers: 2
   embed_workers: 2
@@ -958,8 +958,8 @@ workers:
 
 Start both:
 ```bash
-CODEGRAPH_CONFIG=daemon-001.yaml codegraph daemon run &
-CODEGRAPH_CONFIG=daemon-002.yaml codegraph daemon run &
+CODEGRAPH_CONFIG=daemon-001.yaml robomonkey daemon run &
+CODEGRAPH_CONFIG=daemon-002.yaml robomonkey daemon run &
 ```
 
 Both will claim jobs atomically using PostgreSQL locks.
@@ -980,7 +980,7 @@ PRIORITY_BACKGROUND = 1
 Store per-repo config in `repo_registry.config` JSONB column:
 
 ```sql
-UPDATE codegraph_control.repo_registry
+UPDATE robomonkey_control.repo_registry
 SET config = '{"custom_ignore": ["*.test.js"], "embedding_model": "custom-model"}'::jsonb
 WHERE name = 'myrepo';
 ```
@@ -991,29 +991,29 @@ WHERE name = 'myrepo';
 
 ### Control Schema Tables
 
-**codegraph_control.repo_registry:**
+**robomonkey_control.repo_registry:**
 - Central registry of all managed repos
 - Maps repo name → schema name → root path
 - Stores auto_index, auto_embed, auto_watch flags
 
-**codegraph_control.job_queue:**
+**robomonkey_control.job_queue:**
 - Durable job queue with ACID guarantees
 - Atomic job claiming via `FOR UPDATE SKIP LOCKED`
 - Retry logic with exponential backoff
 - Deduplication via `dedup_key`
 
-**codegraph_control.daemon_instance:**
+**robomonkey_control.daemon_instance:**
 - Tracks running daemon instances
 - Heartbeat monitoring
 - Status tracking (RUNNING, STOPPED, ERROR)
 
-**codegraph_control.job_stats:**
+**robomonkey_control.job_stats:**
 - Aggregated statistics per job type
 - Used for monitoring dashboards
 
 ### Per-Repo Schemas
 
-Each repository gets schema `codegraph_<repo_name>` with tables:
+Each repository gets schema `robomonkey_<repo_name>` with tables:
 - repo, file, symbol, chunk, edge
 - chunk_embedding, document_embedding
 - document, tag, entity_tag, tag_rule
@@ -1024,7 +1024,7 @@ Each repository gets schema `codegraph_<repo_name>` with tables:
 
 ## Support
 
-**Issues:** https://github.com/anthropics/codegraph-mcp/issues
+**Issues:** https://github.com/anthropics/robomonkey-mcp/issues
 
 **Logs:** Check daemon stderr output for detailed error messages
 

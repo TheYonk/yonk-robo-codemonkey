@@ -6,10 +6,10 @@ Also tests Phase 4: edges, graph traversal, and symbol_context.
 import pytest
 import pytest_asyncio
 import asyncpg
-from codegraph_mcp.retrieval.vector_search import vector_search, VectorSearchResult
-from codegraph_mcp.retrieval.graph_traversal import get_callers, get_callees, get_symbol_by_fqn
-from codegraph_mcp.retrieval.symbol_context import get_symbol_context
-from codegraph_mcp.indexer.indexer import index_repository
+from yonk_code_robomonkey.retrieval.vector_search import vector_search, VectorSearchResult
+from yonk_code_robomonkey.retrieval.graph_traversal import get_callers, get_callees, get_symbol_by_fqn
+from yonk_code_robomonkey.retrieval.symbol_context import get_symbol_context
+from yonk_code_robomonkey.indexer.indexer import index_repository
 from pathlib import Path
 import os
 

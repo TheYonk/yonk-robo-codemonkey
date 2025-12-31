@@ -9,15 +9,15 @@ import pytest
 import asyncpg
 from dotenv import load_dotenv
 
-from codegraph_mcp.config import settings
-from codegraph_mcp.cli.commands import db_init, db_ping
+from yonk_code_robomonkey.config import settings
+from yonk_code_robomonkey.cli.commands import db_init, db_ping
 
 
 @pytest.fixture(scope="module")
 def database_url():
     """Load database URL from environment."""
     load_dotenv()
-    from codegraph_mcp.config import Settings
+    from yonk_code_robomonkey.config import Settings
     s = Settings()
     return s.database_url
 

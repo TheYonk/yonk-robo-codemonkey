@@ -1,7 +1,7 @@
 # Schema Isolation Validation Report
 
 **Date:** 2025-12-30
-**Objective:** Validate schema-per-repo isolation for CodeGraph MCP migration assessment
+**Objective:** Validate schema-per-repo isolation for RoboMonkey MCP migration assessment
 
 ---
 
@@ -23,14 +23,14 @@ All critical validation tests passed:
 
 1. **legacy1** (Oracle/Java)
    - Path: `/home/yonk/migration_tooling/migration_test/no_docs_customer_legacy1`
-   - Schema: `codegraph_legacy1`
+   - Schema: `robomonkey_legacy1`
    - Files: 4
    - Symbols: 39
    - Chunks: 43
 
 2. **pg_go_app** (PostgreSQL/Go)
    - Path: `/home/yonk/yonk-web-app`
-   - Schema: `codegraph_pg_go_app`
+   - Schema: `robomonkey_pg_go_app`
    - Files: 6,578
    - Symbols: 5,949
    - Chunks: 12,352
@@ -46,7 +46,7 @@ All critical validation tests passed:
 #### legacy1 Results
 ```json
 {
-  "schema_name": "codegraph_legacy1",
+  "schema_name": "robomonkey_legacy1",
   "tier": "low",
   "score": 3,
   "total_findings": 1
@@ -56,7 +56,7 @@ All critical validation tests passed:
 #### pg_go_app Results
 ```json
 {
-  "schema_name": "codegraph_pg_go_app",
+  "schema_name": "robomonkey_pg_go_app",
   "tier": "low",
   "score": 12,
   "total_findings": 1
@@ -81,7 +81,7 @@ All critical validation tests passed:
 ```
 Query: "NVL"
 Repo: pg_go_app (PostgreSQL/Go)
-Schema: codegraph_pg_go_app
+Schema: robomonkey_pg_go_app
 Results: 0
 ```
 
@@ -92,7 +92,7 @@ Results: 0
 ```
 Query: "jsonb"
 Repo: legacy1 (Oracle/Java)
-Schema: codegraph_legacy1
+Schema: robomonkey_legacy1
 Results: 0
 ```
 
@@ -103,7 +103,7 @@ Results: 0
 ```
 Query: "class"
 Repo: legacy1 (Java)
-Schema: codegraph_legacy1
+Schema: robomonkey_legacy1
 Results: 3
 ```
 
@@ -117,25 +117,25 @@ Results: 3
 ## Files Modified for Schema Isolation
 
 ### Core Schema Management
-1. `src/codegraph_mcp/config.py`
+1. `src/robomonkey_mcp/config.py`
    - Added `SCHEMA_PREFIX` and `USE_SCHEMAS` configuration
    - Added `get_schema_name()` helper function
 
-2. `src/codegraph_mcp/db/schema_manager.py` (NEW)
+2. `src/robomonkey_mcp/db/schema_manager.py` (NEW)
    - `create_schema()` - Create PostgreSQL schemas
-   - `init_schema_tables()` - Initialize CodeGraph tables in schema
+   - `init_schema_tables()` - Initialize RoboMonkey tables in schema
    - `schema_context()` - Async context manager for search_path management
    - `resolve_repo_to_schema()` - Resolve repo name/UUID to (repo_id, schema_name)
    - `ensure_schema_initialized()` - Safe schema initialization with conflict detection
    - `list_repo_schemas()` - List all indexed repos with schema info
 
 ### Indexing Pipeline
-3. `src/codegraph_mcp/indexer/indexer.py`
+3. `src/robomonkey_mcp/indexer/indexer.py`
    - Updated `index_repository()` to use schema isolation
    - All DB operations wrapped in `schema_context()`
 
 ### MCP Tools (Updated for Schema Isolation)
-4. `src/codegraph_mcp/mcp/tools.py`
+4. `src/robomonkey_mcp/mcp/tools.py`
    - ✅ `migration_assess` - Uses `resolve_repo_to_schema()` and passes `schema_name`
    - ✅ `migration_inventory` - Schema-aware queries
    - ✅ `migration_risks` - Schema-aware queries
@@ -149,30 +149,30 @@ Results: 3
    - ⏳ `list_tags`, `tag_entity`, `tag_rules_sync` - **PENDING**
 
 ### Migration Assessment
-5. `src/codegraph_mcp/migration/assessor.py`
+5. `src/robomonkey_mcp/migration/assessor.py`
    - Added `schema_name` parameter to `assess_migration()`
    - Sets `search_path` at connection level for all queries
 
-6. `src/codegraph_mcp/migration/detector.py`
+6. `src/robomonkey_mcp/migration/detector.py`
    - Added `schema_name` parameter to `detect_source_databases()`
    - Sets `search_path` for database detection queries
 
 ### Search Functions
-7. `src/codegraph_mcp/retrieval/hybrid_search.py`
+7. `src/robomonkey_mcp/retrieval/hybrid_search.py`
    - Added `schema_name` parameter
    - Wraps tag query in `schema_context()`
    - Passes `schema_name` to vector and FTS search
 
-8. `src/codegraph_mcp/retrieval/vector_search.py`
+8. `src/robomonkey_mcp/retrieval/vector_search.py`
    - Added `schema_name` parameter
    - Wraps vector query in `schema_context()`
 
-9. `src/codegraph_mcp/retrieval/fts_search.py`
+9. `src/robomonkey_mcp/retrieval/fts_search.py`
    - Added `schema_name` parameter
    - Wraps FTS query in `schema_context()`
 
 ### CLI Commands
-10. `src/codegraph_mcp/cli/commands.py`
+10. `src/robomonkey_mcp/cli/commands.py`
     - Added `--force` flag to `index` command
     - Added `repo ls` command to list all indexed repos with schema info
 
@@ -231,7 +231,7 @@ async def tool_name(repo: str, ...):
 
 - [x] Schema creation and initialization
 - [x] Repo indexing with schema isolation
-- [x] `codegraph repo ls` command
+- [x] `robomonkey repo ls` command
 - [x] Migration assessment respects schemas
 - [x] Hybrid search respects schemas
 - [x] Vector search uses schema context

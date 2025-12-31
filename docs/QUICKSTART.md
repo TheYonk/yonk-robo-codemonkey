@@ -1,4 +1,4 @@
-# CodeGraph MCP Quick Start Guide
+# RoboMonkey MCP Quick Start Guide
 ## For Beginners - Step by Step
 
 This guide assumes you're new to AI coding tools, Docker, and command-line tools. We'll walk through everything step by step.
@@ -98,20 +98,20 @@ ollama --version
 
 ---
 
-## Step 4: Download CodeGraph
+## Step 4: Download RoboMonkey
 
 ```bash
 # Go to your home directory
 cd ~
 
-# Download CodeGraph
-git clone https://github.com/yourusername/codegraph-mcp.git
+# Download RoboMonkey
+git clone https://github.com/yourusername/robomonkey-mcp.git
 
 # Go into the folder
-cd codegraph-mcp
+cd robomonkey-mcp
 ```
 
-**💡 Tip:** This creates a folder called `codegraph-mcp` in your home directory with all the files you need.
+**💡 Tip:** This creates a folder called `robomonkey-mcp` in your home directory with all the files you need.
 
 ---
 
@@ -170,22 +170,22 @@ Think of it like a separate workspace just for this project, so it doesn't mess 
 **You'll know it worked when:**
 Your command line shows `(.venv)` at the start, like:
 ```
-(.venv) user@computer:~/codegraph-mcp$
+(.venv) user@computer:~/robomonkey-mcp$
 ```
 
-**Install CodeGraph:**
+**Install RoboMonkey:**
 
 ```bash
 pip install -e .
 ```
 
-**Expected:** Lots of text scrolling by, then "Successfully installed codegraph-mcp"
+**Expected:** Lots of text scrolling by, then "Successfully installed robomonkey-mcp"
 
-**💡 Tip:** This installs all the pieces CodeGraph needs to run.
+**💡 Tip:** This installs all the pieces RoboMonkey needs to run.
 
 ---
 
-## Step 7: Configure CodeGraph
+## Step 7: Configure RoboMonkey
 
 ```bash
 # Copy the example configuration
@@ -206,7 +206,7 @@ nano .env
 
 ```env
 # If PostgreSQL is running in Docker (leave as-is):
-DATABASE_URL=postgresql://postgres:postgres@localhost:5433/codegraph
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/robomonkey
 
 # If you changed the Docker port, update 5433 to match
 
@@ -248,11 +248,11 @@ ollama list
 ## Step 9: Initialize the Database
 
 ```bash
-# Make sure you're in the codegraph-mcp folder and .venv is activated
+# Make sure you're in the robomonkey-mcp folder and .venv is activated
 # You should see (.venv) at the start of your prompt
 
 # Initialize
-codegraph db init
+robomonkey db init
 ```
 
 **Expected:**
@@ -273,13 +273,13 @@ source .venv/bin/activate  # Mac/Linux
 docker ps
 
 # Check if PostgreSQL is ready
-docker logs codegraph-postgres
+docker logs robomonkey-postgres
 ```
 
 **Test the connection:**
 
 ```bash
-codegraph db ping
+robomonkey db ping
 ```
 
 **Expected:**
@@ -300,17 +300,17 @@ Now let's index some actual code!
 # For example: /Users/john/projects/my-app
 # Or: C:\Users\john\projects\my-app (Windows)
 
-codegraph index --repo /path/to/your/project --name myproject
+robomonkey index --repo /path/to/your/project --name myproject
 ```
 
 **Examples:**
 
 ```bash
 # Mac/Linux example
-codegraph index --repo ~/projects/my-webapp --name mywebapp
+robomonkey index --repo ~/projects/my-webapp --name mywebapp
 
 # Windows example  
-codegraph index --repo C:\Users\YourName\projects\my-app --name myapp
+robomonkey index --repo C:\Users\YourName\projects\my-app --name myapp
 ```
 
 **💡 Tips:**
@@ -330,7 +330,7 @@ Parsing JavaScript files: 123/123
 **Check what got indexed:**
 
 ```bash
-codegraph status --name myproject
+robomonkey status --name myproject
 ```
 
 ---
@@ -341,9 +341,9 @@ This step teaches the AI to understand your code:
 
 ```bash
 # Replace 'myproject' with the name you used above
-# Replace 'codegraph_myproject' with 'codegraph_' + your project name
+# Replace 'robomonkey_myproject' with 'robomonkey_' + your project name
 
-python scripts/embed_repo_direct.py myproject codegraph_myproject
+python scripts/embed_repo_direct.py myproject robomonkey_myproject
 ```
 
 **💡 What's happening?**
@@ -351,7 +351,7 @@ The AI is reading every piece of your code and learning what it does. This lets 
 
 **Expected output:**
 ```
-Starting embeddings for myproject (schema: codegraph_myproject)
+Starting embeddings for myproject (schema: robomonkey_myproject)
 ============================================================
 Using model: snowflake-arctic-embed2:latest
 Max chunk length: 8192 chars
@@ -380,13 +380,13 @@ Let's make sure everything is working:
 
 ```bash
 # Test 1: List your repositories
-codegraph repo ls
+robomonkey repo ls
 ```
 
 **Expected:**
 ```
 Indexed Repositories:
-  - myproject (codegraph_myproject)
+  - myproject (robomonkey_myproject)
     Files: 234
     Symbols: 1,234
     Last indexed: 2025-12-31 08:00:00
@@ -397,13 +397,13 @@ Indexed Repositories:
 ```bash
 python -c "
 import asyncio
-from codegraph_mcp.retrieval.hybrid_search import hybrid_search
+from robomonkey_mcp.retrieval.hybrid_search import hybrid_search
 
 async def test():
     results = await hybrid_search(
         query='function that handles login',
         repo_name='myproject',
-        database_url='postgresql://postgres:postgres@localhost:5433/codegraph',
+        database_url='postgresql://postgres:postgres@localhost:5433/robomonkey',
         top_k=5
     )
     print(f'Found {len(results)} results:')
@@ -433,28 +433,28 @@ asyncio.run(test())
 ```json
 {
   "mcpServers": {
-    "codegraph": {
-      "command": "/Users/yourname/codegraph-mcp/.venv/bin/python",
-      "args": ["-m", "codegraph_mcp.mcp.server"],
+    "robomonkey": {
+      "command": "/Users/yourname/robomonkey-mcp/.venv/bin/python",
+      "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/codegraph"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
       }
     }
   }
 }
 ```
 
-**💡 Important:** Replace `/Users/yourname/codegraph-mcp/.venv/bin/python` with your actual path!
+**💡 Important:** Replace `/Users/yourname/robomonkey-mcp/.venv/bin/python` with your actual path!
 
 **To find your path:**
 ```bash
 # Mac/Linux
-cd ~/codegraph-mcp
+cd ~/robomonkey-mcp
 pwd
 # Copy this path and add /.venv/bin/python at the end
 
 # Windows
-cd C:\Users\YourName\codegraph-mcp
+cd C:\Users\YourName\robomonkey-mcp
 cd
 # Copy this path and add \.venv\Scripts\python.exe at the end
 ```
@@ -468,7 +468,7 @@ In Claude Desktop, try asking:
 "Search my project for authentication functions"
 ```
 
-Claude should now use CodeGraph to find and show you the relevant code!
+Claude should now use RoboMonkey to find and show you the relevant code!
 
 ### For VS Code with Cline:
 
@@ -483,9 +483,9 @@ Claude should now use CodeGraph to find and show you the relevant code!
 ```json
 {
   "cline.mcpServers": {
-    "codegraph": {
-      "command": "/path/to/codegraph-mcp/.venv/bin/python",
-      "args": ["-m", "codegraph_mcp.mcp.server"]
+    "robomonkey": {
+      "command": "/path/to/robomonkey-mcp/.venv/bin/python",
+      "args": ["-m", "robomonkey_mcp.mcp.server"]
     }
   }
 }
@@ -497,7 +497,7 @@ Claude should now use CodeGraph to find and show you the relevant code!
 
 ## Common "Oops!" Moments and Fixes
 
-### "Command not found: codegraph"
+### "Command not found: robomonkey"
 
 **Fix:**
 ```bash
@@ -565,8 +565,8 @@ cd
 
 1. **Index more projects:**
    ```bash
-   codegraph index --repo /path/to/another/project --name project2
-   python scripts/embed_repo_direct.py project2 codegraph_project2
+   robomonkey index --repo /path/to/another/project --name project2
+   python scripts/embed_repo_direct.py project2 robomonkey_project2
    ```
 
 2. **Set up the daemon for automatic updates:**
@@ -584,7 +584,7 @@ cd
 1. **Check the logs:**
    ```bash
    # Database logs
-   docker logs codegraph-postgres
+   docker logs robomonkey-postgres
    
    # Recent commands
    history | tail -20
@@ -593,7 +593,7 @@ cd
 2. **Ask for help:**
    - Include what command you ran
    - Include the error message
-   - Include output of: `docker ps` and `codegraph db ping`
+   - Include output of: `docker ps` and `robomonkey db ping`
 
 3. **Start over (last resort):**
    ```bash
@@ -615,16 +615,16 @@ cd
 source .venv/bin/activate
 
 # Check what's indexed
-codegraph repo ls
+robomonkey repo ls
 
 # Check database connection
-codegraph db ping
+robomonkey db ping
 
 # Index new project
-codegraph index --repo /path/to/project --name projectname
+robomonkey index --repo /path/to/project --name projectname
 
 # Generate embeddings
-python scripts/embed_repo_direct.py projectname codegraph_projectname
+python scripts/embed_repo_direct.py projectname robomonkey_projectname
 
 # Check database status
 docker ps
@@ -636,11 +636,11 @@ docker-compose down
 docker-compose up -d
 
 # View database logs
-docker logs codegraph-postgres
+docker logs robomonkey-postgres
 ```
 
 ---
 
-**🎉 Congratulations!** You've set up CodeGraph MCP and can now search your code using AI!
+**🎉 Congratulations!** You've set up RoboMonkey MCP and can now search your code using AI!
 
 **Next:** Read [USER_GUIDE.md](USER_GUIDE.md) for advanced usage and troubleshooting.

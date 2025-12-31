@@ -1,9 +1,9 @@
 -- CodeGraph Control Schema
 -- This schema holds cross-repo coordination: job queue, repo registry, daemon state
 
-CREATE SCHEMA IF NOT EXISTS codegraph_control;
+CREATE SCHEMA IF NOT EXISTS robomonkey_control;
 
-SET search_path TO codegraph_control, public;
+SET search_path TO robomonkey_control, public;
 
 -- ============================================================================
 -- Repo Registry: Central registry of all repos managed by the daemon
@@ -154,10 +154,10 @@ CREATE OR REPLACE FUNCTION claim_jobs(
     p_worker_id TEXT,
     p_worker_types TEXT[],
     p_limit INT DEFAULT 10
-) RETURNS SETOF codegraph_control.job_queue AS $$
+) RETURNS SETOF robomonkey_control.job_queue AS $$
 BEGIN
     RETURN QUERY
-    UPDATE codegraph_control.job_queue
+    UPDATE robomonkey_control.job_queue
     SET
         status = 'CLAIMED',
         claimed_at = now(),
@@ -166,7 +166,7 @@ BEGIN
         updated_at = now()
     WHERE id IN (
         SELECT id
-        FROM codegraph_control.job_queue
+        FROM robomonkey_control.job_queue
         WHERE status = 'PENDING'
           AND run_after <= now()
           AND (p_worker_types IS NULL OR job_type = ANY(p_worker_types))
@@ -184,7 +184,7 @@ CREATE OR REPLACE FUNCTION complete_job(
     p_worker_id TEXT
 ) RETURNS BOOLEAN AS $$
 BEGIN
-    UPDATE codegraph_control.job_queue
+    UPDATE robomonkey_control.job_queue
     SET
         status = 'DONE',
         completed_at = now(),
@@ -211,12 +211,12 @@ BEGIN
     -- Get current attempts
     SELECT attempts, max_attempts
     INTO v_attempts, v_max_attempts
-    FROM codegraph_control.job_queue
+    FROM robomonkey_control.job_queue
     WHERE id = p_job_id;
 
     IF v_attempts >= v_max_attempts THEN
         -- Max retries reached, mark as FAILED
-        UPDATE codegraph_control.job_queue
+        UPDATE robomonkey_control.job_queue
         SET
             status = 'FAILED',
             error = p_error,
@@ -227,7 +227,7 @@ BEGIN
           AND claimed_by = p_worker_id;
     ELSE
         -- Schedule retry with exponential backoff
-        UPDATE codegraph_control.job_queue
+        UPDATE robomonkey_control.job_queue
         SET
             status = 'RETRY',
             error = p_error,
@@ -238,7 +238,7 @@ BEGIN
           AND claimed_by = p_worker_id;
 
         -- Immediately make retries pending again
-        UPDATE codegraph_control.job_queue
+        UPDATE robomonkey_control.job_queue
         SET status = 'PENDING'
         WHERE id = p_job_id AND status = 'RETRY';
     END IF;
@@ -254,7 +254,7 @@ CREATE OR REPLACE FUNCTION cleanup_old_jobs(
 DECLARE
     v_deleted INT;
 BEGIN
-    DELETE FROM codegraph_control.job_queue
+    DELETE FROM robomonkey_control.job_queue
     WHERE status IN ('DONE', 'FAILED')
       AND completed_at < now() - (p_retention_days || ' days')::INTERVAL;
 
@@ -268,7 +268,7 @@ CREATE OR REPLACE FUNCTION update_heartbeat(
     p_instance_id TEXT
 ) RETURNS BOOLEAN AS $$
 BEGIN
-    UPDATE codegraph_control.daemon_instance
+    UPDATE robomonkey_control.daemon_instance
     SET last_heartbeat = now()
     WHERE instance_id = p_instance_id;
 
@@ -298,16 +298,16 @@ CREATE TRIGGER repo_registry_updated_at
 -- ============================================================================
 
 -- Grant usage on schema
-GRANT USAGE ON SCHEMA codegraph_control TO postgres;
+GRANT USAGE ON SCHEMA robomonkey_control TO postgres;
 
 -- Grant access to tables
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA codegraph_control TO postgres;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA robomonkey_control TO postgres;
 
 -- Grant usage on sequences (for future SERIAL columns if needed)
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA codegraph_control TO postgres;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA robomonkey_control TO postgres;
 
 -- Grant execute on functions
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA codegraph_control TO postgres;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA robomonkey_control TO postgres;
 
 -- Reset search_path
 RESET search_path;
