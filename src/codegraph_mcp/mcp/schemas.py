@@ -542,5 +542,96 @@ TOOL_SCHEMAS = {
             },
             "required": ["repo", "query"]
         }
+    },
+
+    "migration_assess": {
+        "description": "Assess migration complexity from source database to PostgreSQL - analyzes code patterns, SQL dialect usage, and schema artifacts",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name or UUID"
+                },
+                "source_db": {
+                    "type": "string",
+                    "description": "Source database type ('auto', 'oracle', 'sqlserver', 'mongodb', 'mysql')",
+                    "default": "auto"
+                },
+                "target_db": {
+                    "type": "string",
+                    "description": "Target database type (default: 'postgresql')",
+                    "default": "postgresql"
+                },
+                "connect": {
+                    "type": "object",
+                    "description": "Optional live database connection config for enhanced assessment"
+                },
+                "regenerate": {
+                    "type": "boolean",
+                    "description": "Force regeneration even if cached (default: false)",
+                    "default": false
+                },
+                "top_k_evidence": {
+                    "type": "integer",
+                    "description": "Maximum evidence items per finding (default: 50)",
+                    "default": 50
+                }
+            },
+            "required": ["repo"]
+        }
+    },
+
+    "migration_inventory": {
+        "description": "Get raw migration findings grouped by category (drivers, orm, sql_dialect, schema, procedures, etc.)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name or UUID"
+                },
+                "source_db": {
+                    "type": "string",
+                    "description": "Source database type (default: 'auto')",
+                    "default": "auto"
+                }
+            },
+            "required": ["repo"]
+        }
+    },
+
+    "migration_risks": {
+        "description": "Get medium/high/critical migration risks with impacted files and PostgreSQL equivalents",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name or UUID"
+                },
+                "min_severity": {
+                    "type": "string",
+                    "description": "Minimum severity level to include ('low', 'medium', 'high', 'critical')",
+                    "enum": ["low", "medium", "high", "critical"],
+                    "default": "medium"
+                }
+            },
+            "required": ["repo"]
+        }
+    },
+
+    "migration_plan_outline": {
+        "description": "Get phased migration plan outline with work packages, timeline estimates, and recommended approach",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name or UUID"
+                }
+            },
+            "required": ["repo"]
+        }
     }
 }

@@ -252,3 +252,53 @@ DROP TRIGGER IF EXISTS trg_feature_index_fts ON feature_index;
 CREATE TRIGGER trg_feature_index_fts
 BEFORE INSERT OR UPDATE OF name, description ON feature_index
 FOR EACH ROW EXECUTE FUNCTION set_feature_index_fts();
+
+-- Migration Assessment Tables
+CREATE TABLE IF NOT EXISTS migration_assessment (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
+  source_db TEXT NOT NULL,
+  target_db TEXT NOT NULL DEFAULT 'postgresql',
+  mode TEXT NOT NULL,  -- 'repo_only' or 'live_introspect'
+  score INT NOT NULL,  -- 0-100, higher = harder to migrate
+  tier TEXT NOT NULL,  -- 'low', 'medium', 'high', 'extreme'
+  summary TEXT NOT NULL,
+  report_markdown TEXT NOT NULL,
+  report_json JSONB NOT NULL,
+  content_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(repo_id, source_db, target_db, content_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_migration_assessment_repo ON migration_assessment(repo_id);
+CREATE INDEX IF NOT EXISTS idx_migration_assessment_source ON migration_assessment(source_db);
+CREATE INDEX IF NOT EXISTS idx_migration_assessment_tier ON migration_assessment(tier);
+
+CREATE TABLE IF NOT EXISTS migration_finding (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  assessment_id UUID NOT NULL REFERENCES migration_assessment(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,  -- 'drivers', 'orm', 'sql_dialect', 'schema', 'procedures', 'transactions', 'nosql_patterns', 'ops'
+  source_db TEXT NOT NULL,
+  severity TEXT NOT NULL,  -- 'info', 'low', 'medium', 'high', 'critical'
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  evidence JSONB,  -- array of {path, line_start, line_end, excerpt, symbol?, framework?, confidence}
+  mapping JSONB,   -- {postgres_equivalent, rewrite_strategy, complexity, notes}
+  rule_id TEXT,    -- points to ruleset rule
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_migration_finding_assessment ON migration_finding(assessment_id);
+CREATE INDEX IF NOT EXISTS idx_migration_finding_category ON migration_finding(category);
+CREATE INDEX IF NOT EXISTS idx_migration_finding_severity ON migration_finding(severity);
+
+CREATE TABLE IF NOT EXISTS migration_object_snapshot (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  assessment_id UUID NOT NULL REFERENCES migration_assessment(id) ON DELETE CASCADE,
+  db_url_hash TEXT NOT NULL,
+  snapshot_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_migration_snapshot_assessment ON migration_object_snapshot(assessment_id);

@@ -1,0 +1,540 @@
+# Migration Assessment Rules
+# Version: 1.0
+# Format: YAML ruleset for database migration assessment
+# Supports: Oracle, SQL Server, MongoDB, MySQL -> PostgreSQL
+
+version: "1.0"
+
+# Severity weights for scoring (0-100 scale)
+severity_weights:
+  info: 0
+  low: 5
+  medium: 15
+  high: 30
+  critical: 50
+
+# Category multipliers (some categories are harder than others)
+category_multipliers:
+  drivers: 0.5          # Usually straightforward
+  orm: 0.7              # Moderate complexity
+  sql_dialect: 1.0      # Core migration work
+  schema: 0.8           # Important but systematic
+  procedures: 1.5       # Often most complex
+  transactions: 1.2     # Can be tricky
+  nosql_patterns: 2.0   # Fundamental architecture change
+  ops: 0.6              # Operational concerns
+
+# Tier thresholds (score ranges)
+tiers:
+  low:      [0, 25]     # Straightforward migration
+  medium:   [26, 50]    # Moderate effort
+  high:     [51, 75]    # Significant work
+  extreme:  [76, 100]   # Major undertaking
+
+# Database detection patterns (for auto-inference)
+detection:
+  oracle:
+    drivers:
+      - "oracledb"
+      - "oracle"
+      - "cx_Oracle"
+      - "ojdbc"
+      - "oracle.jdbc"
+    connection_patterns:
+      - "jdbc:oracle"
+      - "oracle://"
+      - "@//.*:1521/"
+    dialect_keywords:
+      - "ROWNUM"
+      - "CONNECT BY"
+      - "NVL"
+      - "DECODE"
+      - "SYSDATE"
+      - "DUAL"
+      - "PL/SQL"
+      - "DBMS_"
+    file_extensions:
+      - ".pls"
+      - ".pkb"
+      - ".pks"
+
+  sqlserver:
+    drivers:
+      - "mssql"
+      - "tedious"
+      - "pyodbc"
+      - "pymssql"
+      - "sqlserver"
+      - "com.microsoft.sqlserver"
+    connection_patterns:
+      - "jdbc:sqlserver"
+      - "mssql://"
+      - "Server=.*Database="
+    dialect_keywords:
+      - "NOLOCK"
+      - "READUNCOMMITTED"
+      - "GO\\s*$"
+      - "IDENTITY"
+      - "T-SQL"
+      - "sp_"
+      - "xp_"
+    file_extensions:
+      - ".tsql"
+
+  mongodb:
+    drivers:
+      - "mongodb"
+      - "mongoose"
+      - "pymongo"
+      - "mongo-driver"
+      - "org.mongodb"
+    connection_patterns:
+      - "mongodb://"
+      - "mongodb+srv://"
+    keywords:
+      - "$match"
+      - "$group"
+      - "$lookup"
+      - "$unwind"
+      - "aggregate("
+      - "insertOne"
+      - "findOneAndUpdate"
+
+  mysql:
+    drivers:
+      - "mysql"
+      - "mysql2"
+      - "pymysql"
+      - "mysqldb"
+      - "mysql-connector"
+    connection_patterns:
+      - "jdbc:mysql"
+      - "mysql://"
+    dialect_keywords:
+      - "LIMIT.*OFFSET"
+      - "AUTO_INCREMENT"
+      - "TINYINT"
+      - "MEDIUMINT"
+
+# Common rules (apply regardless of source DB)
+common_rules:
+  - id: "COMMON_DYNAMIC_SQL"
+    category: "sql_dialect"
+    severity: "medium"
+    title: "Dynamic SQL execution"
+    pattern: "(?i)(EXECUTE|EXEC)\\s+(IMMEDIATE|@|N?')"
+    description: "Dynamic SQL found - review for injection risks and portability"
+    mapping:
+      postgres_equivalent: "EXECUTE with USING clause"
+      rewrite_strategy: "Use parameterized queries or PREPARE/EXECUTE"
+      complexity: "low"
+
+  - id: "COMMON_TRANSACTION"
+    category: "transactions"
+    severity: "low"
+    title: "Transaction management"
+    pattern: "(?i)(BEGIN\\s+(TRAN|TRANSACTION)|COMMIT|ROLLBACK)"
+    description: "Explicit transaction control - ensure ACID semantics match"
+    mapping:
+      postgres_equivalent: "BEGIN/COMMIT/ROLLBACK"
+      rewrite_strategy: "Direct mapping usually works"
+      complexity: "low"
+
+# Oracle-specific migration rules
+oracle_rules:
+  # Drivers & Connectivity
+  - id: "ORACLE_DRIVER"
+    category: "drivers"
+    severity: "low"
+    title: "Oracle driver usage"
+    pattern: "(?i)(import|require|using).*(oracledb|cx_Oracle|ojdbc)"
+    description: "Oracle-specific driver - replace with pg/psycopg2/JDBC PostgreSQL"
+    mapping:
+      postgres_equivalent: "pg, psycopg2, or JDBC PostgreSQL driver"
+      rewrite_strategy: "Replace driver + connection strings"
+      complexity: "low"
+
+  # SQL Dialect Features
+  - id: "ORACLE_ROWNUM"
+    category: "sql_dialect"
+    severity: "medium"
+    title: "ROWNUM pagination"
+    pattern: "\\bROWNUM\\b"
+    description: "ROWNUM is Oracle-specific - use LIMIT/OFFSET or ROW_NUMBER()"
+    mapping:
+      postgres_equivalent: "LIMIT/OFFSET or ROW_NUMBER() OVER()"
+      rewrite_strategy: "Rewrite queries to use standard pagination"
+      complexity: "medium"
+
+  - id: "ORACLE_CONNECT_BY"
+    category: "sql_dialect"
+    severity: "high"
+    title: "Hierarchical queries (CONNECT BY)"
+    pattern: "(?i)\\bCONNECT\\s+BY\\b"
+    description: "CONNECT BY is Oracle hierarchical query syntax"
+    mapping:
+      postgres_equivalent: "Recursive CTEs (WITH RECURSIVE)"
+      rewrite_strategy: "Rewrite using WITH RECURSIVE common table expressions"
+      complexity: "high"
+
+  - id: "ORACLE_NVL"
+    category: "sql_dialect"
+    severity: "low"
+    title: "NVL function"
+    pattern: "\\bNVL\\s*\\("
+    description: "NVL is Oracle-specific NULL handling"
+    mapping:
+      postgres_equivalent: "COALESCE() or NULLIF()"
+      rewrite_strategy: "Replace NVL(a,b) with COALESCE(a,b)"
+      complexity: "low"
+
+  - id: "ORACLE_DECODE"
+    category: "sql_dialect"
+    severity: "medium"
+    title: "DECODE function"
+    pattern: "\\bDECODE\\s*\\("
+    description: "DECODE is Oracle-specific conditional logic"
+    mapping:
+      postgres_equivalent: "CASE WHEN expressions"
+      rewrite_strategy: "Rewrite as CASE WHEN ... END"
+      complexity: "medium"
+
+  - id: "ORACLE_DUAL"
+    category: "sql_dialect"
+    severity: "low"
+    title: "DUAL table usage"
+    pattern: "(?i)\\bFROM\\s+DUAL\\b"
+    description: "DUAL is Oracle dummy table"
+    mapping:
+      postgres_equivalent: "No FROM clause needed"
+      rewrite_strategy: "Remove FROM DUAL entirely"
+      complexity: "low"
+
+  - id: "ORACLE_SYSDATE"
+    category: "sql_dialect"
+    severity: "low"
+    title: "SYSDATE function"
+    pattern: "\\bSYSDATE\\b"
+    description: "SYSDATE is Oracle current timestamp"
+    mapping:
+      postgres_equivalent: "CURRENT_TIMESTAMP or now()"
+      rewrite_strategy: "Replace with CURRENT_TIMESTAMP"
+      complexity: "low"
+
+  - id: "ORACLE_SEQUENCE_NEXTVAL"
+    category: "schema"
+    severity: "low"
+    title: "Sequence NEXTVAL syntax"
+    pattern: "\\w+\\.NEXTVAL"
+    description: "Oracle sequence.NEXTVAL syntax differs"
+    mapping:
+      postgres_equivalent: "nextval('sequence_name')"
+      rewrite_strategy: "Use nextval() function or IDENTITY columns"
+      complexity: "low"
+
+  - id: "ORACLE_HINTS"
+    category: "sql_dialect"
+    severity: "medium"
+    title: "Oracle optimizer hints"
+    pattern: "/\\*\\+.*\\*/"
+    description: "Oracle optimizer hints - review query plans"
+    mapping:
+      postgres_equivalent: "PostgreSQL has different hint syntax or use pg_hint_plan"
+      rewrite_strategy: "Remove hints and tune with indexes/statistics"
+      complexity: "medium"
+
+  - id: "ORACLE_PLSQL_PACKAGE"
+    category: "procedures"
+    severity: "critical"
+    title: "PL/SQL packages"
+    pattern: "(?i)\\b(CREATE\\s+(OR\\s+REPLACE\\s+)?PACKAGE|PACKAGE\\s+BODY)\\b"
+    description: "Oracle PL/SQL packages - significant refactoring needed"
+    mapping:
+      postgres_equivalent: "PL/pgSQL functions and schemas"
+      rewrite_strategy: "Rewrite as separate functions, use schemas for organization"
+      complexity: "critical"
+
+  - id: "ORACLE_DBMS_PACKAGE"
+    category: "procedures"
+    severity: "high"
+    title: "Oracle DBMS_ package usage"
+    pattern: "\\bDBMS_\\w+"
+    description: "Oracle built-in DBMS packages - find PostgreSQL equivalents"
+    mapping:
+      postgres_equivalent: "Varies by package - pg_catalog functions or extensions"
+      rewrite_strategy: "Case-by-case replacement"
+      complexity: "high"
+
+  - id: "ORACLE_AUTONOMOUS_TRANSACTION"
+    category: "transactions"
+    severity: "critical"
+    title: "Autonomous transactions"
+    pattern: "(?i)PRAGMA\\s+AUTONOMOUS_TRANSACTION"
+    description: "Autonomous transactions - not directly supported in PostgreSQL"
+    mapping:
+      postgres_equivalent: "dblink for cross-transaction operations"
+      rewrite_strategy: "Refactor or use dblink extension"
+      complexity: "critical"
+
+  - id: "ORACLE_MERGE"
+    category: "sql_dialect"
+    severity: "medium"
+    title: "MERGE statement"
+    pattern: "(?i)\\bMERGE\\s+INTO\\b"
+    description: "Oracle MERGE statement"
+    mapping:
+      postgres_equivalent: "INSERT ... ON CONFLICT (PostgreSQL 9.5+)"
+      rewrite_strategy: "Rewrite as INSERT ON CONFLICT or separate INSERT/UPDATE"
+      complexity: "medium"
+
+# SQL Server-specific migration rules
+sqlserver_rules:
+  # Drivers & Connectivity
+  - id: "SQLSERVER_DRIVER"
+    category: "drivers"
+    severity: "low"
+    title: "SQL Server driver usage"
+    pattern: "(?i)(import|require|using).*(mssql|tedious|pyodbc|pymssql)"
+    description: "SQL Server-specific driver - replace with PostgreSQL driver"
+    mapping:
+      postgres_equivalent: "pg, psycopg2, or JDBC PostgreSQL driver"
+      rewrite_strategy: "Replace driver + connection strings"
+      complexity: "low"
+
+  # SQL Dialect Features
+  - id: "SQLSERVER_NOLOCK"
+    category: "sql_dialect"
+    severity: "medium"
+    title: "WITH (NOLOCK) hint"
+    pattern: "(?i)WITH\\s*\\(\\s*NOLOCK\\s*\\)"
+    description: "NOLOCK hint allows dirty reads - review isolation requirements"
+    mapping:
+      postgres_equivalent: "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED or remove"
+      rewrite_strategy: "Evaluate if dirty reads needed, use proper isolation level"
+      complexity: "medium"
+
+  - id: "SQLSERVER_TOP"
+    category: "sql_dialect"
+    severity: "low"
+    title: "TOP clause"
+    pattern: "(?i)\\bSELECT\\s+TOP\\s+\\d+"
+    description: "TOP is SQL Server pagination syntax"
+    mapping:
+      postgres_equivalent: "LIMIT clause"
+      rewrite_strategy: "Replace SELECT TOP N with LIMIT N"
+      complexity: "low"
+
+  - id: "SQLSERVER_IDENTITY"
+    category: "schema"
+    severity: "low"
+    title: "IDENTITY columns"
+    pattern: "(?i)\\bIDENTITY\\s*\\("
+    description: "SQL Server IDENTITY auto-increment"
+    mapping:
+      postgres_equivalent: "SERIAL or IDENTITY (PostgreSQL 10+)"
+      rewrite_strategy: "Use SERIAL or GENERATED ALWAYS AS IDENTITY"
+      complexity: "low"
+
+  - id: "SQLSERVER_GO"
+    category: "schema"
+    severity: "low"
+    title: "GO batch separator"
+    pattern: "(?i)^\\s*GO\\s*$"
+    description: "GO is SQL Server batch separator"
+    mapping:
+      postgres_equivalent: "Not needed in PostgreSQL"
+      rewrite_strategy: "Remove GO statements or replace with transaction boundaries"
+      complexity: "low"
+
+  - id: "SQLSERVER_SQUARE_BRACKETS"
+    category: "sql_dialect"
+    severity: "low"
+    title: "Square bracket identifiers"
+    pattern: "\\[\\w+\\]"
+    description: "SQL Server uses [brackets] for identifiers"
+    mapping:
+      postgres_equivalent: "Double quotes for identifiers"
+      rewrite_strategy: 'Replace [identifier] with "identifier"'
+      complexity: "low"
+
+  - id: "SQLSERVER_STORED_PROC"
+    category: "procedures"
+    severity: "high"
+    title: "T-SQL stored procedures"
+    pattern: "(?i)\\bCREATE\\s+(OR\\s+ALTER\\s+)?PROC(EDURE)?\\b"
+    description: "SQL Server T-SQL procedures - rewrite in PL/pgSQL"
+    mapping:
+      postgres_equivalent: "PL/pgSQL functions"
+      rewrite_strategy: "Rewrite T-SQL as PL/pgSQL, handle syntax differences"
+      complexity: "high"
+
+  - id: "SQLSERVER_SP_EXECUTESQL"
+    category: "procedures"
+    severity: "medium"
+    title: "sp_executesql dynamic SQL"
+    pattern: "(?i)\\bsp_executesql\\b"
+    description: "SQL Server dynamic SQL procedure"
+    mapping:
+      postgres_equivalent: "EXECUTE with USING clause"
+      rewrite_strategy: "Rewrite as EXECUTE with proper parameterization"
+      complexity: "medium"
+
+  - id: "SQLSERVER_TEMP_TABLE"
+    category: "sql_dialect"
+    severity: "low"
+    title: "Temporary table syntax"
+    pattern: "#\\w+"
+    description: "SQL Server #temp table syntax"
+    mapping:
+      postgres_equivalent: "CREATE TEMP TABLE or use same syntax"
+      rewrite_strategy: "PostgreSQL supports CREATE TEMP TABLE"
+      complexity: "low"
+
+  - id: "SQLSERVER_TRY_CATCH"
+    category: "procedures"
+    severity: "medium"
+    title: "TRY...CATCH blocks"
+    pattern: "(?i)\\b(BEGIN\\s+TRY|BEGIN\\s+CATCH)\\b"
+    description: "SQL Server exception handling"
+    mapping:
+      postgres_equivalent: "BEGIN...EXCEPTION blocks"
+      rewrite_strategy: "Rewrite as PL/pgSQL EXCEPTION blocks"
+      complexity: "medium"
+
+  - id: "SQLSERVER_OUTPUT_PARAM"
+    category: "procedures"
+    severity: "medium"
+    title: "OUTPUT parameters"
+    pattern: "(?i)\\bOUTPUT\\b"
+    description: "SQL Server OUTPUT parameters in stored procedures"
+    mapping:
+      postgres_equivalent: "OUT or INOUT parameters"
+      rewrite_strategy: "Use OUT parameters or return composite types"
+      complexity: "medium"
+
+# MongoDB-specific migration rules
+mongodb_rules:
+  # Drivers & Connectivity
+  - id: "MONGODB_DRIVER"
+    category: "drivers"
+    severity: "low"
+    title: "MongoDB driver usage"
+    pattern: "(?i)(import|require|using).*(mongodb|mongoose|pymongo)"
+    description: "MongoDB driver - need to design relational schema"
+    mapping:
+      postgres_equivalent: "pg, psycopg2, or JDBC PostgreSQL driver"
+      rewrite_strategy: "Design relational schema + replace driver"
+      complexity: "medium"
+
+  # NoSQL Patterns
+  - id: "MONGODB_AGGREGATION"
+    category: "nosql_patterns"
+    severity: "critical"
+    title: "MongoDB aggregation pipeline"
+    pattern: "\\$match|\\$group|\\$lookup|\\$unwind|\\$project"
+    description: "MongoDB aggregation pipeline - translate to SQL JOINs and GROUP BY"
+    mapping:
+      postgres_equivalent: "SQL SELECT with JOINs and GROUP BY"
+      rewrite_strategy: "Rewrite pipeline stages as SQL operations"
+      complexity: "critical"
+
+  - id: "MONGODB_EMBEDDED_DOCS"
+    category: "nosql_patterns"
+    severity: "high"
+    title: "Embedded documents pattern"
+    pattern: "(insertOne|insertMany|updateOne|updateMany).*\\{.*\\{.*\\}"
+    description: "Embedded documents - need to normalize into related tables"
+    mapping:
+      postgres_equivalent: "Normalized tables with foreign keys or JSONB columns"
+      rewrite_strategy: "Normalize to separate tables or use JSONB for flexibility"
+      complexity: "high"
+
+  - id: "MONGODB_ARRAY_FIELDS"
+    category: "nosql_patterns"
+    severity: "medium"
+    title: "Array field usage"
+    pattern: "\\$push|\\$pull|\\$addToSet|\\$pop"
+    description: "MongoDB array operators - consider array or junction table"
+    mapping:
+      postgres_equivalent: "PostgreSQL arrays or junction tables"
+      rewrite_strategy: "Use array columns or normalize to junction table"
+      complexity: "medium"
+
+  - id: "MONGODB_TEXT_SEARCH"
+    category: "nosql_patterns"
+    severity: "medium"
+    title: "MongoDB text search"
+    pattern: "\\$text"
+    description: "MongoDB text search"
+    mapping:
+      postgres_equivalent: "PostgreSQL full-text search (to_tsvector)"
+      rewrite_strategy: "Implement using PostgreSQL FTS"
+      complexity: "medium"
+
+  - id: "MONGODB_GEO_QUERIES"
+    category: "nosql_patterns"
+    severity: "high"
+    title: "Geospatial queries"
+    pattern: "\\$near|\\$geoWithin|\\$geoIntersects"
+    description: "MongoDB geospatial queries"
+    mapping:
+      postgres_equivalent: "PostGIS extension"
+      rewrite_strategy: "Use PostGIS for geospatial operations"
+      complexity: "high"
+
+  - id: "MONGODB_SCHEMA_LESS"
+    category: "nosql_patterns"
+    severity: "critical"
+    title: "Schema-less design"
+    pattern: "(?i)(collection|insertOne|insertMany)"
+    description: "MongoDB schema-less approach - define explicit schema"
+    mapping:
+      postgres_equivalent: "Defined tables with schemas or JSONB"
+      rewrite_strategy: "Analyze data patterns and define schema, use JSONB for variable data"
+      complexity: "critical"
+
+# MySQL-specific migration rules
+mysql_rules:
+  - id: "MYSQL_DRIVER"
+    category: "drivers"
+    severity: "low"
+    title: "MySQL driver usage"
+    pattern: "(?i)(import|require|using).*(mysql|mysql2|pymysql)"
+    description: "MySQL driver - replace with PostgreSQL driver"
+    mapping:
+      postgres_equivalent: "pg, psycopg2, or JDBC PostgreSQL driver"
+      rewrite_strategy: "Replace driver + connection strings"
+      complexity: "low"
+
+  - id: "MYSQL_LIMIT_OFFSET"
+    category: "sql_dialect"
+    severity: "low"
+    title: "LIMIT with OFFSET"
+    pattern: "(?i)\\bLIMIT\\s+\\d+\\s*,\\s*\\d+"
+    description: "MySQL LIMIT offset,count syntax"
+    mapping:
+      postgres_equivalent: "LIMIT count OFFSET offset"
+      rewrite_strategy: "Rewrite as LIMIT count OFFSET offset"
+      complexity: "low"
+
+  - id: "MYSQL_AUTO_INCREMENT"
+    category: "schema"
+    severity: "low"
+    title: "AUTO_INCREMENT columns"
+    pattern: "(?i)\\bAUTO_INCREMENT\\b"
+    description: "MySQL AUTO_INCREMENT"
+    mapping:
+      postgres_equivalent: "SERIAL or IDENTITY"
+      rewrite_strategy: "Use SERIAL or GENERATED ALWAYS AS IDENTITY"
+      complexity: "low"
+
+  - id: "MYSQL_BACKTICKS"
+    category: "sql_dialect"
+    severity: "low"
+    title: "Backtick identifiers"
+    pattern: "`\\w+`"
+    description: "MySQL uses backticks for identifiers"
+    mapping:
+      postgres_equivalent: "Double quotes for identifiers"
+      rewrite_strategy: 'Replace `identifier` with "identifier"'
+      complexity: "low"

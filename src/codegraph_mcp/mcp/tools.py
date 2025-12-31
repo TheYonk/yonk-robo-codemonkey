@@ -23,6 +23,7 @@ from codegraph_mcp.reports.generator import generate_comprehensive_review
 from codegraph_mcp.reports.feature_context import get_feature_context
 from codegraph_mcp.reports.feature_index_builder import build_feature_index as _build_feature_index
 from codegraph_mcp.db_introspect.report_generator import generate_db_architecture_report
+from codegraph_mcp.migration.assessor import assess_migration
 from codegraph_mcp.config import Settings
 
 TOOL_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {}
@@ -1406,3 +1407,429 @@ async def db_feature_context(
 
     finally:
         await conn.close()
+
+
+@tool("migration_assess")
+async def migration_assess(
+    repo: str,
+    source_db: str = "auto",
+    target_db: str = "postgresql",
+    connect: dict[str, Any] | None = None,
+    regenerate: bool = False,
+    top_k_evidence: int = 50
+) -> dict[str, Any]:
+    """Assess migration complexity from source DB to target DB.
+
+    Analyzes code, SQL files, and optionally live database to estimate
+    migration effort and identify key challenges.
+
+    Args:
+        repo: Repository name or UUID
+        source_db: Source database ('auto', 'oracle', 'sqlserver', 'mongodb', 'mysql')
+        target_db: Target database (default 'postgresql')
+        connect: Optional live DB connection config
+        regenerate: Force regeneration even if cached
+        top_k_evidence: Maximum evidence items per finding
+
+    Returns:
+        Migration assessment with score, findings, and reports
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo name/ID
+        try:
+            import uuid
+            uuid.UUID(repo)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo_id = repo
+        else:
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1", repo
+            )
+
+        if not repo_id:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": "Repository does not exist in database"
+            }
+
+        # Perform assessment
+        result = await assess_migration(
+            repo_id=repo_id,
+            source_db=source_db,
+            target_db=target_db,
+            database_url=settings.database_url,
+            connect=connect,
+            regenerate=regenerate,
+            top_k_evidence=top_k_evidence
+        )
+
+        return {
+            "score": result.score,
+            "tier": result.tier,
+            "summary": result.summary,
+            "source_db": result.source_db,
+            "target_db": result.target_db,
+            "mode": result.mode,
+            "total_findings": len(result.findings),
+            "top_blockers": result.report_json.get("top_blockers", [])[:5],
+            "report_markdown": result.report_markdown,
+            "report_json": result.report_json,
+            "cached": result.cached,
+            "why": {
+                "cached": result.cached,
+                "content_hash": result.content_hash,
+                "approach": "Analyzed code patterns, SQL dialect usage, and schema artifacts"
+            }
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("migration_inventory")
+async def migration_inventory(
+    repo: str,
+    source_db: str = "auto"
+) -> dict[str, Any]:
+    """Get raw migration findings grouped by category.
+
+    Args:
+        repo: Repository name or UUID
+        source_db: Source database type
+
+    Returns:
+        Findings grouped by category with evidence
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo
+        try:
+            import uuid
+            uuid.UUID(repo)
+            repo_id = repo
+        except (ValueError, AttributeError):
+            repo_id = await conn.fetchval("SELECT id FROM repo WHERE name = $1", repo)
+
+        if not repo_id:
+            return {"error": f"Repository not found: {repo}"}
+
+        # Get latest assessment
+        assessment = await conn.fetchrow(
+            """
+            SELECT id, source_db, score, tier
+            FROM migration_assessment
+            WHERE repo_id = $1
+              AND (source_db = $2 OR $2 = 'auto')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            repo_id, source_db
+        )
+
+        if not assessment:
+            return {
+                "error": "No assessment found",
+                "why": "Run migration_assess first"
+            }
+
+        # Get findings grouped by category
+        findings = await conn.fetch(
+            """
+            SELECT category, severity, title, description, evidence, rule_id
+            FROM migration_finding
+            WHERE assessment_id = $1
+            ORDER BY
+                CASE severity
+                    WHEN 'critical' THEN 0
+                    WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 3
+                    ELSE 4
+                END,
+                category
+            """,
+            assessment['id']
+        )
+
+        # Group by category
+        by_category = {}
+        for finding in findings:
+            cat = finding['category']
+            if cat not in by_category:
+                by_category[cat] = []
+
+            by_category[cat].append({
+                "title": finding['title'],
+                "severity": finding['severity'],
+                "description": finding['description'],
+                "evidence_count": len(finding['evidence'] or []),
+                "sample_evidence": (finding['evidence'] or [])[:2],
+                "rule_id": finding['rule_id']
+            })
+
+        return {
+            "source_db": assessment['source_db'],
+            "score": assessment['score'],
+            "tier": assessment['tier'],
+            "findings_by_category": by_category,
+            "total_categories": len(by_category),
+            "total_findings": len(findings),
+            "why": "Raw migration findings grouped by category"
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("migration_risks")
+async def migration_risks(
+    repo: str,
+    min_severity: str = "medium"
+) -> dict[str, Any]:
+    """Get medium/high/critical migration risks with impacted files.
+
+    Args:
+        repo: Repository name or UUID
+        min_severity: Minimum severity to include ('low', 'medium', 'high', 'critical')
+
+    Returns:
+        High-risk findings with file/symbol details
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo
+        try:
+            import uuid
+            uuid.UUID(repo)
+            repo_id = repo
+        except (ValueError, AttributeError):
+            repo_id = await conn.fetchval("SELECT id FROM repo WHERE name = $1", repo)
+
+        if not repo_id:
+            return {"error": f"Repository not found: {repo}"}
+
+        # Get latest assessment
+        assessment = await conn.fetchrow(
+            """
+            SELECT id FROM migration_assessment
+            WHERE repo_id = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            repo_id
+        )
+
+        if not assessment:
+            return {"error": "No assessment found"}
+
+        # Severity order
+        severity_levels = {'info': 0, 'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
+        min_level = severity_levels.get(min_severity, 2)
+
+        # Get high-risk findings
+        findings = await conn.fetch(
+            """
+            SELECT category, severity, title, description, evidence, mapping
+            FROM migration_finding
+            WHERE assessment_id = $1
+            ORDER BY
+                CASE severity
+                    WHEN 'critical' THEN 0
+                    WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 3
+                    ELSE 4
+                END
+            """,
+            assessment['id']
+        )
+
+        risks = []
+        for finding in findings:
+            if severity_levels.get(finding['severity'], 0) >= min_level:
+                evidence = finding['evidence'] or []
+
+                # Extract impacted files
+                impacted_files = list(set([e.get('path') for e in evidence if e.get('path')]))
+
+                risks.append({
+                    "title": finding['title'],
+                    "severity": finding['severity'],
+                    "category": finding['category'],
+                    "description": finding['description'],
+                    "impacted_files": impacted_files[:10],
+                    "total_occurrences": len(evidence),
+                    "postgres_equivalent": finding['mapping'].get('postgres_equivalent'),
+                    "complexity": finding['mapping'].get('complexity'),
+                    "sample_locations": evidence[:3]
+                })
+
+        return {
+            "total_risks": len(risks),
+            "min_severity": min_severity,
+            "risks": risks,
+            "why": f"Migration risks with severity >= {min_severity}"
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("migration_plan_outline")
+async def migration_plan_outline(
+    repo: str
+) -> dict[str, Any]:
+    """Get phased migration plan outline with work packages.
+
+    Args:
+        repo: Repository name or UUID
+
+    Returns:
+        Migration plan with phases and work packages
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo
+        try:
+            import uuid
+            uuid.UUID(repo)
+            repo_id = repo
+        except (ValueError, AttributeError):
+            repo_id = await conn.fetchval("SELECT id FROM repo WHERE name = $1", repo)
+
+        if not repo_id:
+            return {"error": f"Repository not found: {repo}"}
+
+        # Get latest assessment
+        assessment = await conn.fetchrow(
+            """
+            SELECT score, tier, report_json
+            FROM migration_assessment
+            WHERE repo_id = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            repo_id
+        )
+
+        if not assessment:
+            return {"error": "No assessment found"}
+
+        report_json = assessment['report_json']
+
+        # Generate plan outline based on tier and findings
+        phases = []
+
+        # Phase 1: Preparation
+        phases.append({
+            "phase": 1,
+            "name": "Preparation & Planning",
+            "duration_estimate": "2-4 weeks",
+            "tasks": [
+                "Set up PostgreSQL test environment",
+                "Install necessary tools and extensions",
+                "Create data migration scripts",
+                "Plan rollback strategy",
+                "Identify critical path items"
+            ]
+        })
+
+        # Phase 2: Schema Migration
+        phases.append({
+            "phase": 2,
+            "name": "Schema Migration",
+            "duration_estimate": "1-3 weeks",
+            "tasks": [
+                "Convert DDL to PostgreSQL syntax",
+                "Migrate sequences and constraints",
+                "Set up indexes",
+                "Validate schema integrity",
+                "Test data migration"
+            ]
+        })
+
+        # Phase 3: Code Changes
+        by_category = report_json.get('findings_by_category', {})
+        code_duration = "2-6 weeks" if assessment['tier'] in ['low', 'medium'] else "6-12 weeks"
+
+        phases.append({
+            "phase": 3,
+            "name": "Application Code Migration",
+            "duration_estimate": code_duration,
+            "tasks": [
+                f"Update drivers and connection strings ({by_category.get('drivers', 0)} changes)",
+                f"Refactor SQL dialect usage ({by_category.get('sql_dialect', 0)} changes)",
+                f"Rewrite stored procedures ({by_category.get('procedures', 0)} procedures)",
+                "Update ORM configurations",
+                "Fix transaction handling"
+            ]
+        })
+
+        # Phase 4: Testing
+        phases.append({
+            "phase": 4,
+            "name": "Testing & Validation",
+            "duration_estimate": "2-4 weeks",
+            "tasks": [
+                "Unit test updates",
+                "Integration testing",
+                "Performance testing",
+                "Data integrity validation",
+                "User acceptance testing"
+            ]
+        })
+
+        # Phase 5: Deployment
+        deployment_approach = report_json.get('migration_approaches', [{}])[0].get('name', 'Phased')
+
+        phases.append({
+            "phase": 5,
+            "name": "Deployment",
+            "duration_estimate": "1-2 weeks",
+            "approach": deployment_approach,
+            "tasks": [
+                "Final data migration",
+                "Switch over to PostgreSQL",
+                "Monitor for issues",
+                "Rollback plan ready",
+                "Performance tuning"
+            ]
+        })
+
+        return {
+            "score": assessment['score'],
+            "tier": assessment['tier'],
+            "total_phases": len(phases),
+            "estimated_timeline": _estimate_timeline(assessment['tier']),
+            "phases": phases,
+            "recommended_approach": deployment_approach,
+            "next_steps": report_json.get('next_steps', []),
+            "why": "Migration plan outline based on complexity assessment"
+        }
+
+    finally:
+        await conn.close()
+
+
+def _estimate_timeline(tier: str) -> str:
+    """Estimate overall timeline based on tier."""
+    timelines = {
+        "low": "2-3 months",
+        "medium": "3-6 months",
+        "high": "6-12 months",
+        "extreme": "12+ months"
+    }
+    return timelines.get(tier, "6-12 months")
