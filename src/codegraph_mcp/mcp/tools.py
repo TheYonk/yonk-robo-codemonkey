@@ -13,6 +13,12 @@ from codegraph_mcp.retrieval.graph_traversal import (
 )
 from codegraph_mcp.retrieval.symbol_context import get_symbol_context as _get_symbol_context
 from codegraph_mcp.tagging.rules import seed_starter_tags, get_entity_tags
+from codegraph_mcp.summaries.generator import (
+    generate_file_summary as _generate_file_summary,
+    generate_symbol_summary as _generate_symbol_summary,
+    generate_module_summary as _generate_module_summary
+)
+from codegraph_mcp.indexer.doc_ingester import store_summary_as_document
 from codegraph_mcp.config import Settings
 
 TOOL_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {}
@@ -356,19 +362,19 @@ async def file_summary(
 
     Args:
         file_id: File UUID
-        generate: Whether to generate if not exists (Phase 5 feature)
+        generate: Whether to generate if not exists
 
     Returns:
-        File summary or indication that generation is not yet implemented
+        File summary with metadata
     """
     settings = Settings()
 
     conn = await asyncpg.connect(dsn=settings.database_url)
     try:
-        # Check if summary exists
+        # Check if summary exists and file hasn't changed
         row = await conn.fetchrow(
             """
-            SELECT fs.summary, f.path
+            SELECT fs.summary, fs.updated_at, f.path, f.updated_at as file_updated_at, f.repo_id
             FROM file_summary fs
             JOIN file f ON f.id = fs.file_id
             WHERE fs.file_id = $1
@@ -376,7 +382,12 @@ async def file_summary(
             file_id
         )
 
-        if row:
+        # Check if file changed since summary was generated
+        needs_regeneration = False
+        if row and row["file_updated_at"] > row["updated_at"]:
+            needs_regeneration = True
+
+        if row and not needs_regeneration:
             return {
                 "file_id": file_id,
                 "path": row["path"],
@@ -384,16 +395,60 @@ async def file_summary(
                 "why": "Existing file summary retrieved from database"
             }
 
-        # If not exists and generate=True, return placeholder
-        if generate:
-            return {
-                "error": "Summary generation not yet implemented (Phase 5 feature)",
-                "why": "File summaries will be generated using LLM in Phase 5"
-            }
+        # Generate if requested or if needs regeneration
+        if generate or needs_regeneration:
+            result = await _generate_file_summary(
+                file_id=file_id,
+                database_url=settings.database_url,
+                llm_provider=settings.embeddings_provider,  # Reuse embeddings provider setting
+                llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
+                llm_base_url=settings.embeddings_base_url
+            )
+
+            if result.success:
+                # Store summary in database
+                await conn.execute(
+                    """
+                    INSERT INTO file_summary (file_id, summary)
+                    VALUES ($1, $2)
+                    ON CONFLICT (file_id)
+                    DO UPDATE SET summary = EXCLUDED.summary, updated_at = now()
+                    """,
+                    file_id, result.summary
+                )
+
+                # Get repo_id and store as document
+                if row:
+                    repo_id = row["repo_id"]
+                else:
+                    repo_row = await conn.fetchrow(
+                        "SELECT repo_id FROM file WHERE id = $1", file_id
+                    )
+                    repo_id = repo_row["repo_id"] if repo_row else None
+
+                if repo_id:
+                    await store_summary_as_document(
+                        repo_id=repo_id,
+                        summary_type="file",
+                        entity_id=file_id,
+                        summary_text=result.summary,
+                        database_url=settings.database_url
+                    )
+
+                return {
+                    "file_id": file_id,
+                    "summary": result.summary,
+                    "why": "File summary generated using LLM and stored in database"
+                }
+            else:
+                return {
+                    "error": f"Failed to generate summary: {result.error}",
+                    "why": "LLM generation failed or returned empty response"
+                }
 
         return {
             "error": "No summary found for this file",
-            "why": "Summary has not been generated yet"
+            "why": "Summary has not been generated yet. Set generate=true to create one."
         }
 
     finally:
@@ -409,10 +464,10 @@ async def symbol_summary(
 
     Args:
         symbol_id: Symbol UUID
-        generate: Whether to generate if not exists (Phase 5 feature)
+        generate: Whether to generate if not exists
 
     Returns:
-        Symbol summary or indication that generation is not yet implemented
+        Symbol summary with metadata
     """
     settings = Settings()
 
@@ -421,7 +476,7 @@ async def symbol_summary(
         # Check if summary exists
         row = await conn.fetchrow(
             """
-            SELECT ss.summary, s.fqn, s.name
+            SELECT ss.summary, s.fqn, s.name, s.repo_id
             FROM symbol_summary ss
             JOIN symbol s ON s.id = ss.symbol_id
             WHERE ss.symbol_id = $1
@@ -438,16 +493,55 @@ async def symbol_summary(
                 "why": "Existing symbol summary retrieved from database"
             }
 
-        # If not exists and generate=True, return placeholder
+        # Generate if requested
         if generate:
-            return {
-                "error": "Summary generation not yet implemented (Phase 5 feature)",
-                "why": "Symbol summaries will be generated using LLM in Phase 5"
-            }
+            result = await _generate_symbol_summary(
+                symbol_id=symbol_id,
+                database_url=settings.database_url,
+                llm_provider=settings.embeddings_provider,
+                llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
+                llm_base_url=settings.embeddings_base_url
+            )
+
+            if result.success:
+                # Store summary in database
+                await conn.execute(
+                    """
+                    INSERT INTO symbol_summary (symbol_id, summary)
+                    VALUES ($1, $2)
+                    ON CONFLICT (symbol_id)
+                    DO UPDATE SET summary = EXCLUDED.summary, updated_at = now()
+                    """,
+                    symbol_id, result.summary
+                )
+
+                # Get repo_id and store as document
+                repo_row = await conn.fetchrow(
+                    "SELECT repo_id FROM symbol WHERE id = $1", symbol_id
+                )
+                if repo_row:
+                    await store_summary_as_document(
+                        repo_id=repo_row["repo_id"],
+                        summary_type="symbol",
+                        entity_id=symbol_id,
+                        summary_text=result.summary,
+                        database_url=settings.database_url
+                    )
+
+                return {
+                    "symbol_id": symbol_id,
+                    "summary": result.summary,
+                    "why": "Symbol summary generated using LLM and stored in database"
+                }
+            else:
+                return {
+                    "error": f"Failed to generate summary: {result.error}",
+                    "why": "LLM generation failed or returned empty response"
+                }
 
         return {
             "error": "No summary found for this symbol",
-            "why": "Summary has not been generated yet"
+            "why": "Summary has not been generated yet. Set generate=true to create one."
         }
 
     finally:
@@ -465,10 +559,10 @@ async def module_summary(
     Args:
         repo_id: Repository UUID
         module_path: Module path (e.g., "src/api")
-        generate: Whether to generate if not exists (Phase 5 feature)
+        generate: Whether to generate if not exists
 
     Returns:
-        Module summary or indication that generation is not yet implemented
+        Module summary with metadata
     """
     settings = Settings()
 
@@ -492,16 +586,53 @@ async def module_summary(
                 "why": "Existing module summary retrieved from database"
             }
 
-        # If not exists and generate=True, return placeholder
+        # Generate if requested
         if generate:
-            return {
-                "error": "Summary generation not yet implemented (Phase 5 feature)",
-                "why": "Module summaries will be generated using LLM in Phase 5"
-            }
+            result = await _generate_module_summary(
+                repo_id=repo_id,
+                module_path=module_path,
+                database_url=settings.database_url,
+                llm_provider=settings.embeddings_provider,
+                llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
+                llm_base_url=settings.embeddings_base_url
+            )
+
+            if result.success:
+                # Store summary in database
+                await conn.execute(
+                    """
+                    INSERT INTO module_summary (repo_id, module_path, summary)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (repo_id, module_path)
+                    DO UPDATE SET summary = EXCLUDED.summary, updated_at = now()
+                    """,
+                    repo_id, module_path, result.summary
+                )
+
+                # Store as document
+                await store_summary_as_document(
+                    repo_id=repo_id,
+                    summary_type="module",
+                    entity_id=module_path,
+                    summary_text=result.summary,
+                    database_url=settings.database_url
+                )
+
+                return {
+                    "repo_id": repo_id,
+                    "module_path": module_path,
+                    "summary": result.summary,
+                    "why": "Module summary generated using LLM and stored in database"
+                }
+            else:
+                return {
+                    "error": f"Failed to generate summary: {result.error}",
+                    "why": "LLM generation failed or returned empty response"
+                }
 
         return {
             "error": "No summary found for this module",
-            "why": "Summary has not been generated yet"
+            "why": "Summary has not been generated yet. Set generate=true to create one."
         }
 
     finally:
