@@ -111,7 +111,7 @@ class CodeGraphDaemon:
 
     async def _heartbeat_loop(self):
         """Periodic heartbeat updater."""
-        interval = self.config.jobs.heartbeat_interval_sec
+        interval = self.config.monitoring.heartbeat_interval
         while self.running:
             try:
                 await self._update_heartbeat()
@@ -134,7 +134,7 @@ class CodeGraphDaemon:
 
         # Start watcher if enabled
         watcher_task = None
-        if self.config.watcher.enabled:
+        if self.config.watching.enabled:
             from yonk_code_robomonkey.daemon.watcher import RepoWatcher
             watcher = RepoWatcher(
                 config=self.config,

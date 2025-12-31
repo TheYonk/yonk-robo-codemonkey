@@ -67,7 +67,20 @@ class EmbeddingsConfig(BaseModel):
 
 class WorkersConfig(BaseModel):
     """Job workers configuration."""
-    count: int = Field(2, ge=1, le=16, description="Number of worker processes")
+    # Global concurrency limits
+    global_max_concurrent: int = Field(4, ge=1, le=32, description="Global max concurrent jobs")
+    max_concurrent_per_repo: int = Field(2, ge=1, le=8, description="Max concurrent jobs per repo")
+
+    # Worker counts by type
+    reindex_workers: int = Field(2, ge=1, le=16, description="Number of reindex workers")
+    embed_workers: int = Field(2, ge=1, le=16, description="Number of embedding workers")
+    docs_workers: int = Field(1, ge=1, le=8, description="Number of docs workers")
+
+    # Polling configuration
+    poll_interval_sec: int = Field(5, ge=1, le=60, description="Job polling interval (seconds)")
+
+    # Legacy fields (for backward compatibility)
+    count: int = Field(2, ge=1, le=16, description="Number of worker processes (deprecated)")
     enabled_job_types: list[str] = Field(
         default_factory=lambda: ["EMBED_REPO", "EMBED_MISSING", "INDEX_REPO", "WATCH_REPO"],
         description="Job types to process"

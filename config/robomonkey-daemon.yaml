@@ -39,10 +39,20 @@ embeddings:
 
 # Job Workers Configuration
 workers:
-  # Number of concurrent job workers
+  # Global concurrency limits
+  global_max_concurrent: 4
+  max_concurrent_per_repo: 2
+
+  # Worker counts by type
+  reindex_workers: 2
+  embed_workers: 2
+  docs_workers: 1
+
+  # Polling interval (seconds)
+  poll_interval_sec: 5
+
+  # Legacy fields (for backward compatibility)
   count: 2
-  
-  # Job types to process
   enabled_job_types:
     - EMBED_REPO
     - EMBED_MISSING
