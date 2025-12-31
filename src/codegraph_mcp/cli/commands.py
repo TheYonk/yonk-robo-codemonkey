@@ -41,6 +41,31 @@ def run() -> None:
     emb.add_argument("--only-missing", action="store_true",
                      help="Only embed chunks without existing embeddings")
 
+    # Watch command
+    watch = sub.add_parser("watch", help="Watch repository for changes")
+    watch.add_argument("--repo", required=True, help="Path to repository")
+    watch.add_argument("--name", required=True, help="Repository name")
+    watch.add_argument("--debounce-ms", type=int, default=500,
+                       help="Debounce delay in milliseconds (default: 500)")
+    watch.add_argument("--generate-summaries", action="store_true",
+                       help="Regenerate summaries after changes")
+
+    # Sync command
+    sync = sub.add_parser("sync", help="Sync repository from git diff")
+    sync.add_argument("--repo", required=True, help="Path to repository")
+    sync_group = sync.add_mutually_exclusive_group(required=True)
+    sync_group.add_argument("--base", help="Base git ref (commit, branch, tag)")
+    sync_group.add_argument("--patch-file", help="Path to patch file")
+    sync.add_argument("--head", default="HEAD", help="Head git ref (default: HEAD)")
+    sync.add_argument("--generate-summaries", action="store_true",
+                      help="Regenerate summaries after changes")
+
+    # Status command
+    status = sub.add_parser("status", help="Show repository index status")
+    status_group = status.add_mutually_exclusive_group(required=True)
+    status_group.add_argument("--repo-id", help="Repository UUID")
+    status_group.add_argument("--name", help="Repository name")
+
     args = parser.parse_args()
 
     try:
@@ -64,6 +89,36 @@ def run() -> None:
                 settings.embeddings_base_url if settings.embeddings_provider == "ollama" else settings.vllm_base_url,
                 settings.vllm_api_key,
                 args.only_missing
+            ))
+        elif args.cmd == "watch":
+            asyncio.run(watch_repo(
+                args.repo,
+                args.name,
+                settings.database_url,
+                getattr(args, "debounce_ms", 500),
+                args.generate_summaries
+            ))
+        elif args.cmd == "sync":
+            if args.patch_file:
+                asyncio.run(sync_from_patch(
+                    args.repo,
+                    args.patch_file,
+                    settings.database_url,
+                    args.generate_summaries
+                ))
+            else:
+                asyncio.run(sync_from_git(
+                    args.repo,
+                    args.base,
+                    args.head,
+                    settings.database_url,
+                    args.generate_summaries
+                ))
+        elif args.cmd == "status":
+            asyncio.run(show_status(
+                settings.database_url,
+                args.repo_id if hasattr(args, "repo_id") else None,
+                args.name if hasattr(args, "name") else None
             ))
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
@@ -241,3 +296,250 @@ async def embed_repo(
 
     except Exception as e:
         raise RuntimeError(f"Embedding failed: {e}")
+
+
+async def watch_repo(
+    repo_path: str,
+    repo_name: str,
+    database_url: str,
+    debounce_ms: int,
+    generate_summaries: bool
+) -> None:
+    """Watch repository for changes and reindex automatically.
+
+    Args:
+        repo_path: Path to repository root
+        repo_name: Repository name
+        database_url: PostgreSQL connection string
+        debounce_ms: Debounce delay in milliseconds
+        generate_summaries: Whether to regenerate summaries
+    """
+    from codegraph_mcp.indexer.watcher import CodeGraphWatcher
+
+    # Ensure repo exists in database
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        repo_id = await conn.fetchval(
+            "SELECT id FROM repo WHERE name = $1",
+            repo_name
+        )
+
+        if not repo_id:
+            # Create repo
+            repo_id = await conn.fetchval(
+                "INSERT INTO repo (name, root_path) VALUES ($1, $2) RETURNING id",
+                repo_name, repo_path
+            )
+            print(f"Created repository: {repo_name} ({repo_id})")
+    finally:
+        await conn.close()
+
+    # Create watcher
+    watcher = CodeGraphWatcher(
+        repo_id=repo_id,
+        repo_root=Path(repo_path),
+        database_url=database_url,
+        debounce_ms=debounce_ms,
+        generate_summaries=generate_summaries
+    )
+
+    # Start watching
+    watcher.start()
+
+    try:
+        # Keep running until interrupted
+        while True:
+            await asyncio.sleep(1)
+    except KeyboardInterrupt:
+        await watcher.stop()
+
+
+async def sync_from_git(
+    repo_path: str,
+    base_ref: str,
+    head_ref: str,
+    database_url: str,
+    generate_summaries: bool
+) -> None:
+    """Sync repository from git diff.
+
+    Args:
+        repo_path: Path to repository root
+        base_ref: Base git ref
+        head_ref: Head git ref
+        database_url: PostgreSQL connection string
+        generate_summaries: Whether to regenerate summaries
+    """
+    from codegraph_mcp.indexer.git_sync import sync_from_git_diff
+
+    # Get repo_id from path
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        repo_id = await conn.fetchval(
+            "SELECT id FROM repo WHERE root_path = $1",
+            str(Path(repo_path).resolve())
+        )
+
+        if not repo_id:
+            raise RuntimeError(
+                f"Repository not found in database. Please index it first:\n"
+                f"  codegraph index --repo {repo_path} --name <name>"
+            )
+    finally:
+        await conn.close()
+
+    print(f"Syncing repository from git diff: {base_ref}...{head_ref}")
+
+    result = await sync_from_git_diff(
+        repo_id=repo_id,
+        repo_root=Path(repo_path),
+        base_ref=base_ref,
+        head_ref=head_ref,
+        database_url=database_url,
+        generate_summaries=generate_summaries
+    )
+
+    if result["success"]:
+        print(f"\n✓ Sync complete")
+        print(f"  Files processed: {result.get('files_processed', 0)}")
+        print(f"  Files deleted: {result.get('files_deleted', 0)}")
+        print(f"  Files upserted: {result.get('files_upserted', 0)}")
+        print(f"  Total symbols: {result.get('total_symbols', 0)}")
+        print(f"  Total chunks: {result.get('total_chunks', 0)}")
+    else:
+        raise RuntimeError(f"Sync failed: {result.get('error', 'Unknown error')}")
+
+
+async def sync_from_patch(
+    repo_path: str,
+    patch_file: str,
+    database_url: str,
+    generate_summaries: bool
+) -> None:
+    """Sync repository from patch file.
+
+    Args:
+        repo_path: Path to repository root
+        patch_file: Path to patch file
+        database_url: PostgreSQL connection string
+        generate_summaries: Whether to regenerate summaries
+    """
+    from codegraph_mcp.indexer.git_sync import sync_from_patch_file
+
+    # Get repo_id from path
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        repo_id = await conn.fetchval(
+            "SELECT id FROM repo WHERE root_path = $1",
+            str(Path(repo_path).resolve())
+        )
+
+        if not repo_id:
+            raise RuntimeError(
+                f"Repository not found in database. Please index it first:\n"
+                f"  codegraph index --repo {repo_path} --name <name>"
+            )
+    finally:
+        await conn.close()
+
+    print(f"Syncing repository from patch file: {patch_file}")
+
+    result = await sync_from_patch_file(
+        repo_id=repo_id,
+        repo_root=Path(repo_path),
+        patch_file=Path(patch_file),
+        database_url=database_url,
+        generate_summaries=generate_summaries
+    )
+
+    if result["success"]:
+        print(f"\n✓ Sync complete")
+        print(f"  Files processed: {result.get('files_processed', 0)}")
+        print(f"  Files deleted: {result.get('files_deleted', 0)}")
+        print(f"  Files upserted: {result.get('files_upserted', 0)}")
+        print(f"  Total symbols: {result.get('total_symbols', 0)}")
+        print(f"  Total chunks: {result.get('total_chunks', 0)}")
+    else:
+        raise RuntimeError(f"Sync failed: {result.get('error', 'Unknown error')}")
+
+
+async def show_status(
+    database_url: str,
+    repo_id: str | None,
+    repo_name: str | None
+) -> None:
+    """Show repository index status.
+
+    Args:
+        database_url: PostgreSQL connection string
+        repo_id: Repository UUID (optional)
+        repo_name: Repository name (optional)
+    """
+    conn = await asyncpg.connect(dsn=database_url)
+
+    try:
+        # Get repo info
+        if repo_id:
+            repo = await conn.fetchrow(
+                "SELECT id, name, root_path FROM repo WHERE id = $1",
+                repo_id
+            )
+        else:
+            repo = await conn.fetchrow(
+                "SELECT id, name, root_path FROM repo WHERE name = $1",
+                repo_name
+            )
+
+        if not repo:
+            raise RuntimeError(f"Repository not found: {repo_id or repo_name}")
+
+        repo_id = repo["id"]
+        print(f"Repository: {repo['name']}")
+        print(f"Path: {repo['root_path']}")
+        print(f"ID: {repo_id}")
+        print()
+
+        # Get index state
+        state = await conn.fetchrow(
+            "SELECT * FROM repo_index_state WHERE repo_id = $1",
+            repo_id
+        )
+
+        if state:
+            print("Index State:")
+            print(f"  Last indexed: {state['last_indexed_at'] or 'Never'}")
+            print(f"  Last commit: {state['last_scan_commit'] or 'N/A'}")
+            print(f"  Last hash: {state['last_scan_hash'] or 'N/A'}")
+            if state['last_error']:
+                print(f"  Last error: {state['last_error']}")
+            print()
+            print(f"Counts:")
+            print(f"  Files: {state['file_count']}")
+            print(f"  Symbols: {state['symbol_count']}")
+            print(f"  Chunks: {state['chunk_count']}")
+            print(f"  Edges: {state['edge_count']}")
+        else:
+            print("Index State: Not initialized")
+            print()
+            # Get counts from actual tables
+            file_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM file WHERE repo_id = $1", repo_id
+            )
+            symbol_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM symbol WHERE repo_id = $1", repo_id
+            )
+            chunk_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM chunk WHERE repo_id = $1", repo_id
+            )
+            edge_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM edge WHERE repo_id = $1", repo_id
+            )
+
+            print(f"Counts (from tables):")
+            print(f"  Files: {file_count}")
+            print(f"  Symbols: {symbol_count}")
+            print(f"  Chunks: {chunk_count}")
+            print(f"  Edges: {edge_count}")
+
+    finally:
+        await conn.close()

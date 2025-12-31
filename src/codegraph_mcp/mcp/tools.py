@@ -767,3 +767,105 @@ async def tag_rules_sync() -> dict[str, Any]:
 
     finally:
         await conn.close()
+
+
+@tool("index_status")
+async def index_status(
+    repo_name_or_id: str
+) -> dict[str, Any]:
+    """Get repository index status and freshness metadata.
+
+    Args:
+        repo_name_or_id: Repository name or UUID
+
+    Returns:
+        Repository index status with counts, timestamps, and freshness info
+    """
+    settings = Settings()
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        # Try to find repo by UUID first, then by name
+        try:
+            # Check if it's a valid UUID format
+            import uuid
+            uuid.UUID(repo_name_or_id)
+            is_uuid = True
+        except (ValueError, AttributeError):
+            is_uuid = False
+
+        if is_uuid:
+            repo = await conn.fetchrow(
+                "SELECT id, name, root_path FROM repo WHERE id = $1",
+                repo_name_or_id
+            )
+        else:
+            repo = await conn.fetchrow(
+                "SELECT id, name, root_path FROM repo WHERE name = $1",
+                repo_name_or_id
+            )
+
+        if not repo:
+            return {
+                "error": f"Repository not found: {repo_name_or_id}",
+                "why": "Repository does not exist in database"
+            }
+
+        repo_id = str(repo["id"])
+        repo_name = repo["name"]
+        repo_path = repo["root_path"]
+
+        # Get index state
+        state = await conn.fetchrow(
+            "SELECT * FROM repo_index_state WHERE repo_id = $1",
+            repo_id
+        )
+
+        # Get actual counts from tables
+        file_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM file WHERE repo_id = $1", repo_id
+        )
+        symbol_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM symbol WHERE repo_id = $1", repo_id
+        )
+        chunk_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM chunk WHERE repo_id = $1", repo_id
+        )
+        edge_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM edge WHERE repo_id = $1", repo_id
+        )
+
+        result = {
+            "repo_id": repo_id,
+            "repo_name": repo_name,
+            "repo_path": repo_path,
+            "counts": {
+                "files": file_count,
+                "symbols": symbol_count,
+                "chunks": chunk_count,
+                "edges": edge_count
+            }
+        }
+
+        if state:
+            result["index_state"] = {
+                "last_indexed_at": str(state["last_indexed_at"]) if state["last_indexed_at"] else None,
+                "last_scan_commit": state["last_scan_commit"],
+                "last_scan_hash": state["last_scan_hash"],
+                "last_error": state["last_error"],
+                "tracked_counts": {
+                    "files": state["file_count"],
+                    "symbols": state["symbol_count"],
+                    "chunks": state["chunk_count"],
+                    "edges": state["edge_count"]
+                }
+            }
+            result["why"] = "Repository index state retrieved from repo_index_state table"
+        else:
+            result["index_state"] = None
+            result["why"] = "Repository indexed but index_state not initialized. Run sync or watch to track freshness."
+
+        return result
+
+    finally:
+        await conn.close()

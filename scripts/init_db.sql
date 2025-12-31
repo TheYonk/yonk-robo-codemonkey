@@ -9,6 +9,19 @@ CREATE TABLE IF NOT EXISTS repo (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS repo_index_state (
+  repo_id UUID PRIMARY KEY REFERENCES repo(id) ON DELETE CASCADE,
+  last_indexed_at TIMESTAMPTZ,
+  last_scan_commit TEXT,
+  last_scan_hash TEXT,
+  last_error TEXT,
+  file_count INT DEFAULT 0,
+  symbol_count INT DEFAULT 0,
+  chunk_count INT DEFAULT 0,
+  edge_count INT DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS file (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,

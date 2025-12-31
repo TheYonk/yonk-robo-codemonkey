@@ -297,5 +297,19 @@ TOOL_SCHEMAS = {
             "properties": {},
             "required": []
         }
+    },
+
+    "index_status": {
+        "description": "Get repository index status and freshness metadata (last indexed time, counts, git commit)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo_name_or_id": {
+                    "type": "string",
+                    "description": "Repository name or UUID"
+                }
+            },
+            "required": ["repo_name_or_id"]
+        }
     }
 }
