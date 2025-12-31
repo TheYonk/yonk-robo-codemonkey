@@ -185,18 +185,19 @@ class CodeGraphDaemon:
         self.shutdown_event.set()
 
 
-async def main_async():
+async def main_async(config_path: Optional[str] = None):
     """Async main entry point."""
     # Load configuration
-    config_path = os.environ.get("CODEGRAPH_CONFIG")
+    if not config_path:
+        config_path = os.environ.get("ROBOMONKEY_CONFIG")
     if not config_path:
         # Default path
-        config_path = Path(__file__).resolve().parents[3] / "config" / "codegraph-daemon.yaml"
+        config_path = Path(__file__).resolve().parents[3] / "config" / "robomonkey-daemon.yaml"
 
     config_path = Path(config_path)
     if not config_path.exists():
         logger.error(f"Configuration file not found: {config_path}")
-        logger.error("Set CODEGRAPH_CONFIG environment variable or create config/codegraph-daemon.yaml")
+        logger.error("Set ROBOMONKEY_CONFIG environment variable or create config/robomonkey-daemon.yaml")
         sys.exit(1)
 
     logger.info(f"Loading configuration from: {config_path}")
@@ -229,10 +230,10 @@ async def main_async():
     await daemon.run()
 
 
-def main():
+def main(config_path: Optional[str] = None):
     """CLI entry point."""
     try:
-        asyncio.run(main_async())
+        asyncio.run(main_async(config_path))
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except Exception as e:

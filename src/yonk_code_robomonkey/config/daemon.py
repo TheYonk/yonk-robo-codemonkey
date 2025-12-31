@@ -14,7 +14,8 @@ class DatabaseConfig(BaseModel):
     """Database configuration."""
     control_dsn: str = Field(..., description="Control schema database URL")
     schema_prefix: str = Field("robomonkey_", description="Schema prefix for repos")
-    
+    pool_size: int = Field(10, ge=1, le=50, description="Connection pool size")
+
     @field_validator("control_dsn")
     @classmethod
     def validate_dsn(cls, v: str) -> str:
@@ -90,6 +91,15 @@ class MonitoringConfig(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field("INFO", description="Log level")
 
 
+class LoggingConfig(BaseModel):
+    """Logging configuration."""
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field("INFO", description="Log level")
+    format: str = Field(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        description="Log format string"
+    )
+
+
 class DevModeConfig(BaseModel):
     """Development mode configuration."""
     enabled: bool = Field(False, description="Enable dev mode")
@@ -99,11 +109,13 @@ class DevModeConfig(BaseModel):
 
 class DaemonConfig(BaseModel):
     """Complete daemon configuration."""
+    daemon_id: str = Field(default_factory=lambda: f"robomonkey-{os.getpid()}", description="Unique daemon ID")
     database: DatabaseConfig
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
     workers: WorkersConfig = Field(default_factory=WorkersConfig)
     watching: WatchingConfig = Field(default_factory=WatchingConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     dev_mode: DevModeConfig = Field(default_factory=DevModeConfig)
     
     @classmethod

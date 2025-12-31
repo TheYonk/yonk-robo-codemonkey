@@ -5,9 +5,12 @@
 database:
   # Control schema DSN (REQUIRED)
   control_dsn: "postgresql://postgres:postgres@localhost:5433/robomonkey"
-  
+
   # Schema prefix for per-repo isolation
   schema_prefix: "robomonkey_"
+
+  # Connection pool size
+  pool_size: 10
 
 # Embeddings Configuration
 embeddings:
@@ -66,12 +69,20 @@ watching:
 monitoring:
   # Heartbeat interval (seconds)
   heartbeat_interval: 30
-  
+
   # Consider daemon dead after this many seconds without heartbeat
   dead_threshold: 120
-  
+
   # Log level: DEBUG, INFO, WARNING, ERROR
   log_level: "INFO"
+
+# Logging Configuration
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 # Development Mode Settings
 dev_mode:
