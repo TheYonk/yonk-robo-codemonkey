@@ -22,14 +22,17 @@ This document provides comprehensive information about all MCP tools available i
 
 ### `list_repos`
 
-**Purpose:** List all indexed code repositories with summaries and statistics.
+**REPOSITORY DISCOVERY & INVENTORY** - RoboMonkey can index multiple codebases simultaneously, each in its own PostgreSQL schema (robomonkey_<repo_name>). When working with multi-repo environments, agents need to know which repositories are available before searching. This tool queries the control schema's repository registry to list all indexed codebases.
 
-**When to use:**
+**CRITICAL: Use this FIRST when:**
 - "What codebases are indexed?"
 - "Which repository should I search?"
 - "I don't know which repo contains X"
-- Starting point for new users
-- Multi-repo environments
+- Starting a new conversation in multi-repo environment
+- You need to see indexing status (files/symbols/chunks, embedding completion %)
+- You want to understand what each codebase does
+
+**Multi-repo environments:** In environments with multiple indexed codebases (e.g., frontend, backend, mobile, microservices), you MUST call this first to discover which repo to search. Don't guess - ASK.
 
 **Parameters:** None
 
@@ -68,13 +71,15 @@ This document provides comprehensive information about all MCP tools available i
 
 ### `suggest_tool`
 
-**Purpose:** Recommend the best MCP tool(s) to use for a given query.
+**META-TOOL: INTELLIGENT TOOL SELECTOR** - RoboMonkey has 31 different tools for code search, symbol analysis, architecture review, database introspection, migration planning, etc. Agents may struggle to select the optimal tool for a given query. This meta-tool analyzes the user's question using keyword matching and intent detection, then recommends which tool(s) to use, why, and in what order.
 
 **When to use:**
-- Agents unsure which tool to use
-- Complex queries needing multiple tools
-- Learning which tools are available
-- Optimizing tool selection
+- Uncertain which tool fits the user's question best
+- Query is complex and might need multiple tools in sequence
+- Learning the tool ecosystem
+- You want to optimize tool selection before executing
+
+**Algorithm:** Matches keywords in the query against each tool's use cases (e.g., "architecture" → comprehensive_review, "what calls this" → callers, "find function" → symbol_lookup). Returns confidence level (high/medium/low), matched keywords, reasoning, alternative tools, and a suggested multi-step workflow.
 
 **Parameters:**
 - `user_query` (required): The user's question or request
@@ -117,14 +122,22 @@ Returns:
 
 ### `universal_search`
 
-**Purpose:** Comprehensive deep search combining multiple strategies with LLM summarization.
+**DEEP MULTI-STRATEGY SEARCH WITH LLM ANALYSIS** - RoboMonkey's most comprehensive search tool. While hybrid_search combines vector+FTS, universal_search runs THREE separate search strategies in parallel: (1) Hybrid search (vector + FTS), (2) Doc search (documentation only), (3) Pure semantic search (vector similarity only). Results from all three are combined, deduplicated, and re-ranked using weighted scoring: 40% hybrid, 30% documentation, 30% semantic. Finally, if deep_mode=true, an LLM (Ollama/vLLM) analyzes the top results and generates a natural language summary answering the query.
 
 **When to use:**
-- "Tell me everything about X"
+- "Tell me everything about X" - need maximum coverage
 - "Comprehensive search for Y"
-- Need maximum search coverage
-- Want LLM-analyzed summary
-- Complex topics requiring multiple perspectives
+- Complex topics requiring multiple perspectives (code + docs + semantic understanding)
+- Exploring unfamiliar code areas
+- You want an LLM to synthesize findings into a coherent answer
+- Single search strategies missed relevant results
+
+**TRADE-OFFS:** Slower than single-strategy searches (runs 3 searches + LLM call), uses more tokens, but provides the most comprehensive results and intelligent summarization. Best for complex questions where speed is less critical than thoroughness.
+
+**Don't use when:**
+- Simple keyword searches → use `hybrid_search` (faster)
+- Known symbol name → use `symbol_lookup`
+- Speed is critical → use targeted tools
 
 **How it works:**
 1. Runs 3 searches in parallel:
@@ -134,7 +147,7 @@ Returns:
 2. Combines and deduplicates results
 3. Re-ranks by weighted score (40% hybrid, 30% docs, 30% semantic)
 4. Extracts top files across all results
-5. Uses LLM to summarize findings (if deep_mode=true)
+5. Uses LLM to summarize findings and answer the query (if deep_mode=true)
 
 **Parameters:**
 - `query` (required): Search query
@@ -192,14 +205,25 @@ Returns:
 
 ### `hybrid_search`
 
-**Purpose:** Primary code search combining vector similarity, full-text search, and tag filtering.
+**CODE INTELLIGENCE SEARCH** - RoboMonkey is a code intelligence system that indexes entire codebases into PostgreSQL with pgvector, extracting symbols (functions/classes), creating semantic chunks, and building multiple search indexes. This tool uses HYBRID SEARCH combining three strategies:
 
-**When to use:**
+1. **Vector similarity search** - Uses embeddings to find semantically related code
+2. **Full-text search (FTS)** - PostgreSQL ts_vector for keyword matching
+3. **Tag-based filtering** - Categorization (auth, database, api, etc.)
+
+Results are merged and re-ranked using weighted scoring: **55% vector, 35% FTS, 10% tag boost**.
+
+**When to use (PRIMARY search tool for code discovery):**
 - "Find code that does X"
 - "Where is authentication implemented?"
 - "Show me examples of database queries"
 - "Find all API endpoints"
-- General code exploration
+- General code exploration by meaning or keywords
+
+**Don't use when:**
+- Need documentation/README content → use `doc_search`
+- Want comprehensive multi-angle coverage → use `universal_search`
+- Already know exact function name → use `symbol_lookup`
 
 **Parameters:**
 - `query` (required): Natural language or keyword search query
@@ -230,13 +254,20 @@ Returns:
 
 ### `doc_search`
 
-**Purpose:** Search documentation files (README, markdown, docs).
+**DOCUMENTATION SEARCH** - RoboMonkey indexes documentation files (README.md, docs/, .md files, .rst, .adoc) separately from code chunks. This tool uses PostgreSQL full-text search (FTS) specifically on documentation content, which often contains higher-level explanations, setup instructions, architecture descriptions, and user guides that aren't in code comments.
 
 **When to use:**
 - "What does the README say about X?"
 - "Find setup instructions"
+- "What are the prerequisites?"
 - "Search API documentation"
-- Finding project documentation
+- "Architecture overview from docs"
+- Looking for project documentation and user guides
+
+**Don't use when:**
+- Searching for code implementations → use `hybrid_search`
+- Need both code and docs → use `universal_search`
+- Documentation wasn't indexed yet
 
 **Parameters:**
 - `query` (required): Search query
@@ -251,13 +282,21 @@ Returns:
 
 ### `symbol_lookup`
 
-**Purpose:** Find a specific symbol (function, class, method) by name.
+**SYMBOL DEFINITION FINDER** - RoboMonkey uses tree-sitter parsers to extract symbols (functions, classes, methods, interfaces, variables) from code during indexing. Each symbol gets a fully-qualified name (FQN) like "UserService.authenticate" or "module.ClassName.method_name". This tool performs exact lookup by FQN or symbol UUID.
 
 **When to use:**
 - "Find the definition of function foo()"
 - "Where is class UserAuth defined?"
 - "Show me the handle_request function"
-- Exact symbol name is known
+- You know the exact function/class name
+- Navigating from callers/callees graph
+
+**Don't use when:**
+- You don't know the exact name → use `hybrid_search` to find it first
+- Want to understand how it's used → use `symbol_context` instead
+- Fuzzy matching needed → use `hybrid_search`
+
+**Search method:** Exact match on FQN in symbol table (fast O(1) lookup)
 
 **Parameters:**
 - `fqn` (optional): Fully qualified name (e.g., "module.Class.method")
@@ -277,13 +316,19 @@ Returns:
 
 ### `symbol_context`
 
-**Purpose:** Get a symbol with its full context (definition + callers + callees + related code).
+**SYMBOL WITH CALL GRAPH CONTEXT** - Extends symbol_lookup by adding call graph traversal. RoboMonkey extracts call relationships (CALLS edges) between symbols during indexing. This tool retrieves a symbol's definition PLUS all its callers (who calls this?) and callees (what does this call?), traversing up to max_depth levels. Uses token budget management to pack related code within limits (default 12k tokens).
 
 **When to use:**
 - "How is this function used?"
-- "What does this function call?"
-- "Show me the context around this class"
-- Understanding symbol relationships
+- "What calls function X?"
+- "What does function Y depend on?"
+- Impact analysis - if I change this, what's affected?
+- Understanding symbol relationships and context
+
+**Don't use when:**
+- Just need definition → `symbol_lookup` is faster
+- Call graph wasn't fully extracted (some languages have better support)
+- Need broader feature understanding → use `feature_context`
 
 **Parameters:**
 - `fqn` or `symbol_id`: Symbol identifier
@@ -303,13 +348,18 @@ Returns:
 
 ### `callers`
 
-**Purpose:** Find all functions/methods that call a given symbol.
+**CALL GRAPH TRAVERSAL: INCOMING EDGES** - RoboMonkey extracts CALLS edges during indexing (e.g., "function A calls function B"). This tool traverses the call graph BACKWARDS from a target symbol to find all callers (who invokes this function?). Traverses up to max_depth levels to find direct callers, callers-of-callers, etc.
 
 **When to use:**
 - "What calls this function?"
 - "Who uses this API?"
 - "Find all usages of this method"
-- Dependency analysis (incoming)
+- Impact analysis - if I change this function, what code is affected?
+- Understanding function's clients
+
+**Don't use when:**
+- Want complete context → use `symbol_context` (gets callers + callees + definition)
+- Call graph incomplete (static analysis has limitations)
 
 **Parameters:**
 - `fqn` or `symbol_id`: Target symbol
@@ -323,13 +373,18 @@ Returns:
 
 ### `callees`
 
-**Purpose:** Find all functions/methods called by a given symbol.
+**CALL GRAPH TRAVERSAL: OUTGOING EDGES** - Inverse of callers tool. Traverses call graph FORWARD from a target symbol to find all callees (what does this function call?). Useful for understanding a function's dependencies and what it relies on.
 
 **When to use:**
 - "What does this function call?"
 - "What dependencies does this have?"
-- "Show me the call tree"
-- Dependency analysis (outgoing)
+- "Show me the call tree from this entry point"
+- Dependency analysis (outgoing edges)
+- Understanding function's implementation without reading full code
+
+**Don't use when:**
+- Want complete context → use `symbol_context`
+- Need to see actual implementation → use `hybrid_search` or `symbol_lookup`
 
 **Parameters:**
 - `fqn` or `symbol_id`: Source symbol
@@ -345,12 +400,22 @@ Returns:
 
 ### `comprehensive_review`
 
-**Purpose:** Generate a comprehensive architecture and code quality report.
+**ARCHITECTURE & CODEBASE ANALYSIS REPORT** - RoboMonkey can generate high-level architecture reports by analyzing the entire codebase structure. This tool examines: (1) Module/package organization, (2) Technology stack detection, (3) Key architectural patterns, (4) Entry points and main components, (5) Data layer structure, (6) API/HTTP endpoints, (7) Auth/security mechanisms, (8) Observability/logging, (9) Code quality indicators, (10) Potential risks/technical debt.
 
 **When to use:**
 - "Give me an overview of this codebase"
-- "What's the architecture?"
-- "Code quality assessment"
+- "What's the architecture of this project?"
+- "How is this project structured?"
+- "What technologies are used?"
+- New to a repo and need high-level overview
+- Before diving into specific features
+
+**Don't use when:**
+- Searching for specific code → use `hybrid_search`
+- Understanding one feature → use `feature_context`
+- Need implementation details → use search tools
+
+**Analysis method:** Analyzes file structure, imports, common patterns, module summaries, detects frameworks/libraries, identifies architectural layers. Results are often cached due to analysis cost.
 - Initial codebase exploration
 - Technical documentation
 
@@ -371,13 +436,20 @@ Returns:
 
 ### `feature_context`
 
-**Purpose:** Understand how a specific feature is implemented across the codebase.
+**FEATURE IMPLEMENTATION DEEP DIVE** - RoboMonkey builds a feature index by analyzing tags, module summaries, and documentation to identify major features/capabilities. This tool performs comprehensive search for a specific feature (e.g., "authentication", "payment processing", "search") across code, docs, and symbols, then packages related files, key functions, data models, and implementation patterns.
 
 **When to use:**
 - "How does the authentication feature work?"
 - "Show me the payment processing implementation"
 - "Explain the search functionality"
-- Understanding cross-cutting features
+- "Where is payment processing implemented?"
+- Understanding cross-cutting concerns that span multiple files
+- Need both code and conceptual understanding of a feature
+
+**Don't use when:**
+- Feature index not built → run `build_feature_index` first
+- Searching for generic code patterns → use `hybrid_search`
+- Need just one function → use `symbol_lookup`
 
 **Parameters:**
 - `feature_name`: Feature to analyze (e.g., "authentication", "payment")
