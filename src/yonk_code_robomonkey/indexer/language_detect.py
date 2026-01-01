@@ -1,12 +1,12 @@
 """Language detection by file extension.
 
-Supports: Python, JavaScript, TypeScript, Go, Java
+Supports: Python, JavaScript, TypeScript, Go, Java, SQL
 """
 from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-Language = Literal["python", "javascript", "typescript", "go", "java", "unknown"]
+Language = Literal["python", "javascript", "typescript", "go", "java", "sql", "unknown"]
 
 # Extension to language mapping
 EXTENSION_MAP: dict[str, Language] = {
@@ -17,6 +17,13 @@ EXTENSION_MAP: dict[str, Language] = {
     ".tsx": "typescript",
     ".go": "go",
     ".java": "java",
+    # SQL and related
+    ".sql": "sql",
+    ".psql": "sql",
+    ".pgsql": "sql",
+    ".plsql": "sql",
+    ".ddl": "sql",
+    ".dml": "sql",
 }
 
 
