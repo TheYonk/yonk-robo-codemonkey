@@ -11,7 +11,7 @@ from .repo_scanner import scan_repo
 from .treesitter.parsers import parse_file
 from .treesitter.extract_symbols import extract_symbols
 from .treesitter.extract_edges import extract_edges
-from .treesitter.chunking import create_chunks
+from .treesitter.chunking import create_chunks, Chunk
 from yonk_code_robomonkey.db.schema_manager import ensure_schema_initialized, schema_context
 
 
@@ -46,7 +46,9 @@ async def index_repository(
             repo_id = await _ensure_repo(conn, repo_name, str(repo_root))
 
             stats = {
-                "files": 0,
+                "files_scanned": 0,
+                "files_indexed": 0,
+                "files_skipped": 0,
                 "symbols": 0,
                 "chunks": 0,
                 "edges": 0,
@@ -55,9 +57,13 @@ async def index_repository(
 
             # Scan and index each file
             for file_path, language in scan_repo(repo_root):
+                stats["files_scanned"] += 1
                 try:
-                    await _index_file(conn, repo_id, file_path, language, repo_root)
-                    stats["files"] += 1
+                    indexed = await _index_file(conn, repo_id, file_path, language, repo_root)
+                    if indexed:
+                        stats["files_indexed"] += 1
+                    else:
+                        stats["files_skipped"] += 1
                 except Exception as e:
                     print(f"Warning: Failed to index {file_path}: {e}")
                     continue
@@ -71,6 +77,26 @@ async def index_repository(
             )
             stats["edges"] = await conn.fetchval(
                 "SELECT COUNT(*) FROM edge WHERE repo_id = $1", repo_id
+            )
+
+            # Get total file count (for repo_index_state)
+            total_files = await conn.fetchval(
+                "SELECT COUNT(*) FROM file WHERE repo_id = $1", repo_id
+            )
+
+            # Update repo_index_state table with current stats
+            await conn.execute(
+                """
+                INSERT INTO repo_index_state (repo_id, last_indexed_at, file_count, symbol_count, chunk_count)
+                VALUES ($1, now(), $2, $3, $4)
+                ON CONFLICT (repo_id)
+                DO UPDATE SET
+                    last_indexed_at = now(),
+                    file_count = EXCLUDED.file_count,
+                    symbol_count = EXCLUDED.symbol_count,
+                    chunk_count = EXCLUDED.chunk_count
+                """,
+                repo_id, total_files, stats["symbols"], stats["chunks"]
             )
 
             return stats
@@ -108,7 +134,7 @@ async def _index_file(
     file_path: Path,
     language: str,
     repo_root: Path
-) -> None:
+) -> bool:
     """Index a single file (transactional).
 
     Args:
@@ -117,34 +143,60 @@ async def _index_file(
         file_path: Path to file
         language: Language identifier
         repo_root: Repository root for relative path
+
+    Returns:
+        True if file was indexed, False if skipped (unchanged)
     """
-    # Parse file
+    # Try to parse file with tree-sitter
     result = parse_file(str(file_path), language)
-    if not result:
-        return
 
-    source, tree = result
+    if result:
+        # Tree-sitter parsing succeeded
+        source, tree = result
+        # Extract symbols
+        symbols = extract_symbols(source, tree, language, str(file_path))
+        # Extract edges
+        edges = extract_edges(source, tree, language, str(file_path))
+        # Create chunks
+        chunks = create_chunks(source, symbols, language)
+    else:
+        # No tree-sitter parser available (e.g., SQL files)
+        # Index as plain text with simple chunking
+        try:
+            with open(file_path, "rb") as f:
+                source = f.read()
+        except Exception:
+            return
 
-    # Extract symbols
-    symbols = extract_symbols(source, tree, language, str(file_path))
+        # No symbols or edges for plain text files
+        symbols = []
+        edges = []
 
-    # Extract edges
-    edges = extract_edges(source, tree, language, str(file_path))
+        # Create simple text-based chunks
+        chunks = _create_plain_text_chunks(source, language)
 
-    # Create chunks
-    chunks = create_chunks(source, symbols, language)
+    # Calculate relative path
+    rel_path = str(file_path.relative_to(repo_root))
 
+    # Calculate file hash
+    file_hash = hashlib.sha256(source).hexdigest()[:16]
+
+    # Get file mtime
+    mtime = file_path.stat().st_mtime
+
+    # Check if file exists and is unchanged
+    existing = await conn.fetchrow(
+        "SELECT id, sha FROM file WHERE repo_id = $1 AND path = $2",
+        repo_id, rel_path
+    )
+
+    if existing and existing['sha'] == file_hash:
+        # File unchanged, skip reindexing to preserve embeddings
+        return False
+
+    # File is new or changed, proceed with indexing
     # Start transaction for this file
     async with conn.transaction():
-        # Calculate relative path
-        rel_path = str(file_path.relative_to(repo_root))
-
-        # Calculate file hash
-        file_hash = hashlib.sha256(source).hexdigest()[:16]
-
-        # Get file mtime
-        mtime = file_path.stat().st_mtime
-
         # Upsert file
         file_id = await conn.fetchval(
             """
@@ -250,3 +302,71 @@ async def _index_file(
                     file_id, edge.evidence_start_line, edge.evidence_end_line,
                     edge.confidence
                 )
+
+        return True
+
+
+def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100) -> list[Chunk]:
+    """Create simple line-based chunks for files without tree-sitter parsers.
+
+    Used for SQL files and other plain text files.
+
+    Args:
+        source: Source file content as bytes
+        language: Language identifier (e.g., 'sql')
+        max_lines: Maximum lines per chunk (default 100)
+
+    Returns:
+        List of chunks
+    """
+    chunks = []
+
+    try:
+        source_text = source.decode("utf-8", errors="replace")
+    except Exception:
+        # If decoding fails, create a single chunk with the raw content
+        content_hash = hashlib.sha256(source).hexdigest()[:16]
+        return [Chunk(
+            start_line=1,
+            end_line=1,
+            content=f"[Binary file - {len(source)} bytes]",
+            content_hash=content_hash,
+            symbol_id=None
+        )]
+
+    lines = source_text.splitlines(keepends=True)
+    total_lines = len(lines)
+
+    if total_lines == 0:
+        # Empty file - create a single empty chunk
+        return [Chunk(
+            start_line=1,
+            end_line=1,
+            content="",
+            content_hash=hashlib.sha256(b"").hexdigest()[:16],
+            symbol_id=None
+        )]
+
+    # Split into chunks of max_lines
+    current_line = 0
+    while current_line < total_lines:
+        end_line = min(current_line + max_lines, total_lines)
+
+        # Extract chunk content
+        chunk_lines = lines[current_line:end_line]
+        content = "".join(chunk_lines)
+
+        # Calculate content hash
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+        chunks.append(Chunk(
+            start_line=current_line + 1,  # 1-indexed
+            end_line=end_line,
+            content=content,
+            content_hash=content_hash,
+            symbol_id=None  # No symbols for plain text
+        ))
+
+        current_line = end_line
+
+    return chunks

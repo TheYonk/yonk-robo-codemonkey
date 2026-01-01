@@ -316,7 +316,9 @@ async def index_repo(repo_path: str, repo_name: str, database_url: str, force: b
         stats = await index_repository(repo_path, repo_name, database_url, force=force)
 
         print(f"\n✓ Indexing complete")
-        print(f"  Files indexed: {stats['files']}")
+        print(f"  Files scanned: {stats['files_scanned']}")
+        print(f"  Files indexed: {stats['files_indexed']}")
+        print(f"  Files skipped: {stats['files_skipped']} (unchanged)")
         print(f"  Symbols extracted: {stats['symbols']}")
         print(f"  Chunks created: {stats['chunks']}")
 
