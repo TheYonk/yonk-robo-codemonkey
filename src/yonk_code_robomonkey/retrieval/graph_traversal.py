@@ -27,6 +27,7 @@ async def get_callers(
     symbol_id: str,
     database_url: str,
     repo_id: str | None = None,
+    schema_name: str | None = None,
     max_depth: int = 2
 ) -> list[GraphNode]:
     """Find all symbols that call the given symbol.
@@ -35,6 +36,7 @@ async def get_callers(
         symbol_id: UUID of the symbol to find callers for
         database_url: Database connection string
         repo_id: Optional repository filter
+        schema_name: Optional schema name to set search_path
         max_depth: Maximum traversal depth (default 2)
 
     Returns:
@@ -42,6 +44,8 @@ async def get_callers(
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         return await _traverse_graph(
             conn, symbol_id, direction="incoming",
             repo_id=repo_id, max_depth=max_depth
@@ -54,6 +58,7 @@ async def get_callees(
     symbol_id: str,
     database_url: str,
     repo_id: str | None = None,
+    schema_name: str | None = None,
     max_depth: int = 2
 ) -> list[GraphNode]:
     """Find all symbols called by the given symbol.
@@ -62,6 +67,7 @@ async def get_callees(
         symbol_id: UUID of the symbol to find callees for
         database_url: Database connection string
         repo_id: Optional repository filter
+        schema_name: Optional schema name to set search_path
         max_depth: Maximum traversal depth (default 2)
 
     Returns:
@@ -69,6 +75,8 @@ async def get_callees(
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         return await _traverse_graph(
             conn, symbol_id, direction="outgoing",
             repo_id=repo_id, max_depth=max_depth
@@ -173,7 +181,8 @@ async def _traverse_graph(
 async def get_symbol_by_fqn(
     fqn: str,
     database_url: str,
-    repo_id: str | None = None
+    repo_id: str | None = None,
+    schema_name: str | None = None
 ) -> dict | None:
     """Look up a symbol by its fully qualified name.
 
@@ -181,12 +190,16 @@ async def get_symbol_by_fqn(
         fqn: Fully qualified name
         database_url: Database connection string
         repo_id: Optional repository filter
+        schema_name: Optional schema name to set search_path
 
     Returns:
         Symbol details or None if not found
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         query = """
             SELECT
                 s.id, s.fqn, s.name, s.kind, s.signature,
@@ -227,19 +240,24 @@ async def get_symbol_by_fqn(
 
 async def get_symbol_by_id(
     symbol_id: str,
-    database_url: str
+    database_url: str,
+    schema_name: str | None = None
 ) -> dict | None:
     """Look up a symbol by its UUID.
 
     Args:
         symbol_id: Symbol UUID
         database_url: Database connection string
+        schema_name: Optional schema name to set search_path
 
     Returns:
         Symbol details or None if not found
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         row = await conn.fetchrow(
             """
             SELECT

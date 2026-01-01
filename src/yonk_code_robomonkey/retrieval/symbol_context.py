@@ -52,6 +52,7 @@ async def get_symbol_context(
     symbol_id: str | None = None,
     database_url: str = "",
     repo_id: str | None = None,
+    schema_name: str | None = None,
     max_depth: int = 2,
     budget_tokens: int = 12000
 ) -> SymbolContext | None:
@@ -62,6 +63,7 @@ async def get_symbol_context(
         symbol_id: Symbol UUID (alternative to symbol_fqn)
         database_url: Database connection string
         repo_id: Optional repository filter
+        schema_name: Optional schema name to set search_path
         max_depth: Maximum graph traversal depth (default 2)
         budget_tokens: Maximum approximate token budget (default 12000)
 
@@ -70,9 +72,9 @@ async def get_symbol_context(
     """
     # Resolve symbol
     if symbol_id:
-        symbol = await get_symbol_by_id(symbol_id, database_url)
+        symbol = await get_symbol_by_id(symbol_id, database_url, schema_name)
     elif symbol_fqn:
-        symbol = await get_symbol_by_fqn(symbol_fqn, database_url, repo_id)
+        symbol = await get_symbol_by_fqn(symbol_fqn, database_url, repo_id, schema_name)
     else:
         return None
 
@@ -84,6 +86,8 @@ async def get_symbol_context(
     # Connect to database
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
         # 1. Get definition chunk
         definition_chunk = await _get_definition_chunk(conn, symbol_id)
 
@@ -108,11 +112,11 @@ async def get_symbol_context(
         depth_reached = 0
 
         if used_chars < budget_chars:
-            callers = await get_callers(symbol_id, database_url, repo_id, max_depth)
+            callers = await get_callers(symbol_id, database_url, repo_id, schema_name, max_depth)
             depth_reached = max((c.depth for c in callers), default=0)
 
         if used_chars < budget_chars:
-            callees = await get_callees(symbol_id, database_url, repo_id, max_depth)
+            callees = await get_callees(symbol_id, database_url, repo_id, schema_name, max_depth)
             depth_reached = max(depth_reached, max((c.depth for c in callees), default=0))
 
         # 3. Collect chunks for graph nodes (with budget control)

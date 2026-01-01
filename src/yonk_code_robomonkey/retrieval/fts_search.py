@@ -195,6 +195,7 @@ async def fts_search(
     query: str,
     database_url: str,
     repo_id: str | None = None,
+    schema_name: str | None = None,
     top_k: int = 30,
     search_chunks: bool = True,
     search_documents: bool = True
@@ -205,6 +206,7 @@ async def fts_search(
         query: Search query (will be processed with websearch_to_tsquery)
         database_url: Database connection string
         repo_id: Optional repository UUID to filter by
+        schema_name: Optional schema name for isolation
         top_k: Total number of results to return
         search_chunks: Whether to search chunks
         search_documents: Whether to search documents
@@ -216,11 +218,11 @@ async def fts_search(
 
     # Gather candidates from both sources
     if search_chunks:
-        chunk_results = await fts_search_chunks(query, database_url, repo_id, top_k)
+        chunk_results = await fts_search_chunks(query, database_url, repo_id, schema_name, top_k)
         results.extend(chunk_results)
 
     if search_documents:
-        doc_results = await fts_search_documents(query, database_url, repo_id, top_k)
+        doc_results = await fts_search_documents(query, database_url, repo_id, schema_name, top_k)
         results.extend(doc_results)
 
     # Sort by rank and limit
