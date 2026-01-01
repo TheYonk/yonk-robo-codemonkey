@@ -585,53 +585,87 @@ async def show_status(
         repo_id: Repository UUID (optional)
         repo_name: Repository name (optional)
     """
+    from yonk_code_robomonkey.db.schema_manager import schema_context
+    from yonk_code_robomonkey.config import settings
+
     conn = await asyncpg.connect(dsn=database_url)
 
     try:
-        # Get repo info
-        if repo_id:
-            repo = await conn.fetchrow(
-                "SELECT id, name, root_path FROM repo WHERE id = $1",
+        # Determine schema name from repo name
+        if repo_name:
+            schema_name = f"{settings.schema_prefix}{repo_name.replace('-', '_')}"
+        elif repo_id:
+            # Try to find schema from repo_id (check all schemas)
+            schemas = await conn.fetch(
+                """
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name LIKE $1
+                ORDER BY schema_name
+                """,
+                f"{settings.schema_prefix}%"
+            )
+
+            schema_name = None
+            for schema_row in schemas:
+                test_schema = schema_row['schema_name']
+                await conn.execute(f'SET search_path TO "{test_schema}", public')
+                found = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM repo WHERE id = $1)",
+                    repo_id
+                )
+                if found:
+                    schema_name = test_schema
+                    break
+
+            if not schema_name:
+                raise RuntimeError(f"Repository not found: {repo_id}")
+        else:
+            raise RuntimeError("Must provide either repo_id or repo_name")
+
+        # Set schema context
+        async with schema_context(conn, schema_name):
+            # Get repo info
+            if repo_id:
+                repo = await conn.fetchrow(
+                    "SELECT id, name, root_path FROM repo WHERE id = $1",
+                    repo_id
+                )
+            else:
+                repo = await conn.fetchrow(
+                    "SELECT id, name, root_path FROM repo WHERE name = $1",
+                    repo_name
+                )
+
+            if not repo:
+                raise RuntimeError(f"Repository not found: {repo_id or repo_name}")
+
+            repo_id = repo["id"]
+            print(f"Repository: {repo['name']}")
+            print(f"Schema: {schema_name}")
+            print(f"Path: {repo['root_path']}")
+            print(f"ID: {repo_id}")
+            print()
+
+            # Get index state
+            state = await conn.fetchrow(
+                "SELECT * FROM repo_index_state WHERE repo_id = $1",
                 repo_id
             )
-        else:
-            repo = await conn.fetchrow(
-                "SELECT id, name, root_path FROM repo WHERE name = $1",
-                repo_name
-            )
 
-        if not repo:
-            raise RuntimeError(f"Repository not found: {repo_id or repo_name}")
+            if state:
+                print("Index State:")
+                print(f"  Last indexed: {state['last_indexed_at'] or 'Never'}")
+                print(f"  Last commit: {state['last_scan_commit'] or 'N/A'}")
+                print(f"  Last hash: {state['last_scan_hash'] or 'N/A'}")
+                if state['last_error']:
+                    print(f"  Last error: {state['last_error']}")
+            else:
+                print("Index State: Not initialized")
 
-        repo_id = repo["id"]
-        print(f"Repository: {repo['name']}")
-        print(f"Path: {repo['root_path']}")
-        print(f"ID: {repo_id}")
-        print()
-
-        # Get index state
-        state = await conn.fetchrow(
-            "SELECT * FROM repo_index_state WHERE repo_id = $1",
-            repo_id
-        )
-
-        if state:
-            print("Index State:")
-            print(f"  Last indexed: {state['last_indexed_at'] or 'Never'}")
-            print(f"  Last commit: {state['last_scan_commit'] or 'N/A'}")
-            print(f"  Last hash: {state['last_scan_hash'] or 'N/A'}")
-            if state['last_error']:
-                print(f"  Last error: {state['last_error']}")
             print()
-            print(f"Counts:")
-            print(f"  Files: {state['file_count']}")
-            print(f"  Symbols: {state['symbol_count']}")
-            print(f"  Chunks: {state['chunk_count']}")
-            print(f"  Edges: {state['edge_count']}")
-        else:
-            print("Index State: Not initialized")
-            print()
-            # Get counts from actual tables
+
+            # Always get live counts from actual tables (including embeddings)
             file_count = await conn.fetchval(
                 "SELECT COUNT(*) FROM file WHERE repo_id = $1", repo_id
             )
@@ -645,11 +679,40 @@ async def show_status(
                 "SELECT COUNT(*) FROM edge WHERE repo_id = $1", repo_id
             )
 
-            print(f"Counts (from tables):")
-            print(f"  Files: {file_count}")
-            print(f"  Symbols: {symbol_count}")
-            print(f"  Chunks: {chunk_count}")
-            print(f"  Edges: {edge_count}")
+            # Get embedding counts
+            chunk_embedding_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM chunk_embedding ce JOIN chunk c ON ce.chunk_id = c.id WHERE c.repo_id = $1",
+                repo_id
+            )
+            doc_embedding_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM document_embedding de JOIN document d ON de.document_id = d.id WHERE d.repo_id = $1",
+                repo_id
+            )
+
+            # Calculate missing embeddings
+            chunks_missing_embeddings = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM chunk c
+                LEFT JOIN chunk_embedding ce ON c.id = ce.chunk_id
+                WHERE c.repo_id = $1 AND ce.chunk_id IS NULL
+                """,
+                repo_id
+            )
+
+            print(f"Counts:")
+            print(f"  Files:           {file_count}")
+            print(f"  Symbols:         {symbol_count}")
+            print(f"  Chunks:          {chunk_count}")
+            print(f"  Edges:           {edge_count}")
+            print()
+            print(f"Embeddings:")
+            print(f"  Chunk embeddings:     {chunk_embedding_count} / {chunk_count}")
+            if chunk_count > 0:
+                completion_pct = (chunk_embedding_count / chunk_count) * 100
+                print(f"  Completion:           {completion_pct:.1f}%")
+                print(f"  Missing:              {chunks_missing_embeddings}")
+            print(f"  Document embeddings:  {doc_embedding_count}")
 
     finally:
         await conn.close()
