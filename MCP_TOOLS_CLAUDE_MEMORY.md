@@ -34,7 +34,34 @@
 
 **Meta:**
 - `suggest_tool(query)` → Unsure which tool to use? Ask this first
-- `universal_search` → Most comprehensive (slow, runs multiple strategies + LLM)
+- `universal_search(query, repo, deep_mode=true)` → Most comprehensive search + LLM analysis
+
+**Advanced Features:**
+- `file_summary(file_id)` → "What does this file do?" (cached AI explanation)
+- `symbol_summary(symbol_id)` → "What does this function do?" (cached)
+- `module_summary(repo, module_path)` → "What's in this directory?" (cached)
+
+### Universal Search - When Maximum Understanding Needed
+
+**`universal_search(query, repo, deep_mode=true)`** is the most powerful tool:
+- Runs 3 searches in parallel: hybrid + docs + pure semantic
+- LLM analyzes all results and generates intelligent summary
+- Use for: "How does authentication work end-to-end?"
+- Returns: Top results + LLM explanation of how it all fits together
+- Trade-off: Slower than `hybrid_search`, but most thorough
+
+**Decision:**
+- Need specific code? → `hybrid_search` (fast, targeted)
+- Understanding complex topic? → `universal_search` (comprehensive + explained)
+
+### Summaries - Cached AI Documentation
+
+Pre-generated LLM explanations cached in database:
+- **`file_summary`** - Purpose, components, dependencies, usage
+- **`symbol_summary`** - What it does, params, returns, callers
+- **`module_summary`** - Module purpose, files, responsibilities
+
+**Benefits:** Faster than reading code, cached forever, context-aware
 
 ### Quick Examples
 ```
