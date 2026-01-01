@@ -492,7 +492,7 @@ async def doc_search(
                 "vec_score": r.vec_score,
                 "fts_rank": r.fts_rank,
                 "fts_score": r.fts_score,
-                "why": f"Hybrid match (vec_score={r.vec_score:.4f if r.vec_score else 0}, fts_score={r.fts_score:.4f if r.fts_score else 0}, combined={r.score:.4f})"
+                "why": f"Hybrid match (vec_score={r.vec_score or 0:.4f}, fts_score={r.fts_score or 0:.4f}, combined={r.score:.4f})"
             }
             for r in results
         ],
