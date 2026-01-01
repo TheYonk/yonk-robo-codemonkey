@@ -8,6 +8,23 @@ from dataclasses import dataclass
 from yonk_code_robomonkey.db.schema_manager import schema_context
 
 
+def build_or_tsquery(query: str) -> str:
+    """Build a tsquery string with OR logic from plain text.
+
+    Args:
+        query: Plain text search query
+
+    Returns:
+        tsquery string with OR operators (e.g., "word1 | word2 | word3")
+    """
+    # Split on whitespace and filter out empty strings
+    words = [w.strip() for w in query.split() if w.strip()]
+    if not words:
+        return ""
+    # Join with OR operator
+    return " | ".join(words)
+
+
 @dataclass
 class FTSResult:
     """A full-text search result."""
@@ -24,6 +41,8 @@ class FTSResult:
     # Document-specific fields (None for chunks)
     doc_type: str | None = None
     source: str | None = None
+    title: str | None = None
+    path: str | None = None
 
 
 async def fts_search_chunks(
@@ -33,10 +52,10 @@ async def fts_search_chunks(
     schema_name: str | None = None,
     top_k: int = 30
 ) -> list[FTSResult]:
-    """Search chunks using full-text search.
+    """Search chunks using full-text search with OR logic.
 
     Args:
-        query: Search query (will be processed with websearch_to_tsquery)
+        query: Search query (words will be OR'd together)
         database_url: Database connection string
         repo_id: Optional repository UUID to filter by
         schema_name: Optional schema name for isolation
@@ -45,6 +64,11 @@ async def fts_search_chunks(
     Returns:
         List of FTS results ordered by rank (highest first)
     """
+    # Build OR query
+    or_query = build_or_tsquery(query)
+    if not or_query:
+        return []
+
     conn = await asyncpg.connect(dsn=database_url)
     try:
         # Build query
@@ -59,15 +83,15 @@ async def fts_search_chunks(
                     c.start_line,
                     c.end_line,
                     f.path as file_path,
-                    ts_rank_cd(c.fts, websearch_to_tsquery('simple', $1)) as rank
+                    ts_rank_cd(c.fts, to_tsquery('simple', $1)) as rank
                 FROM chunk c
                 JOIN file f ON c.file_id = f.id
                 WHERE c.repo_id = $2
-                AND c.fts @@ websearch_to_tsquery('simple', $1)
+                AND c.fts @@ to_tsquery('simple', $1)
                 ORDER BY rank DESC
                 LIMIT $3
             """
-            params = (query, repo_id, top_k)
+            params = (or_query, repo_id, top_k)
         else:
             sql = """
                 SELECT
@@ -79,14 +103,14 @@ async def fts_search_chunks(
                     c.start_line,
                     c.end_line,
                     f.path as file_path,
-                    ts_rank_cd(c.fts, websearch_to_tsquery('simple', $1)) as rank
+                    ts_rank_cd(c.fts, to_tsquery('simple', $1)) as rank
                 FROM chunk c
                 JOIN file f ON c.file_id = f.id
-                WHERE c.fts @@ websearch_to_tsquery('simple', $1)
+                WHERE c.fts @@ to_tsquery('simple', $1)
                 ORDER BY rank DESC
                 LIMIT $2
             """
-            params = (query, top_k)
+            params = (or_query, top_k)
 
         # Execute query with schema context if provided
         if schema_name:
@@ -122,10 +146,10 @@ async def fts_search_documents(
     schema_name: str | None = None,
     top_k: int = 30
 ) -> list[FTSResult]:
-    """Search documents using full-text search.
+    """Search documents using full-text search with OR logic.
 
     Args:
-        query: Search query (will be processed with websearch_to_tsquery)
+        query: Search query (words will be OR'd together)
         database_url: Database connection string
         repo_id: Optional repository UUID to filter by
         schema_name: Optional schema name for isolation
@@ -134,6 +158,11 @@ async def fts_search_documents(
     Returns:
         List of FTS results ordered by rank (highest first)
     """
+    # Build OR query
+    or_query = build_or_tsquery(query)
+    if not or_query:
+        return []
+
     conn = await asyncpg.connect(dsn=database_url)
     try:
         # Set schema context if provided
@@ -148,14 +177,16 @@ async def fts_search_documents(
                     d.content,
                     d.type as doc_type,
                     d.source,
-                    ts_rank_cd(d.fts, websearch_to_tsquery('simple', $1)) as rank
+                    d.title,
+                    d.path,
+                    ts_rank_cd(d.fts, to_tsquery('simple', $1)) as rank
                 FROM document d
                 WHERE d.repo_id = $2
-                AND d.fts @@ websearch_to_tsquery('simple', $1)
+                AND d.fts @@ to_tsquery('simple', $1)
                 ORDER BY rank DESC
                 LIMIT $3
             """
-            params = (query, repo_id, top_k)
+            params = (or_query, repo_id, top_k)
         else:
             sql = """
                 SELECT
@@ -164,13 +195,15 @@ async def fts_search_documents(
                     d.content,
                     d.type as doc_type,
                     d.source,
-                    ts_rank_cd(d.fts, websearch_to_tsquery('simple', $1)) as rank
+                    d.title,
+                    d.path,
+                    ts_rank_cd(d.fts, to_tsquery('simple', $1)) as rank
                 FROM document d
-                WHERE d.fts @@ websearch_to_tsquery('simple', $1)
+                WHERE d.fts @@ to_tsquery('simple', $1)
                 ORDER BY rank DESC
                 LIMIT $2
             """
-            params = (query, top_k)
+            params = (or_query, top_k)
 
         rows = await conn.fetch(sql, *params)
 
@@ -182,7 +215,9 @@ async def fts_search_documents(
                 content=row["content"],
                 rank=row["rank"],
                 doc_type=row["doc_type"],
-                source=row["source"]
+                source=row["source"],
+                title=row.get("title"),
+                path=row.get("path")
             ))
 
         return results
@@ -200,10 +235,10 @@ async def fts_search(
     search_chunks: bool = True,
     search_documents: bool = True
 ) -> list[FTSResult]:
-    """Combined FTS search across chunks and documents.
+    """Combined FTS search across chunks and documents with OR logic.
 
     Args:
-        query: Search query (will be processed with websearch_to_tsquery)
+        query: Search query (words will be OR'd together)
         database_url: Database connection string
         repo_id: Optional repository UUID to filter by
         schema_name: Optional schema name for isolation

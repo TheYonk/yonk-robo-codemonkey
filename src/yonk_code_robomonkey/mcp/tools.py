@@ -434,7 +434,7 @@ async def doc_search(
     repo: str | None = None,
     top_k: int = 10
 ) -> dict[str, Any]:
-    """Search documentation and markdown files using full-text search.
+    """Search documentation and markdown files using hybrid search (vector + FTS).
 
     Args:
         query: Search query string
@@ -462,24 +462,37 @@ async def doc_search(
         finally:
             await conn.close()
 
-    results = await fts_search_documents(
+    # Use hybrid search (vector + FTS)
+    from yonk_code_robomonkey.retrieval.doc_hybrid_search import doc_hybrid_search
+
+    results = await doc_hybrid_search(
         query=query,
         database_url=settings.database_url,
+        embeddings_provider=settings.embeddings_provider,
+        embeddings_model=settings.embeddings_model,
+        embeddings_base_url=settings.embeddings_base_url,
+        embeddings_api_key=settings.vllm_api_key,
         repo_id=repo_id,
         schema_name=schema_name,
-        top_k=top_k
+        vector_top_k=30,
+        fts_top_k=30,
+        final_top_k=top_k
     )
 
     return {
         "schema_name": schema_name,
         "results": [
             {
-                "document_id": str(r.entity_id),
+                "document_id": str(r.document_id),
                 "title": r.title,
                 "content": r.content[:500] + "..." if len(r.content) > 500 else r.content,
                 "path": r.path,
-                "rank": r.rank,
-                "why": f"Full-text match for '{query}' with rank {r.rank:.4f}"
+                "score": r.score,
+                "vec_rank": r.vec_rank,
+                "vec_score": r.vec_score,
+                "fts_rank": r.fts_rank,
+                "fts_score": r.fts_score,
+                "why": f"Hybrid match (vec_score={r.vec_score:.4f if r.vec_score else 0}, fts_score={r.fts_score:.4f if r.fts_score else 0}, combined={r.score:.4f})"
             }
             for r in results
         ],
@@ -1414,8 +1427,8 @@ async def db_feature_context(
             FROM document d
             WHERE d.repo_id = $1
               AND d.type IN ('DB_REPORT', 'GENERATED_SUMMARY')
-              AND d.fts @@ websearch_to_tsquery('simple', $2)
-            ORDER BY ts_rank_cd(d.fts, websearch_to_tsquery('simple', $2)) DESC
+              AND d.fts @@ plainto_tsquery('simple', $2)
+            ORDER BY ts_rank_cd(d.fts, plainto_tsquery('simple', $2)) DESC
             LIMIT 3
             """,
             repo_id, query

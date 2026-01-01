@@ -163,8 +163,8 @@ async def _search_feature_index(
         SELECT id, name, description, evidence
         FROM feature_index
         WHERE repo_id = $1
-        AND fts @@ websearch_to_tsquery('simple', $2)
-        ORDER BY ts_rank_cd(fts, websearch_to_tsquery('simple', $2)) DESC
+        AND fts @@ plainto_tsquery('simple', $2)
+        ORDER BY ts_rank_cd(fts, plainto_tsquery('simple', $2)) DESC
         LIMIT 10
         """,
         repo_id, query
@@ -301,10 +301,10 @@ async def _get_relevant_docs(
     """Get relevant documentation."""
     docs = await conn.fetch(
         """
-        SELECT path, title, content, ts_rank_cd(fts, websearch_to_tsquery('simple', $2)) as rank
+        SELECT path, title, content, ts_rank_cd(fts, plainto_tsquery('simple', $2)) as rank
         FROM document
         WHERE repo_id = $1
-        AND fts @@ websearch_to_tsquery('simple', $2)
+        AND fts @@ plainto_tsquery('simple', $2)
         ORDER BY rank DESC
         LIMIT $3
         """,
