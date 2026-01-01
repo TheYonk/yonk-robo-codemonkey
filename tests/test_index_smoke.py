@@ -51,6 +51,10 @@ async def test_indexed_files_in_db(database_url, test_repo_path):
     # Check database
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search path to the repo schema
+        schema_name = "robomonkey_test_repo"
+        await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         # Get repo
         repo_id = await conn.fetchval(
             "SELECT id FROM repo WHERE name = $1", "test_repo"
@@ -87,6 +91,10 @@ async def test_symbol_details(database_url, test_repo_path):
 
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search path to the repo schema
+        schema_name = "robomonkey_test_repo"
+        await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         repo_id = await conn.fetchval(
             "SELECT id FROM repo WHERE name = $1", "test_repo"
         )

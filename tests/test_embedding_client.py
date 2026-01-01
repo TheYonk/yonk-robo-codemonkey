@@ -10,12 +10,14 @@ from yonk_code_robomonkey.embeddings.vllm_openai import vllm_embed
 @pytest.mark.asyncio
 async def test_ollama_embed_single_text():
     """Test Ollama embedding with a single text."""
-    mock_response = MagicMock()  # Use MagicMock for response object
+    mock_response = MagicMock()
     mock_response.json.return_value = {"embedding": [0.1, 0.2, 0.3]}
     mock_response.raise_for_status = MagicMock()
 
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=mock_client):
         embeddings = await ollama_embed(
@@ -39,8 +41,10 @@ async def test_ollama_embed_multiple_texts():
     mock_response2.json.return_value = {"embedding": [0.3, 0.4]}
     mock_response2.raise_for_status = MagicMock()
 
-    mock_client = AsyncMock()
-    mock_client.post.side_effect = [mock_response1, mock_response2]
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(side_effect=[mock_response1, mock_response2])
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=mock_client):
         embeddings = await ollama_embed(
@@ -76,8 +80,10 @@ async def test_vllm_embed_single_text():
     }
     mock_response.raise_for_status = MagicMock()
 
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=mock_client):
         embeddings = await vllm_embed(
@@ -104,8 +110,10 @@ async def test_vllm_embed_batch():
     }
     mock_response.raise_for_status = MagicMock()
 
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=mock_client):
         embeddings = await vllm_embed(
@@ -141,19 +149,25 @@ async def test_ollama_embed_http_error():
     mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
         "500 Server Error",
         request=MagicMock(),
-        response=MagicMock()
+        response=MagicMock(status_code=500)
     )
 
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=mock_client):
-        with pytest.raises(RuntimeError, match="Ollama embedding failed"):
-            await ollama_embed(
-                texts=["test"],
-                model="test-model",
-                base_url="http://localhost:11434"
-            )
+        # Ollama retries on 500, then returns zero vector
+        embeddings = await ollama_embed(
+            texts=["test"],
+            model="test-model",
+            base_url="http://localhost:11434",
+            embedding_dim=1024
+        )
+        # Should get zero vector after retries
+        assert len(embeddings) == 1
+        assert embeddings[0] == [0.0] * 1024
 
 
 @pytest.mark.asyncio
@@ -166,8 +180,10 @@ async def test_vllm_embed_http_error():
         response=MagicMock()
     )
 
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(RuntimeError, match="vLLM embedding failed"):

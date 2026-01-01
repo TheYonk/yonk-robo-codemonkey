@@ -33,6 +33,7 @@ async def oracle_repo(db, fixtures_dir):
     """Index Oracle fixture repo."""
     repo_path = str(fixtures_dir / "oracle_app")
     repo_name = "oracle_test_app"
+    schema_name = f"robomonkey_{repo_name}"
 
     # Index the repository
     await index_repository(
@@ -41,12 +42,18 @@ async def oracle_repo(db, fixtures_dir):
         database_url=settings.database_url
     )
 
-    # Get repo ID
+    # Set search path to the repo schema
+    await db.execute(f'SET search_path TO "{schema_name}", public')
+
+    # Get repo ID from schema-specific repo table
     row = await db.fetchrow(
         "SELECT id FROM repo WHERE name = $1",
         repo_name
     )
-    return str(row["id"])
+    if not row:
+        raise RuntimeError(f"Repo {repo_name} not found in schema {schema_name}")
+
+    return {"repo_id": str(row["id"]), "schema_name": schema_name}
 
 
 @pytest_asyncio.fixture
@@ -54,6 +61,7 @@ async def sqlserver_repo(db, fixtures_dir):
     """Index SQL Server fixture repo."""
     repo_path = str(fixtures_dir / "sqlserver_app")
     repo_name = "sqlserver_test_app"
+    schema_name = f"robomonkey_{repo_name}"
 
     # Index the repository
     await index_repository(
@@ -62,12 +70,18 @@ async def sqlserver_repo(db, fixtures_dir):
         database_url=settings.database_url
     )
 
-    # Get repo ID
+    # Set search path to the repo schema
+    await db.execute(f'SET search_path TO "{schema_name}", public')
+
+    # Get repo ID from schema-specific repo table
     row = await db.fetchrow(
         "SELECT id FROM repo WHERE name = $1",
         repo_name
     )
-    return str(row["id"])
+    if not row:
+        raise RuntimeError(f"Repo {repo_name} not found in schema {schema_name}")
+
+    return {"repo_id": str(row["id"]), "schema_name": schema_name}
 
 
 @pytest_asyncio.fixture
@@ -75,6 +89,7 @@ async def mongodb_repo(db, fixtures_dir):
     """Index MongoDB fixture repo."""
     repo_path = str(fixtures_dir / "mongodb_app")
     repo_name = "mongodb_test_app"
+    schema_name = f"robomonkey_{repo_name}"
 
     # Index the repository
     await index_repository(
@@ -83,12 +98,18 @@ async def mongodb_repo(db, fixtures_dir):
         database_url=settings.database_url
     )
 
-    # Get repo ID
+    # Set search path to the repo schema
+    await db.execute(f'SET search_path TO "{schema_name}", public')
+
+    # Get repo ID from schema-specific repo table
     row = await db.fetchrow(
         "SELECT id FROM repo WHERE name = $1",
         repo_name
     )
-    return str(row["id"])
+    if not row:
+        raise RuntimeError(f"Repo {repo_name} not found in schema {schema_name}")
+
+    return {"repo_id": str(row["id"]), "schema_name": schema_name}
 
 
 @pytest.mark.asyncio
@@ -130,7 +151,7 @@ async def test_oracle_detection(db, oracle_repo):
 
     # Detect source databases
     detections = await detect_source_databases(
-        repo_id=oracle_repo,
+        repo_id=oracle_repo["repo_id"], schema_name=oracle_repo["schema_name"],
         database_url=settings.database_url,
         ruleset=ruleset
     )
@@ -155,7 +176,7 @@ async def test_sqlserver_detection(db, sqlserver_repo):
 
     # Detect source databases
     detections = await detect_source_databases(
-        repo_id=sqlserver_repo,
+        repo_id=sqlserver_repo["repo_id"], schema_name=sqlserver_repo["schema_name"],
         database_url=settings.database_url,
         ruleset=ruleset
     )
@@ -179,7 +200,7 @@ async def test_mongodb_detection(db, mongodb_repo):
 
     # Detect source databases
     detections = await detect_source_databases(
-        repo_id=mongodb_repo,
+        repo_id=mongodb_repo["repo_id"], schema_name=mongodb_repo["schema_name"],
         database_url=settings.database_url,
         ruleset=ruleset
     )
@@ -202,7 +223,7 @@ async def test_oracle_assessment(db, oracle_repo):
     """Test Oracle migration assessment."""
     # Run assessment with auto-detection
     result = await assess_migration(
-        repo_id=oracle_repo,
+        repo_id=oracle_repo["repo_id"], schema_name=oracle_repo["schema_name"],
         source_db="auto",
         target_db="postgresql",
         database_url=settings.database_url,
@@ -252,7 +273,7 @@ async def test_oracle_assessment(db, oracle_repo):
 async def test_sqlserver_assessment(db, sqlserver_repo):
     """Test SQL Server migration assessment."""
     result = await assess_migration(
-        repo_id=sqlserver_repo,
+        repo_id=sqlserver_repo["repo_id"], schema_name=sqlserver_repo["schema_name"],
         source_db="sqlserver",  # Explicit source DB
         target_db="postgresql",
         database_url=settings.database_url,
@@ -277,7 +298,7 @@ async def test_sqlserver_assessment(db, sqlserver_repo):
 async def test_mongodb_assessment(db, mongodb_repo):
     """Test MongoDB migration assessment."""
     result = await assess_migration(
-        repo_id=mongodb_repo,
+        repo_id=mongodb_repo["repo_id"], schema_name=mongodb_repo["schema_name"],
         source_db="mongodb",
         target_db="postgresql",
         database_url=settings.database_url,
@@ -305,12 +326,12 @@ async def test_assessment_caching(db, oracle_repo):
     # Clean up any existing assessments
     await db.execute(
         "DELETE FROM migration_assessment WHERE repo_id = $1",
-        UUID(oracle_repo)
+        UUID(oracle_repo["repo_id"])
     )
 
     # First assessment
     result1 = await assess_migration(
-        repo_id=oracle_repo,
+        repo_id=oracle_repo["repo_id"], schema_name=oracle_repo["schema_name"],
         source_db="oracle",
         target_db="postgresql",
         database_url=settings.database_url,
@@ -320,7 +341,7 @@ async def test_assessment_caching(db, oracle_repo):
 
     # Second assessment (should be cached)
     result2 = await assess_migration(
-        repo_id=oracle_repo,
+        repo_id=oracle_repo["repo_id"], schema_name=oracle_repo["schema_name"],
         source_db="oracle",
         target_db="postgresql",
         database_url=settings.database_url,
@@ -336,7 +357,7 @@ async def test_assessment_caching(db, oracle_repo):
 
     # Force regeneration
     result3 = await assess_migration(
-        repo_id=oracle_repo,
+        repo_id=oracle_repo["repo_id"], schema_name=oracle_repo["schema_name"],
         source_db="oracle",
         target_db="postgresql",
         database_url=settings.database_url,
@@ -351,7 +372,7 @@ async def test_assessment_stored_in_db(db, oracle_repo):
     """Test that assessments are properly stored in database."""
     # Run assessment
     result = await assess_migration(
-        repo_id=oracle_repo,
+        repo_id=oracle_repo["repo_id"], schema_name=oracle_repo["schema_name"],
         source_db="oracle",
         target_db="postgresql",
         database_url=settings.database_url,
@@ -361,7 +382,7 @@ async def test_assessment_stored_in_db(db, oracle_repo):
     # Check migration_assessment table
     assessment = await db.fetchrow(
         "SELECT * FROM migration_assessment WHERE repo_id = $1 AND source_db = $2",
-        UUID(oracle_repo),
+        UUID(oracle_repo["repo_id"]),
         "oracle"
     )
     assert assessment is not None
@@ -400,7 +421,7 @@ async def test_assessment_stored_in_db(db, oracle_repo):
 async def test_scoring_with_different_severities(db, oracle_repo):
     """Test that scoring properly weights different severities."""
     result = await assess_migration(
-        repo_id=oracle_repo,
+        repo_id=oracle_repo["repo_id"], schema_name=oracle_repo["schema_name"],
         source_db="oracle",
         target_db="postgresql",
         database_url=settings.database_url,

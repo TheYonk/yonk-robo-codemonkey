@@ -1,33 +1,36 @@
 """Tests for full-text search functionality."""
 import pytest
 import pytest_asyncio
-import os
 from pathlib import Path
 from yonk_code_robomonkey.retrieval.fts_search import fts_search_chunks, fts_search
 from yonk_code_robomonkey.indexer.indexer import index_repository
-
-
-@pytest.fixture
-def database_url():
-    """Get database URL from environment."""
-    return os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/codegraph")
 
 
 @pytest_asyncio.fixture
 async def indexed_repo(database_url):
     """Index test repository for FTS testing."""
     test_repo_path = Path(__file__).parent / "fixtures" / "test_repo"
+    repo_name = "test_repo_fts"
+    schema_name = f"robomonkey_{repo_name}"
+
     await index_repository(
         repo_path=str(test_repo_path),
-        repo_name="test_repo_fts",
+        repo_name=repo_name,
         database_url=database_url
     )
 
     import asyncpg
     conn = await asyncpg.connect(dsn=database_url)
     try:
-        repo_row = await conn.fetchrow("SELECT id FROM repo WHERE name = $1", "test_repo_fts")
-        return repo_row["id"]
+        # Set search path to the repo schema
+        await conn.execute(f'SET search_path TO "{schema_name}", public')
+
+        # Get repo_id from the schema-specific repo table
+        repo_row = await conn.fetchrow("SELECT id FROM repo WHERE name = $1", repo_name)
+        if not repo_row:
+            raise RuntimeError(f"Repo {repo_name} not found in schema {schema_name}")
+
+        return {"repo_id": repo_row["id"], "schema_name": schema_name}
     finally:
         await conn.close()
 
@@ -38,7 +41,8 @@ async def test_fts_search_hello(database_url, indexed_repo):
     results = await fts_search_chunks(
         query="hello",
         database_url=database_url,
-        repo_id=indexed_repo,
+        repo_id=indexed_repo["repo_id"],
+        schema_name=indexed_repo["schema_name"],
         top_k=10
     )
 
@@ -56,7 +60,8 @@ async def test_fts_search_calculator(database_url, indexed_repo):
     results = await fts_search_chunks(
         query="calculator",
         database_url=database_url,
-        repo_id=indexed_repo,
+        repo_id=indexed_repo["repo_id"],
+        schema_name=indexed_repo["schema_name"],
         top_k=10
     )
 
@@ -71,7 +76,8 @@ async def test_fts_search_add_numbers(database_url, indexed_repo):
     results = await fts_search_chunks(
         query="add numbers",
         database_url=database_url,
-        repo_id=indexed_repo,
+        repo_id=indexed_repo["repo_id"],
+        schema_name=indexed_repo["schema_name"],
         top_k=10
     )
 
@@ -86,7 +92,8 @@ async def test_fts_search_top_k_limit(database_url, indexed_repo):
     results = await fts_search_chunks(
         query="def",
         database_url=database_url,
-        repo_id=indexed_repo,
+        repo_id=indexed_repo["repo_id"],
+        schema_name=indexed_repo["schema_name"],
         top_k=2
     )
 
@@ -100,7 +107,8 @@ async def test_fts_search_result_fields(database_url, indexed_repo):
     results = await fts_search_chunks(
         query="hello",
         database_url=database_url,
-        repo_id=indexed_repo,
+        repo_id=indexed_repo["repo_id"],
+        schema_name=indexed_repo["schema_name"],
         top_k=1
     )
 
@@ -124,7 +132,8 @@ async def test_fts_search_combined(database_url, indexed_repo):
     results = await fts_search(
         query="hello",
         database_url=database_url,
-        repo_id=indexed_repo,
+        repo_id=indexed_repo["repo_id"],
+        schema_name=indexed_repo["schema_name"],
         top_k=10,
         search_chunks=True,
         search_documents=False  # No documents in test repo
