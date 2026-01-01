@@ -35,6 +35,21 @@ def tool(name: str):
         return fn
     return deco
 
+
+def get_repo_or_default(repo: str | None) -> str | None:
+    """Get repo parameter or use default from settings.
+
+    Args:
+        repo: Explicit repo name or None
+
+    Returns:
+        Repo name to use (explicit or default)
+    """
+    if repo:
+        return repo
+    settings = Settings()
+    return settings.default_repo if settings.default_repo else None
+
 @tool("ping")
 async def ping() -> dict[str, str]:
     return {"ok": "true"}
@@ -52,7 +67,7 @@ async def hybrid_search(
 
     Args:
         query: Search query string
-        repo: Optional repository name or UUID to filter by
+        repo: Optional repository name or UUID to filter by (uses DEFAULT_REPO from .env if not provided)
         tags_any: Optional list of tags (match any)
         tags_all: Optional list of tags (match all)
         final_top_k: Number of results to return (default 12)
@@ -61,6 +76,9 @@ async def hybrid_search(
         Dictionary with results and explainability information
     """
     settings = Settings()
+
+    # Use default repo if not provided
+    repo = get_repo_or_default(repo)
 
     # Resolve repo to schema if provided
     repo_id = None
@@ -132,12 +150,15 @@ async def symbol_lookup(
     Args:
         fqn: Fully qualified name (e.g., "MyClass.my_method")
         symbol_id: Symbol UUID (alternative to fqn)
-        repo: Optional repository name or UUID to filter by
+        repo: Optional repository name or UUID to filter by (uses DEFAULT_REPO from .env if not provided)
 
     Returns:
         Symbol details or error if not found
     """
     settings = Settings()
+
+    # Use default repo if not provided
+    repo = get_repo_or_default(repo)
 
     # Resolve repo to schema if provided
     repo_id = None
@@ -188,7 +209,7 @@ async def symbol_context(
     Args:
         fqn: Fully qualified name
         symbol_id: Symbol UUID (alternative to fqn)
-        repo: Optional repository name or UUID to filter by
+        repo: Optional repository name or UUID to filter by (uses DEFAULT_REPO from .env if not provided)
         max_depth: Maximum graph traversal depth (default 2)
         budget_tokens: Token budget (default from config)
 
@@ -199,6 +220,9 @@ async def symbol_context(
 
     if budget_tokens is None:
         budget_tokens = settings.context_budget_tokens
+
+    # Use default repo if not provided
+    repo = get_repo_or_default(repo)
 
     # Resolve repo to schema if provided
     repo_id = None
@@ -527,8 +551,8 @@ async def file_summary(
                     database_url=settings.database_url,
                     schema_name=schema_name,
                     llm_provider=settings.embeddings_provider,
-                    llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
-                    llm_base_url=settings.embeddings_base_url
+                    llm_model=settings.llm_model,
+                    llm_base_url=settings.llm_base_url
                 )
 
                 if result.success:
@@ -628,8 +652,8 @@ async def symbol_summary(
                 symbol_id=symbol_id,
                 database_url=settings.database_url,
                 llm_provider=settings.embeddings_provider,
-                llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
-                llm_base_url=settings.embeddings_base_url
+                llm_model=settings.llm_model,
+                llm_base_url=settings.llm_base_url
             )
 
             if result.success:
@@ -722,8 +746,8 @@ async def module_summary(
                 module_path=module_path,
                 database_url=settings.database_url,
                 llm_provider=settings.embeddings_provider,
-                llm_model=getattr(settings, "llm_model", "llama3.2:3b"),
-                llm_base_url=settings.embeddings_base_url
+                llm_model=settings.llm_model,
+                llm_base_url=settings.llm_base_url
             )
 
             if result.success:
@@ -914,50 +938,45 @@ async def index_status(
 
     conn = await asyncpg.connect(dsn=settings.database_url)
     try:
-        # Try to find repo by UUID first, then by name
+        # Resolve repo name to schema and get repo_id
         try:
-            # Check if it's a valid UUID format
-            import uuid
-            uuid.UUID(repo_name_or_id)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
-
-        if is_uuid:
-            repo = await conn.fetchrow(
-                "SELECT id, name, root_path FROM repo WHERE id = $1",
-                repo_name_or_id
-            )
-        else:
-            repo = await conn.fetchrow(
-                "SELECT id, name, root_path FROM repo WHERE name = $1",
-                repo_name_or_id
-            )
-
-        if not repo:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo_name_or_id)
+        except ValueError as e:
             return {
                 "error": f"Repository not found: {repo_name_or_id}",
-                "why": "Repository does not exist in database"
+                "why": str(e)
             }
 
-        repo_id = str(repo["id"])
-        repo_name = repo["name"]
-        repo_path = repo["root_path"]
+        # Get repo info from the resolved schema
+        async with schema_context(conn, schema_name):
+            repo = await conn.fetchrow(
+                "SELECT id, name, root_path FROM repo WHERE id = $1",
+                repo_id
+            )
 
-        # Get index state
-        state = await conn.fetchrow(
-            "SELECT * FROM repo_index_state WHERE repo_id = $1",
-            repo_id
-        )
+            if not repo:
+                return {
+                    "error": f"Repository not found: {repo_name_or_id}",
+                    "why": "Repository does not exist in database"
+                }
 
-        # Get actual counts from tables
-        file_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM file WHERE repo_id = $1", repo_id
-        )
-        symbol_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM symbol WHERE repo_id = $1", repo_id
-        )
-        chunk_count = await conn.fetchval(
+            repo_name = repo["name"]
+            repo_path = repo["root_path"]
+
+            # Get index state
+            state = await conn.fetchrow(
+                "SELECT * FROM repo_index_state WHERE repo_id = $1",
+                repo_id
+            )
+
+            # Get actual counts from tables
+            file_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM file WHERE repo_id = $1", repo_id
+            )
+            symbol_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM symbol WHERE repo_id = $1", repo_id
+            )
+            chunk_count = await conn.fetchval(
             "SELECT COUNT(*) FROM chunk WHERE repo_id = $1", repo_id
         )
         edge_count = await conn.fetchval(
@@ -1024,25 +1043,13 @@ async def comprehensive_review(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo name/ID
+        # Resolve repo name to schema and get repo_id
         try:
-            import uuid
-            uuid.UUID(repo)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
-
-        if is_uuid:
-            repo_id = repo
-        else:
-            repo_id = await conn.fetchval(
-                "SELECT id FROM repo WHERE name = $1", repo
-            )
-
-        if not repo_id:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
             return {
                 "error": f"Repository not found: {repo}",
-                "why": "Repository does not exist in database"
+                "why": str(e)
             }
 
         # Generate report
@@ -1100,20 +1107,14 @@ async def feature_context(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo name/ID
+        # Resolve repo name to schema and get repo_id
         try:
-            import uuid
-            uuid.UUID(repo)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
-
-        if is_uuid:
-            repo_id = repo
-        else:
-            repo_id = await conn.fetchval(
-                "SELECT id FROM repo WHERE name = $1", repo
-            )
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": str(e)
+            }
 
         if not repo_id:
             return {
@@ -1130,6 +1131,7 @@ async def feature_context(
             embeddings_model=settings.embeddings_model,
             embeddings_base_url=settings.embeddings_base_url,
             embeddings_api_key=settings.vllm_api_key,
+            schema_name=schema_name,
             filters=filters,
             top_k_files=top_k_files,
             budget_tokens=budget_tokens,
@@ -1170,50 +1172,39 @@ async def list_features(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo name/ID
+        # Resolve repo name to schema and get repo_id
         try:
-            import uuid
-            uuid.UUID(repo)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
-
-        if is_uuid:
-            repo_id = repo
-        else:
-            repo_id = await conn.fetchval(
-                "SELECT id FROM repo WHERE name = $1", repo
-            )
-
-        if not repo_id:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
             return {
                 "error": f"Repository not found: {repo}",
-                "why": "Repository does not exist in database"
+                "why": str(e)
             }
 
         # Get features
-        if prefix:
-            features = await conn.fetch(
-                """
-                SELECT id, name, description, source
-                FROM feature_index
-                WHERE repo_id = $1 AND name LIKE $2
-                ORDER BY name
-                LIMIT $3
-                """,
-                repo_id, f"{prefix}%", limit
-            )
-        else:
-            features = await conn.fetch(
-                """
-                SELECT id, name, description, source
-                FROM feature_index
-                WHERE repo_id = $1
-                ORDER BY name
-                LIMIT $2
-                """,
-                repo_id, limit
-            )
+        async with schema_context(conn, schema_name):
+            if prefix:
+                features = await conn.fetch(
+                    """
+                    SELECT id, name, description, source
+                    FROM feature_index
+                    WHERE repo_id = $1 AND name LIKE $2
+                    ORDER BY name
+                    LIMIT $3
+                    """,
+                    repo_id, f"{prefix}%", limit
+                )
+            else:
+                features = await conn.fetch(
+                    """
+                    SELECT id, name, description, source
+                    FROM feature_index
+                    WHERE repo_id = $1
+                    ORDER BY name
+                    LIMIT $2
+                    """,
+                    repo_id, limit
+                )
 
         return {
             "features": [
@@ -1248,41 +1239,15 @@ async def build_feature_index(
         Stats about features indexed
     """
     settings = Settings()
-    conn = await asyncpg.connect(dsn=settings.database_url)
 
-    try:
-        # Resolve repo name/ID
-        try:
-            import uuid
-            uuid.UUID(repo)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
+    # Build index - the underlying function handles schema resolution
+    result = await _build_feature_index(
+        repo_id=repo,  # Can be name or UUID
+        database_url=settings.database_url,
+        regenerate=regenerate
+    )
 
-        if is_uuid:
-            repo_id = repo
-        else:
-            repo_id = await conn.fetchval(
-                "SELECT id FROM repo WHERE name = $1", repo
-            )
-
-        if not repo_id:
-            return {
-                "error": f"Repository not found: {repo}",
-                "why": "Repository does not exist in database"
-            }
-
-        # Build index
-        result = await _build_feature_index(
-            repo_id=repo_id,
-            database_url=settings.database_url,
-            regenerate=regenerate
-        )
-
-        return result
-
-    finally:
-        await conn.close()
+    return result
 
 
 @tool("db_review")
@@ -1311,33 +1276,11 @@ async def db_review(
         Comprehensive DB report with JSON and markdown
     """
     settings = Settings()
-    conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo name/ID
-        try:
-            import uuid
-            uuid.UUID(repo)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
-
-        if is_uuid:
-            repo_id = repo
-        else:
-            repo_id = await conn.fetchval(
-                "SELECT id FROM repo WHERE name = $1", repo
-            )
-
-        if not repo_id:
-            return {
-                "error": f"Repository not found: {repo}",
-                "why": "Repository does not exist in database"
-            }
-
-        # Generate DB report
+        # Generate DB report - the underlying function handles schema resolution
         result = await generate_db_architecture_report(
-            repo_id=repo_id,
+            repo_id=repo,  # Can be name or UUID
             target_db_url=target_db_url,
             database_url=settings.database_url,
             regenerate=regenerate,
@@ -1347,7 +1290,6 @@ async def db_review(
         )
 
         return {
-            "repo_id": repo_id,
             "cached": result.cached,
             "updated_at": str(result.updated_at),
             "report_markdown": result.report_text,
@@ -1358,9 +1300,11 @@ async def db_review(
                 "sections": list(result.report_json.keys()) if isinstance(result.report_json, dict) else []
             }
         }
-
-    finally:
-        await conn.close()
+    except ValueError as e:
+        return {
+            "error": f"Repository not found: {repo}",
+            "why": str(e)
+        }
 
 
 @tool("db_feature_context")
@@ -1390,20 +1334,14 @@ async def db_feature_context(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Resolve repo name/ID
+        # Resolve repo name to schema and get repo_id
         try:
-            import uuid
-            uuid.UUID(repo)
-            is_uuid = True
-        except (ValueError, AttributeError):
-            is_uuid = False
-
-        if is_uuid:
-            repo_id = repo
-        else:
-            repo_id = await conn.fetchval(
-                "SELECT id FROM repo WHERE name = $1", repo
-            )
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+        except ValueError as e:
+            return {
+                "error": f"Repository not found: {repo}",
+                "why": str(e)
+            }
 
         if not repo_id:
             return {
@@ -2294,14 +2232,9 @@ async def list_repos() -> dict[str, Any]:
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Get all registered repositories
-        repos = await conn.fetch("""
-            SELECT name, schema_name, root_path, enabled,
-                   created_at, updated_at, last_seen_at, config
-            FROM robomonkey_control.repo_registry
-            WHERE enabled = true
-            ORDER BY updated_at DESC
-        """)
+        # Use list_repo_schemas to get all repos
+        from yonk_code_robomonkey.db.schema_manager import list_repo_schemas
+        repos = await list_repo_schemas(conn)
 
         repo_list = []
         for repo in repos:
@@ -2309,7 +2242,7 @@ async def list_repos() -> dict[str, Any]:
 
             # Get stats for this repo
             async with schema_context(conn, schema_name):
-                stats = await conn.fetchrow("""
+                stats_row = await conn.fetchrow("""
                     SELECT
                         (SELECT COUNT(*) FROM file) as file_count,
                         (SELECT COUNT(*) FROM symbol) as symbol_count,
@@ -2320,7 +2253,7 @@ async def list_repos() -> dict[str, Any]:
                 # Try to get comprehensive review summary if it exists
                 summary_doc = await conn.fetchval("""
                     SELECT content FROM document
-                    WHERE doc_type = 'comprehensive_review'
+                    WHERE type = 'comprehensive_review'
                     ORDER BY created_at DESC
                     LIMIT 1
                 """)
@@ -2335,19 +2268,21 @@ async def list_repos() -> dict[str, Any]:
                         overview = line.strip()[:500]
                         break
 
+            chunk_count = stats_row["chunk_count"] or 0
+            embedding_count = stats_row["embedding_count"] or 0
+
             repo_list.append({
-                "name": repo["name"],
+                "name": repo["repo_name"],
                 "schema": schema_name,
                 "root_path": repo["root_path"],
-                "last_updated": str(repo["updated_at"]) if repo["updated_at"] else None,
-                "last_seen": str(repo["last_seen_at"]) if repo["last_seen_at"] else None,
+                "last_indexed": str(repo["last_indexed_at"]) if repo["last_indexed_at"] else None,
                 "stats": {
-                    "files": stats["file_count"] or 0,
-                    "symbols": stats["symbol_count"] or 0,
-                    "chunks": stats["chunk_count"] or 0,
-                    "embeddings": stats["embedding_count"] or 0,
+                    "files": stats_row["file_count"] or 0,
+                    "symbols": stats_row["symbol_count"] or 0,
+                    "chunks": chunk_count,
+                    "embeddings": embedding_count,
                     "indexed_percent": (
-                        round((stats["embedding_count"] or 0) / max(stats["chunk_count"] or 1, 1) * 100, 1)
+                        round(embedding_count / max(chunk_count, 1) * 100, 1)
                     )
                 },
                 "overview": overview
@@ -2809,3 +2744,281 @@ Include:
 
     finally:
         await conn.close()
+
+
+async def generate_tags_for_topic(
+    topic: str,
+    repo: str | None = None,
+    entity_types: list[str] | None = None,
+    threshold: float = 0.7,
+    max_results: int = 100
+) -> dict[str, Any]:
+    """**SEMANTIC TAG GENERATION** - Automatically tag entities by semantic similarity to a topic.
+
+    Given a topic/keyword (e.g., "UI", "Wrestling Match", "Authentication"), this tool embeds the topic
+    and finds all code chunks, documents, and symbols with similar semantic meaning. It then tags them
+    with the topic name and stores confidence scores.
+
+    USE THIS WHEN: You want to categorize code by topic - "tag all UI-related code", "find and tag
+    authentication components", "mark all database-related files".
+
+    ALGORITHM: (1) Embed topic name, (2) Vector similarity search across chunks/docs/symbols,
+    (3) Filter by threshold, (4) Create tag if doesn't exist, (5) Write entity_tag rows with confidence scores.
+
+    Args:
+        topic: Topic/keyword to tag (e.g., "UI Components", "Wrestler Match")
+        repo: Repository name (defaults to settings.default_repo)
+        entity_types: Types to tag - ["chunk", "document", "symbol", "file"] (default: ["chunk", "document"])
+        threshold: Minimum similarity score 0.0-1.0 (default 0.7)
+        max_results: Maximum entities to tag per type (default 100)
+
+    Returns:
+        {
+            "topic": str,
+            "tag_id": UUID,
+            "tagged_chunks": int,
+            "tagged_docs": int,
+            "tagged_symbols": int,
+            "tagged_files": int,
+            "threshold": float,
+            "entity_types": list
+        }
+    """
+    from ..tagging.semantic_tagger import tag_by_semantic_similarity
+
+    # Defaults
+    if repo is None:
+        repo = settings.default_repo
+    if entity_types is None:
+        entity_types = ["chunk", "document"]
+
+    logger.info(f"generate_tags_for_topic: topic='{topic}', repo={repo}, threshold={threshold}")
+
+    # Get schema for repo
+    conn = await get_connection()
+    try:
+        schema_name = await get_schema_for_repo(conn, repo)
+
+        if not schema_name:
+            return {
+                "error": f"Repository '{repo}' not found",
+                "topic": topic,
+                "why": "Repository does not exist in the index"
+            }
+
+        # Call semantic tagger
+        stats = await tag_by_semantic_similarity(
+            topic=topic,
+            repo_name=repo,
+            database_url=settings.database_url,
+            schema_name=schema_name,
+            entity_types=entity_types,
+            threshold=threshold,
+            max_results=max_results,
+            embeddings_provider=settings.embeddings_provider,
+            embeddings_model=settings.embeddings_model,
+            embeddings_base_url=settings.embeddings_base_url
+        )
+
+        return {
+            "topic": topic,
+            "repo": repo,
+            "schema_name": schema_name,
+            "tag_id": stats["tag_id"],
+            "tagged_chunks": stats["tagged_chunks"],
+            "tagged_docs": stats["tagged_docs"],
+            "tagged_symbols": stats["tagged_symbols"],
+            "tagged_files": stats["tagged_files"],
+            "threshold": threshold,
+            "entity_types": entity_types,
+            "why": f"Semantically tagged {sum([stats['tagged_chunks'], stats['tagged_docs'], stats['tagged_symbols'], stats['tagged_files']])} entities with topic '{topic}'"
+        }
+
+    finally:
+        await conn.close()
+
+
+async def suggest_tags_mcp(
+    repo: str | None = None,
+    max_tags: int = 10,
+    sample_size: int = 50,
+    auto_apply: bool = False,
+    threshold: float = 0.7,
+    max_results_per_tag: int = 100
+) -> dict[str, Any]:
+    """**LLM TAG SUGGESTION** - Analyze codebase and suggest relevant tags for organization.
+
+    Uses LLM to analyze sample code/docs from the repository and suggest high-level categories that would
+    be useful for organizing the codebase. Optionally auto-applies each suggested tag by finding
+    semantically similar content.
+
+    USE THIS WHEN: Starting to organize a new codebase, discovering what categories exist in your code,
+    or wanting to understand high-level structure. Example: "What are the main components in this repo?"
+
+    ALGORITHM: (1) Sample 50 random chunks/docs, (2) Send to LLM with analysis prompt, (3) LLM suggests
+    10 tags with descriptions, (4) If auto_apply=true, run generate_tags_for_topic for each suggestion.
+
+    Args:
+        repo: Repository name (defaults to settings.default_repo)
+        max_tags: Maximum tags to suggest (default 10)
+        sample_size: Number of chunks/docs to sample for analysis (default 50)
+        auto_apply: Automatically apply suggested tags (default false)
+        threshold: If auto_apply, minimum similarity for tagging (default 0.7)
+        max_results_per_tag: If auto_apply, max entities per tag (default 100)
+
+    Returns:
+        {
+            "repo": str,
+            "suggestions": [{"tag": str, "description": str, "estimated_matches": int}],
+            "applied_tags": [{"tag": str, "stats": {...}}]  # if auto_apply=true
+        }
+    """
+    from ..tagging.tag_suggester import suggest_tags, suggest_and_apply_tags
+
+    # Defaults
+    if repo is None:
+        repo = settings.default_repo
+
+    logger.info(f"suggest_tags: repo={repo}, max_tags={max_tags}, auto_apply={auto_apply}")
+
+    # Get schema for repo
+    conn = await get_connection()
+    try:
+        schema_name = await get_schema_for_repo(conn, repo)
+
+        if not schema_name:
+            return {
+                "error": f"Repository '{repo}' not found",
+                "why": "Repository does not exist in the index"
+            }
+
+    finally:
+        await conn.close()
+
+    # Suggest tags (and optionally apply)
+    if auto_apply:
+        result = await suggest_and_apply_tags(
+            repo_name=repo,
+            database_url=settings.database_url,
+            schema_name=schema_name,
+            max_tags=max_tags,
+            sample_size=sample_size,
+            threshold=threshold,
+            max_results_per_tag=max_results_per_tag,
+            llm_model=getattr(settings, 'llm_model', None),
+            llm_base_url=settings.embeddings_base_url,
+            embeddings_provider=settings.embeddings_provider,
+            embeddings_model=settings.embeddings_model,
+            embeddings_base_url=settings.embeddings_base_url
+        )
+
+        return {
+            "repo": repo,
+            "schema_name": schema_name,
+            "suggestions": result["suggestions"],
+            "applied_tags": result["applied_tags"],
+            "why": f"Suggested {len(result['suggestions'])} tags and applied {len(result['applied_tags'])} automatically"
+        }
+    else:
+        suggestions = await suggest_tags(
+            repo_name=repo,
+            database_url=settings.database_url,
+            schema_name=schema_name,
+            max_tags=max_tags,
+            sample_size=sample_size,
+            llm_model=getattr(settings, 'llm_model', None),
+            llm_base_url=settings.embeddings_base_url
+        )
+
+        return {
+            "repo": repo,
+            "schema_name": schema_name,
+            "suggestions": suggestions,
+            "why": f"LLM analyzed {sample_size} code samples and suggested {len(suggestions)} tags for categorization"
+        }
+
+
+async def categorize_file(
+    file_path: str,
+    repo: str | None = None,
+    tag: str | None = None,
+    auto_suggest: bool = True
+) -> dict[str, Any]:
+    """**DIRECT FILE CATEGORIZATION** - Categorize a specific file with a tag.
+
+    Simple, direct tool to tag individual files. If no tag is specified, the LLM analyzes the file
+    and suggests an appropriate category. This is perfect for interactive use: "categorize file X as Y"
+    or "what category should file X be in?"
+
+    USE THIS WHEN: You want to manually categorize a specific file, or ask the system to suggest
+    a category for a file. Examples: "categorize LoginForm.tsx as UI", "what should api/users.ts be tagged as?"
+
+    ALGORITHM: (1) If tag not provided, analyze file content with LLM and suggest tag, (2) Check existing
+    tags and prefer reusing them, (3) Tag the file and all its code chunks, (4) Return results.
+
+    Args:
+        file_path: Relative path to file from repo root (e.g., "src/components/LoginForm.tsx")
+        repo: Repository name (defaults to settings.default_repo)
+        tag: Tag name to apply (e.g., "Frontend UI", "Database"). If None, LLM will suggest one.
+        auto_suggest: If tag is None, automatically suggest using LLM (default True)
+
+    Returns:
+        {
+            "file_path": str,
+            "tag_applied": str,
+            "tag_suggested": bool,
+            "suggestion": {"tag": str, "confidence": float, "reason": str},
+            "existing_tags": [list of existing tags],
+            "stats": {"tagged_files": 1, "tagged_chunks": N}
+        }
+    """
+    from ..tagging.file_tagger import categorize_file as categorize_file_impl
+
+    # Defaults
+    if repo is None:
+        repo = settings.default_repo
+
+    logger.info(f"categorize_file: file={file_path}, repo={repo}, tag={tag}")
+
+    # Get schema for repo
+    conn = await get_connection()
+    try:
+        schema_name = await get_schema_for_repo(conn, repo)
+
+        if not schema_name:
+            return {
+                "error": f"Repository '{repo}' not found",
+                "file_path": file_path,
+                "why": "Repository does not exist in the index"
+            }
+
+    finally:
+        await conn.close()
+
+    # Categorize the file
+    result = await categorize_file_impl(
+        file_path=file_path,
+        repo_name=repo,
+        database_url=settings.database_url,
+        schema_name=schema_name,
+        tag_name=tag,
+        auto_suggest=auto_suggest,
+        llm_model=getattr(settings, 'llm_model', None),
+        llm_base_url=settings.embeddings_base_url
+    )
+
+    why_parts = []
+    if result["tag_suggested"]:
+        why_parts.append(f"LLM suggested tag '{result['tag_applied']}' with {result['suggestion']['confidence']:.0%} confidence")
+        why_parts.append(f"Reason: {result['suggestion']['reason']}")
+    else:
+        why_parts.append(f"Applied tag '{result['tag_applied']}' as specified")
+
+    why_parts.append(f"Tagged file and {result['stats']['tagged_chunks']} code chunks")
+
+    return {
+        **result,
+        "repo": repo,
+        "schema_name": schema_name,
+        "why": ". ".join(why_parts)
+    }

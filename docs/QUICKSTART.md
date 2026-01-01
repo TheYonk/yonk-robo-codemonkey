@@ -219,6 +219,11 @@ EMBEDDING_BATCH_SIZE=100
 
 **💡 Tip:** Only change DATABASE_URL if you know you need to. The defaults work for most people!
 
+**📝 Note on Configuration:**
+This guide uses the `.env` file for configuration. There's also a `config/robomonkey-daemon.yaml` file, but that's ONLY for the background daemon (which we're not using in this quickstart). For now, just use `.env` - it's all you need for CLI commands and manual operations.
+
+👉 **See [CONFIG.md](../CONFIG.md) for a complete explanation of both config systems.**
+
 Save and close the file.
 
 ---

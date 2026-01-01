@@ -12,7 +12,9 @@
         "EMBEDDINGS_PROVIDER": "ollama",
         "EMBEDDINGS_MODEL": "snowflake-arctic-embed2:latest",
         "EMBEDDINGS_BASE_URL": "http://localhost:11434",
-        "EMBEDDINGS_DIMENSION": "1024"
+        "EMBEDDINGS_DIMENSION": "1024",
+        "LLM_MODEL": "qwen3-coder:30b",
+        "DEFAULT_REPO": "codegraph-mcp"
       }
     }
   }

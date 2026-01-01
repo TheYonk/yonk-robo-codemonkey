@@ -153,6 +153,16 @@ robomonkey --help
 
 ### Step 4: Configure Environment
 
+**📝 Important: Configuration System**
+
+RoboMonkey uses **two separate config files**:
+- **`.env`** - For CLI commands, MCP server, scripts (setup this now)
+- **`config/robomonkey-daemon.yaml`** - For daemon only (setup later in Step B)
+
+👉 **See [CONFIG.md](../CONFIG.md) for complete explanation**
+
+**For now, just setup `.env`:**
+
 ```bash
 # Copy example configuration
 cp .env.example .env
@@ -179,6 +189,8 @@ EMBEDDING_BATCH_SIZE=100
 USE_SCHEMAS=true
 SCHEMA_PREFIX=robomonkey_
 ```
+
+**✅ You're now configured for CLI and MCP server usage!**
 
 ### Step 5: Initialize Database
 
@@ -245,16 +257,48 @@ Embedding 12352 chunks in batches of 100...
 
 The daemon provides automatic background processing (embedding generation, file watching, git sync).
 
-### Step 1: Verify Daemon Components
+**📝 Configuration Change:**
+The daemon uses `config/robomonkey-daemon.yaml`, NOT `.env`. Make sure settings match!
+
+👉 **See [CONFIG.md](../CONFIG.md) - Scenario 2 for daemon setup details**
+
+### Step 1: Configure Daemon YAML
+
+**Important:** Settings in YAML must match your `.env` file (especially database URL).
 
 ```bash
-# Check daemon configuration
+# Edit daemon configuration
+nano config/robomonkey-daemon.yaml
+
+# Make sure these match your .env:
+# - database.control_dsn should match DATABASE_URL
+# - database.schema_prefix should match SCHEMA_PREFIX
+# - embeddings.dimension should match EMBEDDINGS_DIMENSION
+```
+
+**Example matching config:**
+
+`.env` has:
+```env
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/robomonkey
+```
+
+YAML must have:
+```yaml
+database:
+  control_dsn: "postgresql://postgres:postgres@localhost:5433/robomonkey"
+```
+
+### Step 2: Verify Daemon Configuration
+
+```bash
+# Test daemon config loads correctly
 python -c "
-from robomonkey_mcp.daemon.config import DaemonConfig
-config = DaemonConfig.from_env()
-print(f'Workers: {config.num_workers}')
-print(f'Watch enabled: {config.watch_enabled}')
-print(f'Poll interval: {config.poll_interval_seconds}s')
+from yonk_code_robomonkey.config.daemon import load_daemon_config
+config = load_daemon_config()
+print(f'Database: {config.database.control_dsn}')
+print(f'Embeddings: {config.embeddings.model}')
+print(f'Workers: {config.workers.embed_workers}')
 "
 ```
 
@@ -368,16 +412,22 @@ The MCP server configuration varies by IDE. See [D. IDE Integration](#d-ide-inte
       "command": "/path/to/robomonkey-mcp/.venv/bin/python",
       "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
+        "DEFAULT_REPO": "myrepo"
       }
     }
   }
 }
 ```
 
+**Note:** Setting `DEFAULT_REPO` here means you can omit the repo name in queries!
+
 **Test it:**
 ```bash
-# In Claude Code chat
+# With DEFAULT_REPO set, you can just say:
+"Search for authentication functions"
+
+# Instead of:
 "Search for authentication functions in myrepo"
 ```
 
@@ -393,7 +443,8 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
       "command": "/path/to/robomonkey-mcp/.venv/bin/python",
       "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
+        "DEFAULT_REPO": "myrepo"
       }
     }
   }
@@ -401,6 +452,8 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 ```
 
 **Restart Claude Desktop** after saving the configuration.
+
+**Tip:** Add `DEFAULT_REPO` to avoid specifying repo name in every query!
 
 ### Cline (VS Code Extension)
 
@@ -413,12 +466,15 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
       "command": "/path/to/robomonkey-mcp/.venv/bin/python",
       "args": ["-m", "robomonkey_mcp.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
+        "DEFAULT_REPO": "myrepo"
       }
     }
   }
 }
 ```
+
+**Tip:** With `DEFAULT_REPO` set, you can ask Cline to search without specifying the repo!
 
 ### Cursor
 

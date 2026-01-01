@@ -144,6 +144,16 @@ class CodeGraphDaemon:
             watcher_task = asyncio.create_task(watcher.run())
             logger.info("File system watcher started")
 
+        # Start health monitor
+        from yonk_code_robomonkey.daemon.health_monitor import HealthMonitor
+        health_monitor = HealthMonitor(
+            pool=self.pool,
+            job_queue=self.job_queue,
+            config=self.config
+        )
+        health_task = await health_monitor.start()
+        logger.info("Health monitor started")
+
         logger.info("Daemon running - waiting for jobs")
 
         # Wait for shutdown signal
@@ -158,9 +168,11 @@ class CodeGraphDaemon:
         worker_task.cancel()
         if watcher_task:
             watcher_task.cancel()
+        health_monitor.stop()
+        health_task.cancel()
 
         # Wait for tasks to complete
-        tasks = [heartbeat_task, worker_task]
+        tasks = [heartbeat_task, worker_task, health_task]
         if watcher_task:
             tasks.append(watcher_task)
 

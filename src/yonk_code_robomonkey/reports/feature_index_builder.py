@@ -11,6 +11,7 @@ from typing import Any
 from collections import defaultdict
 import asyncpg
 import re
+from yonk_code_robomonkey.db.schema_manager import resolve_repo_to_schema, schema_context
 
 
 async def build_feature_index(
@@ -31,63 +32,76 @@ async def build_feature_index(
     conn = await asyncpg.connect(dsn=database_url)
 
     try:
-        # Check if index exists
-        if not regenerate:
-            existing_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM feature_index WHERE repo_id = $1",
-                repo_id
-            )
+        # Resolve repo_id to schema
+        try:
+            resolved_repo_id, schema_name = await resolve_repo_to_schema(conn, repo_id)
+        except ValueError as e:
+            return {
+                "error": f"Repository not found: {repo_id}",
+                "why": str(e)
+            }
 
-            if existing_count > 0:
-                return {
-                    "success": True,
-                    "features_count": existing_count,
-                    "regenerated": False,
-                    "why": "Feature index already exists. Use regenerate=true to rebuild."
-                }
+        # Use the resolved repo_id (in case a name was passed)
+        repo_id = resolved_repo_id
 
-        # Delete existing features if regenerating
-        if regenerate:
-            await conn.execute(
-                "DELETE FROM feature_index WHERE repo_id = $1",
-                repo_id
-            )
+        async with schema_context(conn, schema_name):
+            # Check if index exists
+            if not regenerate:
+                existing_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM feature_index WHERE repo_id = $1",
+                    repo_id
+                )
 
-        features = []
+                if existing_count > 0:
+                    return {
+                        "success": True,
+                        "features_count": existing_count,
+                        "regenerated": False,
+                        "why": "Feature index already exists. Use regenerate=true to rebuild."
+                    }
 
-        # 1. Extract features from tags
-        tag_features = await _extract_from_tags(conn, repo_id)
-        features.extend(tag_features)
+            # Delete existing features if regenerating
+            if regenerate:
+                await conn.execute(
+                    "DELETE FROM feature_index WHERE repo_id = $1",
+                    repo_id
+                )
 
-        # 2. Extract features from module summaries
-        module_features = await _extract_from_modules(conn, repo_id)
-        features.extend(module_features)
+            features = []
 
-        # 3. Extract features from documentation headings
-        doc_features = await _extract_from_docs(conn, repo_id)
-        features.extend(doc_features)
+            # 1. Extract features from tags
+            tag_features = await _extract_from_tags(conn, repo_id)
+            features.extend(tag_features)
 
-        # 4. Deduplicate and merge features
-        merged_features = _merge_features(features)
+            # 2. Extract features from module summaries
+            module_features = await _extract_from_modules(conn, repo_id)
+            features.extend(module_features)
 
-        # 5. Insert features
-        for feature in merged_features:
-            await conn.execute(
-                """
-                INSERT INTO feature_index (repo_id, name, description, evidence, source)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (repo_id, name) DO UPDATE SET
-                    description = EXCLUDED.description,
-                    evidence = EXCLUDED.evidence,
-                    source = EXCLUDED.source,
-                    updated_at = now()
-                """,
-                repo_id,
-                feature["name"],
-                feature["description"],
-                feature["evidence"],
-                feature["source"]
-            )
+            # 3. Extract features from documentation headings
+            doc_features = await _extract_from_docs(conn, repo_id)
+            features.extend(doc_features)
+
+            # 4. Deduplicate and merge features
+            merged_features = _merge_features(features)
+
+            # 5. Insert features
+            for feature in merged_features:
+                await conn.execute(
+                    """
+                    INSERT INTO feature_index (repo_id, name, description, evidence, source)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (repo_id, name) DO UPDATE SET
+                        description = EXCLUDED.description,
+                        evidence = EXCLUDED.evidence,
+                        source = EXCLUDED.source,
+                        updated_at = now()
+                    """,
+                    repo_id,
+                    feature["name"],
+                    feature["description"],
+                    feature["evidence"],
+                    feature["source"]
+                )
 
         return {
             "success": True,

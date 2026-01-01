@@ -45,6 +45,11 @@ async def init_schema_tables(conn: asyncpg.Connection, schema_name: str) -> None
     with open(DDL_PATH, 'r') as f:
         ddl_sql = f.read()
 
+    # Replace hardcoded vector dimension with configured dimension
+    # This ensures the schema matches the embedding model's output dimension
+    configured_dimension = settings.embeddings_dimension
+    ddl_sql = ddl_sql.replace('vector(1536)', f'vector({configured_dimension})')
+
     # First, ensure extensions are installed (extensions are database-wide, not schema-specific)
     await conn.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')
     await conn.execute('CREATE EXTENSION IF NOT EXISTS vector')

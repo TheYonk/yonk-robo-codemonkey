@@ -1,0 +1,22 @@
+[Unit]
+Description=RoboMonkey MCP Daemon
+After=network.target postgresql.service docker.service
+Wants=postgresql.service docker.service
+
+[Service]
+Type=simple
+User=yonk
+WorkingDirectory=/home/yonk/code-retro/codegraph-mcp
+Environment=PATH=/home/yonk/code-retro/codegraph-mcp/.venv/bin:/usr/bin:/bin
+Environment=ROBOMONKEY_CONFIG=/home/yonk/code-retro/codegraph-mcp/config/robomonkey-daemon.yaml
+ExecStart=/home/yonk/code-retro/codegraph-mcp/.venv/bin/python -m yonk_code_robomonkey.daemon.main
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Logging
+SyslogIdentifier=robomonkey-daemon
+
+[Install]
+WantedBy=multi-user.target

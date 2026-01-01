@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 class RepoEventHandler(FileSystemEventHandler):
     """Handles file system events for a single repo."""
 
-    SUPPORTED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java"}
+    CODE_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java"}
+    DOC_EXTENSIONS = {".md", ".rst", ".adoc"}
+    SUPPORTED_EXTENSIONS = CODE_EXTENSIONS | DOC_EXTENSIONS
 
     def __init__(self, repo_name: str, schema_name: str, root_path: Path,
                  ignore_patterns: list[str], event_queue: asyncio.Queue):
@@ -48,6 +50,10 @@ class RepoEventHandler(FileSystemEventHandler):
 
         return True
 
+    def _is_doc_file(self, path: str) -> bool:
+        """Check if file is a documentation file."""
+        return Path(path).suffix in self.DOC_EXTENSIONS
+
     def on_created(self, event: FileSystemEvent):
         if event.is_directory or not self._should_process(event.src_path):
             return
@@ -58,7 +64,8 @@ class RepoEventHandler(FileSystemEventHandler):
             "schema_name": self.schema_name,
             "path": event.src_path,
             "op": "UPSERT",
-            "reason": "file_created"
+            "reason": "file_created",
+            "is_doc": self._is_doc_file(event.src_path)
         })
 
     def on_modified(self, event: FileSystemEvent):
@@ -71,7 +78,8 @@ class RepoEventHandler(FileSystemEventHandler):
             "schema_name": self.schema_name,
             "path": event.src_path,
             "op": "UPSERT",
-            "reason": "file_modified"
+            "reason": "file_modified",
+            "is_doc": self._is_doc_file(event.src_path)
         })
 
     def on_deleted(self, event: FileSystemEvent):
@@ -84,7 +92,8 @@ class RepoEventHandler(FileSystemEventHandler):
             "schema_name": self.schema_name,
             "path": event.src_path,
             "op": "DELETE",
-            "reason": "file_deleted"
+            "reason": "file_deleted",
+            "is_doc": self._is_doc_file(event.src_path)
         })
 
     def on_moved(self, event: FileSystemEvent):
@@ -97,7 +106,8 @@ class RepoEventHandler(FileSystemEventHandler):
                     "schema_name": self.schema_name,
                     "path": event.src_path,
                     "op": "DELETE",
-                    "reason": "file_moved_from"
+                    "reason": "file_moved_from",
+                    "is_doc": self._is_doc_file(event.src_path)
                 })
 
             if self._should_process(event.dest_path):
@@ -107,7 +117,8 @@ class RepoEventHandler(FileSystemEventHandler):
                     "schema_name": self.schema_name,
                     "path": event.dest_path,
                     "op": "UPSERT",
-                    "reason": "file_moved_to"
+                    "reason": "file_moved_to",
+                    "is_doc": self._is_doc_file(event.dest_path)
                 })
 
 
@@ -206,40 +217,58 @@ class RepoWatcher:
 
         logger.info(f"Flushing {len(events)} pending file events")
 
-        # Group by repo
-        by_repo: dict[str, list[dict]] = defaultdict(list)
+        # Group by repo and type (code vs doc)
+        by_repo: dict[str, dict[str, list[dict]]] = defaultdict(lambda: {"code": [], "doc": []})
         for event in events:
-            by_repo[event["repo_name"]].append(event)
+            event_type = "doc" if event.get("is_doc", False) else "code"
+            by_repo[event["repo_name"]][event_type].append(event)
 
         # Enqueue jobs
-        for repo_name, repo_events in by_repo.items():
-            if len(repo_events) == 1:
-                # Single file - enqueue individual job
-                event = repo_events[0]
-                await self.job_queue.enqueue(
-                    repo_name=event["repo_name"],
-                    schema_name=event["schema_name"],
-                    job_type="REINDEX_FILE",
-                    payload={
-                        "path": event["path"],
-                        "op": event["op"],
-                        "reason": event["reason"],
-                    },
-                    priority=6,  # High priority for watch events
-                    dedup_key=f"{event['repo_name']}:{event['path']}:{event['op']}"
-                )
-            else:
-                # Multiple files - batch job
-                paths = [{"path": e["path"], "op": e["op"]} for e in repo_events]
+        for repo_name, event_types in by_repo.items():
+            code_events = event_types["code"]
+            doc_events = event_types["doc"]
+
+            # Handle code file events
+            if code_events:
+                if len(code_events) == 1:
+                    # Single code file - enqueue individual job
+                    event = code_events[0]
+                    await self.job_queue.enqueue(
+                        repo_name=event["repo_name"],
+                        schema_name=event["schema_name"],
+                        job_type="REINDEX_FILE",
+                        payload={
+                            "path": event["path"],
+                            "op": event["op"],
+                            "reason": event["reason"],
+                        },
+                        priority=6,  # High priority for watch events
+                        dedup_key=f"{event['repo_name']}:{event['path']}:{event['op']}"
+                    )
+                else:
+                    # Multiple code files - batch job
+                    paths = [{"path": e["path"], "op": e["op"]} for e in code_events]
+                    await self.job_queue.enqueue(
+                        repo_name=repo_name,
+                        schema_name=code_events[0]["schema_name"],
+                        job_type="REINDEX_MANY",
+                        payload={
+                            "paths": paths,
+                            "reason": "watch_batch",
+                        },
+                        priority=6,
+                    )
+
+            # Handle doc file events - trigger DOCS_SCAN for the repo
+            if doc_events:
+                logger.info(f"Detected {len(doc_events)} doc file changes for {repo_name}, triggering DOCS_SCAN")
                 await self.job_queue.enqueue(
                     repo_name=repo_name,
-                    schema_name=repo_events[0]["schema_name"],
-                    job_type="REINDEX_MANY",
-                    payload={
-                        "paths": paths,
-                        "reason": "watch_batch",
-                    },
-                    priority=6,
+                    schema_name=doc_events[0]["schema_name"],
+                    job_type="DOCS_SCAN",
+                    payload={},
+                    priority=7,  # Slightly lower priority than code changes
+                    dedup_key=f"{repo_name}:docs_scan"
                 )
 
         logger.info(f"Enqueued jobs for {len(by_repo)} repos")

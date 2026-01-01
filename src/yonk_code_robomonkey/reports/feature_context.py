@@ -13,6 +13,7 @@ import asyncpg
 
 from yonk_code_robomonkey.retrieval.hybrid_search import hybrid_search
 from yonk_code_robomonkey.retrieval.graph_traversal import get_callers, get_callees
+from yonk_code_robomonkey.db.schema_manager import schema_context
 
 
 @dataclass
@@ -34,6 +35,7 @@ async def get_feature_context(
     embeddings_model: str,
     embeddings_base_url: str,
     embeddings_api_key: str | None = None,
+    schema_name: str | None = None,
     filters: dict[str, Any] | None = None,
     top_k_files: int = 25,
     budget_tokens: int = 12000,
@@ -50,6 +52,7 @@ async def get_feature_context(
         embeddings_model: Embeddings model name
         embeddings_base_url: Embeddings base URL
         embeddings_api_key: API key (for vLLM)
+        schema_name: Schema name for repo (required for schema isolation)
         filters: Optional filters (tags, language, path)
         top_k_files: Number of top files to return
         budget_tokens: Token budget for context
@@ -59,6 +62,9 @@ async def get_feature_context(
     Returns:
         FeatureContextResult with all relevant context
     """
+    if not schema_name:
+        raise ValueError("schema_name is required for feature context retrieval")
+
     conn = await asyncpg.connect(dsn=database_url)
 
     try:
@@ -85,42 +91,44 @@ async def get_feature_context(
             final_top_k=top_k_files * 3  # Get more candidates for filtering
         )
 
-        # Step 2: Search feature index (if exists)
-        feature_results = await _search_feature_index(conn, repo_id, query)
+        # Use schema context for all repo-specific queries
+        async with schema_context(conn, schema_name):
+            # Step 2: Search feature index (if exists)
+            feature_results = await _search_feature_index(conn, repo_id, query)
 
-        # Step 3: Group results by file
-        file_contexts = await _group_by_file(
-            conn=conn,
-            repo_id=repo_id,
-            search_results=search_results,
-            feature_results=feature_results,
-            top_k_files=top_k_files,
-            path_prefix=path_prefix,
-            language=language
-        )
+            # Step 3: Group results by file
+            file_contexts = await _group_by_file(
+                conn=conn,
+                repo_id=repo_id,
+                search_results=search_results,
+                feature_results=feature_results,
+                top_k_files=top_k_files,
+                path_prefix=path_prefix,
+                language=language
+            )
 
-        # Step 4: Get relevant documents
-        relevant_docs = await _get_relevant_docs(
-            conn=conn,
-            repo_id=repo_id,
-            query=query,
-            top_k=10
-        )
+            # Step 4: Get relevant documents
+            relevant_docs = await _get_relevant_docs(
+                conn=conn,
+                repo_id=repo_id,
+                query=query,
+                top_k=10
+            )
 
-        # Step 5: Identify key flows
-        key_flows = await _identify_key_flows(
-            conn=conn,
-            repo_id=repo_id,
-            file_contexts=file_contexts,
-            depth=depth
-        )
+            # Step 5: Identify key flows
+            key_flows = await _identify_key_flows(
+                conn=conn,
+                repo_id=repo_id,
+                file_contexts=file_contexts,
+                depth=depth
+            )
 
-        # Step 6: Generate architecture notes
-        architecture_notes = await _generate_architecture_notes(
-            conn=conn,
-            repo_id=repo_id,
-            file_contexts=file_contexts
-        )
+            # Step 6: Generate architecture notes
+            architecture_notes = await _generate_architecture_notes(
+                conn=conn,
+                repo_id=repo_id,
+                file_contexts=file_contexts
+            )
 
         # Step 7: Build "why" explanation
         why = {

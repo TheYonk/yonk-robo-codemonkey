@@ -15,6 +15,7 @@ from datetime import datetime
 from yonk_code_robomonkey.db_introspect.schema_extractor import extract_db_schema, DBSchema
 from yonk_code_robomonkey.db_introspect.routine_analyzer import analyze_routine
 from yonk_code_robomonkey.db_introspect.app_call_discoverer import discover_db_calls
+from yonk_code_robomonkey.db.schema_manager import resolve_repo_to_schema, schema_context
 
 
 @dataclass
@@ -40,7 +41,7 @@ async def generate_db_architecture_report(
     Generate comprehensive database architecture report.
 
     Args:
-        repo_id: Repository UUID
+        repo_id: Repository UUID or name
         target_db_url: Connection string for target database to analyze
         database_url: CodeGraph database connection string
         regenerate: Force regeneration even if cached
@@ -53,49 +54,59 @@ async def generate_db_architecture_report(
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
-        # Calculate content hash for caching
-        content_hash = await _calculate_content_hash(conn, repo_id, target_db_url, schemas or [])
+        # Resolve repo_id to schema
+        try:
+            resolved_repo_id, schema_name = await resolve_repo_to_schema(conn, repo_id)
+        except ValueError as e:
+            raise ValueError(f"Repository not found: {repo_id}") from e
 
-        # Check for cached report
-        if not regenerate:
-            cached = await conn.fetchrow(
-                """
-                SELECT d.content, d.created_at
-                FROM document d
-                WHERE d.repo_id = $1
-                  AND d.type = 'DB_REPORT'
-                  AND d.source = 'GENERATED'
-                  AND d.metadata->>'content_hash' = $2
-                ORDER BY d.created_at DESC
-                LIMIT 1
-                """,
-                repo_id, content_hash
-            )
-            if cached:
-                report_json = json.loads(cached['content'])
-                report_text = _generate_markdown(report_json)
-                return DBReportResult(
-                    cached=True,
-                    report_json=report_json,
-                    report_text=report_text,
-                    updated_at=cached['created_at'],
-                    content_hash=content_hash
+        # Use the resolved repo_id (in case a name was passed)
+        repo_id = resolved_repo_id
+
+        async with schema_context(conn, schema_name):
+            # Calculate content hash for caching
+            content_hash = await _calculate_content_hash(conn, repo_id, target_db_url, schemas or [])
+
+            # Check for cached report
+            if not regenerate:
+                cached = await conn.fetchrow(
+                    """
+                    SELECT d.content, d.created_at
+                    FROM document d
+                    WHERE d.repo_id = $1
+                      AND d.type = 'DB_REPORT'
+                      AND d.source = 'GENERATED'
+                      AND d.metadata->>'content_hash' = $2
+                    ORDER BY d.created_at DESC
+                    LIMIT 1
+                    """,
+                    repo_id, content_hash
                 )
+                if cached:
+                    report_json = json.loads(cached['content'])
+                    report_text = _generate_markdown(report_json)
+                    return DBReportResult(
+                        cached=True,
+                        report_json=report_json,
+                        report_text=report_text,
+                        updated_at=cached['created_at'],
+                        content_hash=content_hash
+                    )
 
-        # Generate new report
-        report_data = await _generate_report_data(
-            conn, repo_id, target_db_url, schemas, max_routines, max_app_calls
-        )
-        report_data['metadata'] = {
-            'generated_at': datetime.utcnow().isoformat(),
-            'content_hash': content_hash,
-            'repo_id': repo_id
-        }
+            # Generate new report
+            report_data = await _generate_report_data(
+                conn, repo_id, target_db_url, schemas, max_routines, max_app_calls
+            )
+            report_data['metadata'] = {
+                'generated_at': datetime.utcnow().isoformat(),
+                'content_hash': content_hash,
+                'repo_id': repo_id
+            }
 
-        report_text = _generate_markdown(report_data)
+            report_text = _generate_markdown(report_data)
 
-        # Store report as document
-        await _store_report(conn, repo_id, report_data, report_text, content_hash)
+            # Store report as document
+            await _store_report(conn, repo_id, report_data, report_text, content_hash)
 
         return DBReportResult(
             cached=False,

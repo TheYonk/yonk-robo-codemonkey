@@ -155,6 +155,159 @@ async def embed_chunks(
         await conn.close()
 
 
+async def embed_documents(
+    repo_id: str,
+    database_url: str,
+    provider: str,
+    model: str,
+    base_url: str,
+    api_key: str = "",
+    only_missing: bool = True,
+    batch_size: int = 32,
+    schema_name: str | None = None,
+    max_chunk_length: int | None = None
+) -> dict[str, int]:
+    """Embed documents for a repository.
+
+    Args:
+        repo_id: Repository UUID
+        database_url: Database connection string
+        provider: "ollama" or "vllm"
+        model: Embedding model name
+        base_url: Provider base URL
+        api_key: API key (for vLLM)
+        only_missing: If True, only embed documents without embeddings
+        batch_size: Batch size for embedding requests
+        schema_name: Optional schema name for schema isolation
+        max_chunk_length: Maximum document length in characters (default from settings)
+
+    Returns:
+        Statistics dict with counts
+
+    Raises:
+        ValueError: If provider is invalid
+    """
+    # Validate provider
+    if provider not in ("ollama", "vllm"):
+        raise ValueError(f"Invalid provider: {provider}. Must be 'ollama' or 'vllm'")
+
+    # Use config default if not specified
+    if max_chunk_length is None:
+        max_chunk_length = settings.max_chunk_length
+
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Set search path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
+        # Get documents that need embedding
+        if only_missing:
+            # Only documents without existing embeddings
+            query = """
+                SELECT d.id, d.content
+                FROM document d
+                LEFT JOIN document_embedding de ON d.id = de.document_id
+                WHERE d.repo_id = $1 AND de.document_id IS NULL
+                ORDER BY d.id
+            """
+        else:
+            # All documents for the repo
+            query = """
+                SELECT id, content
+                FROM document
+                WHERE repo_id = $1
+                ORDER BY id
+            """
+
+        documents = await conn.fetch(query, repo_id)
+
+        if not documents:
+            return {"embedded": 0, "skipped": 0}
+
+        # Prepare texts and IDs, truncating long documents
+        doc_ids = []
+        doc_texts = []
+        skipped_count = 0
+
+        for row in documents:
+            content = row["content"]
+            # Skip empty or very short documents
+            if not content or len(content.strip()) < 10:
+                print(f"  WARNING: Skipping document {row['id']} (empty or too short: {len(content)} chars)")
+                skipped_count += 1
+                continue
+
+            if len(content) > max_chunk_length:
+                # Truncate to max length
+                print(f"  WARNING: Truncating document {row['id']} from {len(content)} to {max_chunk_length} chars")
+                doc_ids.append(row["id"])
+                doc_texts.append(content[:max_chunk_length])
+            else:
+                doc_ids.append(row["id"])
+                doc_texts.append(content)
+
+        total_docs = len(doc_texts)
+        print(f"Embedding {total_docs} documents in batches of {settings.embedding_batch_size}...")
+
+        # Process in batches
+        embedded_count = 0
+        batch_size_write = settings.embedding_batch_size
+
+        for batch_start in range(0, total_docs, batch_size_write):
+            batch_end = min(batch_start + batch_size_write, total_docs)
+            batch_texts = doc_texts[batch_start:batch_end]
+            batch_ids = doc_ids[batch_start:batch_end]
+
+            # Generate embeddings for this batch
+            if provider == "ollama":
+                batch_embeddings = await ollama_embed(
+                    batch_texts,
+                    model=model,
+                    base_url=base_url,
+                    embedding_dim=settings.embeddings_dimension,
+                    batch_size=1  # Ollama processes one at a time
+                )
+            else:  # vllm
+                batch_embeddings = await vllm_embed(
+                    batch_texts,
+                    model=model,
+                    base_url=base_url,
+                    api_key=api_key,
+                    batch_size=batch_size
+                )
+
+            # Store batch embeddings
+            for doc_id, embedding in zip(batch_ids, batch_embeddings):
+                # Convert to string format for pgvector
+                vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
+
+                # Upsert embedding
+                await conn.execute(
+                    """
+                    INSERT INTO document_embedding (document_id, embedding)
+                    VALUES ($1, $2::vector)
+                    ON CONFLICT (document_id)
+                    DO UPDATE SET embedding = EXCLUDED.embedding
+                    """,
+                    doc_id,
+                    vec_str
+                )
+                embedded_count += 1
+
+            print(f"  ✓ Batch {batch_start//batch_size_write + 1}: Embedded {embedded_count}/{total_docs} documents")
+
+        print(f"✓ Completed: Embedded {embedded_count} documents, skipped {skipped_count}")
+
+        return {
+            "embedded": embedded_count,
+            "skipped": skipped_count
+        }
+
+    finally:
+        await conn.close()
+
+
 async def embed_repo(
     repo_id: str | None = None,
     repo_name: str | None = None,
@@ -232,13 +385,25 @@ async def embed_repo(
             max_chunk_length=max_chunk_length
         )
 
-        # TODO: Also embed documents when document_embedding support is added
+        # Embed documents
+        doc_stats = await embed_documents(
+            repo_id=str(repo_id),
+            database_url=database_url,
+            provider=embeddings_provider,
+            model=embeddings_model,
+            base_url=embeddings_base_url,
+            api_key=embeddings_api_key,
+            only_missing=only_missing,
+            batch_size=batch_size,
+            schema_name=schema_name,
+            max_chunk_length=max_chunk_length
+        )
 
         return {
             "chunks_embedded": chunk_stats.get("embedded", 0),
             "chunks_skipped": chunk_stats.get("skipped", 0),
-            "docs_embedded": 0,  # Placeholder
-            "docs_skipped": 0    # Placeholder
+            "docs_embedded": doc_stats.get("embedded", 0),
+            "docs_skipped": doc_stats.get("skipped", 0)
         }
 
     finally:

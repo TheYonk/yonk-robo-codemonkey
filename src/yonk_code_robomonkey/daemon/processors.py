@@ -52,12 +52,15 @@ class FullIndexProcessor(JobProcessor):
         # Import indexer
         from yonk_code_robomonkey.indexer.indexer import index_repository
 
-        # Run full index
+        # Run full index (check payload for force flag)
+        import json
+        payload = job.payload if isinstance(job.payload, dict) else json.loads(job.payload) if job.payload else {}
+        force = payload.get("force", False)
         stats = await index_repository(
             repo_path=repo_path,
             repo_name=job.repo_name,
             database_url=self.config.database.control_dsn,
-            force=False
+            force=force
         )
 
         logger.info(f"FULL_INDEX complete for {job.repo_name}: {stats}")
@@ -68,8 +71,10 @@ class ReindexFileProcessor(JobProcessor):
 
     async def process(self, job: Job) -> None:
         """Reindex a single file."""
-        file_path = job.payload.get("path")
-        op = job.payload.get("op", "UPSERT")
+        import json
+        payload = job.payload if isinstance(job.payload, dict) else json.loads(job.payload) if job.payload else {}
+        file_path = payload.get("path")
+        op = payload.get("op", "UPSERT")
 
         if not file_path:
             raise ValueError("REINDEX_FILE job missing 'path' in payload")
@@ -95,26 +100,29 @@ class ReindexFileProcessor(JobProcessor):
         schema_name = repo["schema_name"]
 
         # Get repo_id from the repo schema
-        async with await asyncpg.connect(dsn=self.config.database.control_dsn) as conn:
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
             await conn.execute(f'SET search_path TO "{schema_name}", public')
             repo_id = await conn.fetchval(
                 "SELECT id FROM repo WHERE name = $1",
                 job.repo_name
             )
+        finally:
+            await conn.close()
 
         if not repo_id:
             raise ValueError(f"Repo ID not found for {job.repo_name} in schema {schema_name}")
 
         # Import reindexer
-        from yonk_code_robomonkey.freshness.reindexer import reindex_file
+        from yonk_code_robomonkey.indexer.reindexer import reindex_file
 
         # Reindex the file
         await reindex_file(
             repo_id=str(repo_id),
-            abs_path=str(abs_path),
+            abs_path=abs_path,
             op=op,
             database_url=self.config.database.control_dsn,
-            schema_name=schema_name
+            repo_root=repo_root
         )
 
         logger.info(f"REINDEX_FILE complete: {file_path}")
@@ -150,18 +158,21 @@ class ReindexManyProcessor(JobProcessor):
         schema_name = repo["schema_name"]
 
         # Get repo_id from the repo schema
-        async with await asyncpg.connect(dsn=self.config.database.control_dsn) as conn:
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
             await conn.execute(f'SET search_path TO "{schema_name}", public')
             repo_id = await conn.fetchval(
                 "SELECT id FROM repo WHERE name = $1",
                 job.repo_name
             )
+        finally:
+            await conn.close()
 
         if not repo_id:
             raise ValueError(f"Repo ID not found for {job.repo_name} in schema {schema_name}")
 
         # Import reindexer
-        from yonk_code_robomonkey.freshness.reindexer import reindex_file
+        from yonk_code_robomonkey.indexer.reindexer import reindex_file
 
         # Process each file
         success_count = 0
@@ -304,12 +315,15 @@ class DocsScanProcessor(JobProcessor):
         schema_name = repo["schema_name"]
 
         # Get repo_id from the repo schema
-        async with await asyncpg.connect(dsn=self.config.database.control_dsn) as conn:
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
             await conn.execute(f'SET search_path TO "{schema_name}", public')
             repo_id = await conn.fetchval(
                 "SELECT id FROM repo WHERE name = $1",
                 job.repo_name
             )
+        finally:
+            await conn.close()
 
         if not repo_id:
             raise ValueError(f"Repo ID not found for {job.repo_name}")
@@ -356,12 +370,15 @@ class TagRulesSyncProcessor(JobProcessor):
         schema_name = repo["schema_name"]
 
         # Get repo_id from the repo schema
-        async with await asyncpg.connect(dsn=self.config.database.control_dsn) as conn:
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
             await conn.execute(f'SET search_path TO "{schema_name}", public')
             repo_id = await conn.fetchval(
                 "SELECT id FROM repo WHERE name = $1",
                 job.repo_name
             )
+        finally:
+            await conn.close()
 
         if not repo_id:
             raise ValueError(f"Repo ID not found for {job.repo_name}")
@@ -384,6 +401,61 @@ class TagRulesSyncProcessor(JobProcessor):
         logger.info(f"TAG_RULES_SYNC complete for {job.repo_name}: {stats}")
 
 
+class RegenerateSummaryProcessor(JobProcessor):
+    """Processor for REGENERATE_SUMMARY jobs."""
+
+    async def process(self, job: Job) -> None:
+        """Regenerate comprehensive summary for a repository."""
+        logger.info(f"Processing REGENERATE_SUMMARY for {job.repo_name}")
+
+        # Get repo info
+        async with self.control_pool.acquire() as conn:
+            repo = await conn.fetchrow(
+                """
+                SELECT name, schema_name
+                FROM robomonkey_control.repo_registry
+                WHERE name = $1
+                """,
+                job.repo_name
+            )
+
+        if not repo:
+            raise ValueError(f"Repo not found: {job.repo_name}")
+
+        schema_name = repo["schema_name"]
+
+        # Get repo_id from the repo schema
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1",
+                job.repo_name
+            )
+        finally:
+            await conn.close()
+
+        if not repo_id:
+            raise ValueError(f"Repo ID not found for {job.repo_name}")
+
+        # Import summary generator
+        from yonk_code_robomonkey.reports.generator import generate_comprehensive_review
+
+        # Generate comprehensive review summary
+        result = await generate_comprehensive_review(
+            repo_id=str(repo_id),
+            database_url=self.config.database.control_dsn,
+            regenerate=True,  # Force regeneration
+            max_modules=25,
+            max_files_per_module=20
+        )
+
+        logger.info(
+            f"REGENERATE_SUMMARY complete for {job.repo_name}: "
+            f"cached={result.cached}, hash={result.content_hash[:8]}"
+        )
+
+
 # Registry of processors
 PROCESSORS: dict[str, type[JobProcessor]] = {
     "FULL_INDEX": FullIndexProcessor,
@@ -392,6 +464,7 @@ PROCESSORS: dict[str, type[JobProcessor]] = {
     "EMBED_MISSING": EmbedMissingProcessor,
     "DOCS_SCAN": DocsScanProcessor,
     "TAG_RULES_SYNC": TagRulesSyncProcessor,
+    "REGENERATE_SUMMARY": RegenerateSummaryProcessor,
 }
 
 

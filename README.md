@@ -6,6 +6,26 @@ Local-first MCP server that indexes code and documentation into Postgres with pg
 
 **New to RoboMonkey?** Start here:
 
+### ⚡ Automated Setup (Fastest)
+
+Get up and running in 2 minutes with the automated scripts:
+
+```bash
+# Start everything: database, daemon, and index your first repo
+./quick_start.sh
+
+# When done, tear down everything
+./quick_teardown.sh
+```
+
+The `quick_start.sh` script will:
+- ✅ Start PostgreSQL with pgvector
+- ✅ Initialize database schema
+- ✅ Prompt for your repository path
+- ✅ Start the background daemon
+- ✅ Begin indexing and embedding
+- ✅ Create MCP config for Claude Desktop
+
 ### [📘 Complete Documentation](docs/DOCUMENTATION_INDEX.md)
 
 ### Choose Your Guide:

@@ -46,6 +46,10 @@ class WorkerPool:
                 "count": config.workers.docs_workers,
                 "job_types": ["DOCS_SCAN", "TAG_RULES_SYNC"],
             },
+            "summary": {
+                "count": 1,  # One summary worker per daemon
+                "job_types": ["REGENERATE_SUMMARY"],
+            },
         }
 
     async def _process_job(self, job: Job):
@@ -69,9 +73,11 @@ class WorkerPool:
 
                     logger.info(f"Job {job.id} completed successfully")
 
-                    # Auto-enqueue embeddings after indexing jobs
+                    # Auto-enqueue follow-up jobs after indexing
                     if job.job_type in ["FULL_INDEX", "REINDEX_FILE", "REINDEX_MANY"]:
+                        await self._maybe_enqueue_docs_scan(job)
                         await self._maybe_enqueue_embeddings(job)
+                        await self._maybe_enqueue_summary_regen(job)
 
                 except Exception as e:
                     logger.error(f"Job {job.id} failed: {e}", exc_info=True)
@@ -82,6 +88,22 @@ class WorkerPool:
                         "error_message": str(e),
                     }
                     await self.job_queue.fail_job(job.id, str(e), error_detail)
+
+    async def _maybe_enqueue_docs_scan(self, job: Job):
+        """Auto-enqueue document scanning after indexing."""
+        # Only run docs scan after FULL_INDEX (not for individual file changes)
+        if job.job_type != "FULL_INDEX":
+            return
+
+        logger.info(f"Auto-enqueuing DOCS_SCAN for repo {job.repo_name}")
+        await self.job_queue.enqueue(
+            repo_name=job.repo_name,
+            schema_name=job.schema_name,
+            job_type="DOCS_SCAN",
+            payload={},
+            priority=9,  # Higher priority than embeddings (run docs first)
+            dedup_key=f"{job.repo_name}:docs_scan"
+        )
 
     async def _maybe_enqueue_embeddings(self, job: Job):
         """Auto-enqueue embeddings after indexing if enabled."""
@@ -104,6 +126,69 @@ class WorkerPool:
                 payload={},
                 priority=4,  # Lower priority than indexing
                 dedup_key=f"{job.repo_name}:embed_missing"
+            )
+
+    async def _maybe_enqueue_summary_regen(self, job: Job):
+        """Auto-enqueue summary regeneration after significant code changes."""
+        # Only regenerate summaries after REINDEX_MANY (batch changes) or FULL_INDEX
+        # Skip for single file changes (REINDEX_FILE) to avoid excessive regeneration
+        if job.job_type == "REINDEX_FILE":
+            return
+
+        # Get schema and check if summary exists
+        async with self.pool.acquire() as conn:
+            # Get schema name
+            schema_name_result = await conn.fetchval(
+                "SELECT schema_name FROM robomonkey_control.repo_registry WHERE name = $1",
+                job.repo_name
+            )
+
+            if not schema_name_result:
+                return
+
+            # Set search path and check for existing summary
+            await conn.execute(f'SET search_path TO "{schema_name_result}", public')
+
+            # Get total file count and last summary timestamp
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM file) as total_files,
+                    (SELECT MAX(created_at) FROM document WHERE type = 'comprehensive_review') as last_summary
+                """
+            )
+
+            total_files = stats["total_files"] if stats else 0
+            last_summary = stats["last_summary"] if stats else None
+
+        # Only enqueue if:
+        # 1. For FULL_INDEX: always regenerate
+        # 2. For REINDEX_MANY: check if significant changes (>5% of files)
+        should_regenerate = False
+
+        if job.job_type == "FULL_INDEX":
+            should_regenerate = True
+            logger.info(f"Enqueuing summary regen for FULL_INDEX: {job.repo_name}")
+        elif job.job_type == "REINDEX_MANY":
+            paths_changed = len(job.payload.get("paths", []))
+            if total_files > 0:
+                change_percentage = (paths_changed / total_files) * 100
+                # Regenerate if >5% of files changed
+                if change_percentage > 5:
+                    should_regenerate = True
+                    logger.info(
+                        f"Enqueuing summary regen for {job.repo_name}: "
+                        f"{paths_changed}/{total_files} files changed ({change_percentage:.1f}%)"
+                    )
+
+        if should_regenerate:
+            await self.job_queue.enqueue(
+                repo_name=job.repo_name,
+                schema_name=job.schema_name,
+                job_type="REGENERATE_SUMMARY",
+                payload={},
+                priority=5,  # Lowest priority (lower than embeddings)
+                dedup_key=f"{job.repo_name}:regenerate_summary"
             )
 
     async def _worker_loop(self, worker_id: str, job_types: list[str]):

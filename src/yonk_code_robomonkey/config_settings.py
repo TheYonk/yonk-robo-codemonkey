@@ -41,6 +41,10 @@ class Settings:
         self.vllm_base_url = os.getenv("VLLM_BASE_URL", "http://localhost:8000")
         self.vllm_api_key = os.getenv("VLLM_API_KEY", "local-key")
 
+        # LLM for summaries and text generation
+        self.llm_model = os.getenv("LLM_MODEL", "qwen3-coder:30b")
+        self.llm_base_url = os.getenv("LLM_BASE_URL", self.embeddings_base_url)  # Defaults to embeddings URL
+
         # Repo scanning
         self.repo_root = os.getenv("REPO_ROOT", "")
         self.ignore_file = os.getenv("IGNORE_FILE", ".gitignore")
@@ -54,6 +58,9 @@ class Settings:
         # Context packing
         self.context_budget_tokens = int(os.getenv("CONTEXT_BUDGET_TOKENS", "12000"))
         self.graph_depth = int(os.getenv("GRAPH_DEPTH", "2"))
+
+        # Default repository for MCP server
+        self.default_repo = os.getenv("DEFAULT_REPO", "")
 
 
 # Global settings instance
