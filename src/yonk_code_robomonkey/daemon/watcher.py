@@ -166,7 +166,7 @@ class RepoWatcher:
                 repo_name=repo["name"],
                 schema_name=repo["schema_name"],
                 root_path=root_path,
-                ignore_patterns=self.config.watcher.ignore_patterns,
+                ignore_patterns=self.config.watching.ignore_patterns,
                 event_queue=self.event_queue,
             )
 
@@ -178,8 +178,7 @@ class RepoWatcher:
 
     async def _debounce_loop(self):
         """Debounce events and enqueue jobs."""
-        debounce_ms = self.config.watcher.debounce_ms
-        debounce_sec = debounce_ms / 1000.0
+        debounce_sec = self.config.watching.debounce_seconds
 
         while self.running:
             try:

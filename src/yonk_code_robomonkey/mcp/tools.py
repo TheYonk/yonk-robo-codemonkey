@@ -2644,16 +2644,16 @@ async def universal_search(
 
         # Process doc results
         for r in doc_results:
-            # Doc results have different structure
-            doc_id = r.get("id") or r.get("doc_id")
+            # Doc results have different structure (FTSResult dataclass)
+            doc_id = r.entity_id
             if doc_id not in seen_chunks:
                 seen_chunks.add(doc_id)
                 all_results.append({
                     "source": "documentation",
-                    "file_path": r.get("path", "document"),
-                    "content": r.get("content", "")[:1000],
-                    "score": r.get("score", 0.0),
-                    "doc_type": r.get("doc_type", "unknown")
+                    "file_path": r.path or "document",
+                    "content": (r.content or "")[:1000],
+                    "score": r.rank,
+                    "doc_type": r.doc_type or "unknown"
                 })
 
         # Process semantic results (top scorers only)
