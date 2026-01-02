@@ -59,6 +59,7 @@ async def ping() -> dict[str, str]:
 async def hybrid_search(
     query: str,
     repo: str | None = None,
+    repo_id: str | None = None,
     tags_any: list[str] | None = None,
     tags_all: list[str] | None = None,
     final_top_k: int = 12
@@ -68,6 +69,7 @@ async def hybrid_search(
     Args:
         query: Search query string
         repo: Optional repository name or UUID to filter by (uses DEFAULT_REPO from .env if not provided)
+        repo_id: Optional repository name or UUID (alias for repo, takes precedence if both provided)
         tags_any: Optional list of tags (match any)
         tags_all: Optional list of tags (match all)
         final_top_k: Number of results to return (default 12)
@@ -77,17 +79,21 @@ async def hybrid_search(
     """
     settings = Settings()
 
+    # repo_id is an alias for repo, takes precedence if both provided
+    if repo_id is not None:
+        repo = repo_id
+
     # Use default repo if not provided
     repo = get_repo_or_default(repo)
 
     # Resolve repo to schema if provided
-    repo_id = None
+    resolved_repo_id = None
     schema_name = None
     if repo:
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+            resolved_repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
         except ValueError as e:
             return {
                 "error": str(e),
@@ -103,7 +109,7 @@ async def hybrid_search(
         embeddings_model=settings.embeddings_model,
         embeddings_base_url=settings.embeddings_base_url,
         embeddings_api_key=settings.vllm_api_key,
-        repo_id=repo_id,
+        repo_id=resolved_repo_id,
         schema_name=schema_name,
         tags_any=tags_any,
         tags_all=tags_all,
@@ -432,6 +438,7 @@ async def callees(
 async def doc_search(
     query: str,
     repo: str | None = None,
+    repo_id: str | None = None,
     top_k: int = 10
 ) -> dict[str, Any]:
     """Search documentation and markdown files using hybrid search (vector + FTS).
@@ -439,6 +446,7 @@ async def doc_search(
     Args:
         query: Search query string
         repo: Optional repository name or UUID to filter by
+        repo_id: Optional repository name or UUID (alias for repo, takes precedence if both provided)
         top_k: Number of results to return (default 10)
 
     Returns:
@@ -446,14 +454,18 @@ async def doc_search(
     """
     settings = Settings()
 
+    # repo_id is an alias for repo, takes precedence if both provided
+    if repo_id is not None:
+        repo = repo_id
+
     # Resolve repo to schema if provided
-    repo_id = None
+    resolved_repo_id = None
     schema_name = None
     if repo:
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
+            resolved_repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
         except ValueError as e:
             return {
                 "error": str(e),
@@ -472,7 +484,7 @@ async def doc_search(
         embeddings_model=settings.embeddings_model,
         embeddings_base_url=settings.embeddings_base_url,
         embeddings_api_key=settings.vllm_api_key,
-        repo_id=repo_id,
+        repo_id=resolved_repo_id,
         schema_name=schema_name,
         vector_top_k=30,
         fts_top_k=30,
