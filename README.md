@@ -6,34 +6,66 @@ Local-first MCP server that indexes code and documentation into Postgres with pg
 
 **New to RoboMonkey?** Start here:
 
-### ⚡ Automated Setup (Fastest)
+### Prerequisites
 
-Get up and running in 2 minutes with the automated scripts:
+Before running the automated setup, ensure you have:
+- **Docker** and **Docker Compose** installed
+- **Python 3.11+** installed
+- **Ollama** running locally (or vLLM/OpenAI API access for embeddings)
+- A repository you want to index
+
+### ⚡ Automated Setup (Recommended)
+
+> **🎯 This is the preferred way to get started!** The automated scripts handle everything: database, daemon setup, configuration, and indexing.
+
+Get up and running in **5-10 minutes** with the automated scripts:
 
 ```bash
 # Start everything: database, daemon, and index your first repo
 ./quick_start.sh
+```
 
-# When done, tear down everything
+**What `quick_start.sh` does:**
+- ✅ Creates Python virtual environment and installs RoboMonkey
+- ✅ Starts PostgreSQL with pgvector (via Docker)
+- ✅ Initializes database schema with control tables
+- ✅ **Interactively configures** your embedding provider (Ollama/vLLM/OpenAI)
+- ✅ **Interactively configures** your LLM for summaries (Ollama/vLLM/OpenAI)
+- ✅ Prompts for your repository path and name
+- ✅ **Starts the background daemon** for automatic processing
+- ✅ Creates `.mcp.json` config for Claude Desktop integration
+- ✅ Enqueues indexing job and monitors progress
+- ✅ Shows real-time status updates (files, symbols, embeddings)
+
+**When you're done:**
+
+```bash
+# Tear down everything cleanly
 ./quick_teardown.sh
 ```
 
-The `quick_start.sh` script will:
-- ✅ Start PostgreSQL with pgvector
-- ✅ Initialize database schema
-- ✅ Prompt for your repository path
-- ✅ Start the background daemon
-- ✅ Begin indexing and embedding
-- ✅ Create MCP config for Claude Desktop
+**What `quick_teardown.sh` does:**
+- 🛑 Stops the RoboMonkey daemon gracefully
+- 🛑 Stops any file watchers
+- 🛑 Stops PostgreSQL container
+- 🧹 Optionally removes all data (database volumes, logs, .venv)
+- 🔍 Shows you what's left so you can verify cleanup
+
+> **💡 Tip:** The daemon setup is the recommended way to run RoboMonkey. It handles automatic embedding generation and incremental updates in the background.
+
+### 📖 Alternative: Manual Setup
+
+If you prefer manual control or need custom configuration, see:
+- **[📦 Installation Guide](docs/INSTALL.md)** - Step-by-step manual setup
+- **[🎯 Quick Start Guide](docs/QUICKSTART.md)** - Beginner-friendly manual walkthrough
 
 ### [📘 Complete Documentation](docs/DOCUMENTATION_INDEX.md)
 
-### Choose Your Guide:
-
-- **[🎯 Quick Start Guide](docs/QUICKSTART.md)** - For beginners (30 min)
-- **[📦 Installation Guide](docs/INSTALL.md)** - Full server setup (1-2 hours)  
+**All guides:**
+- **[🎯 Quick Start Guide](docs/QUICKSTART.md)** - Manual setup for beginners (30 min)
+- **[📦 Installation Guide](docs/INSTALL.md)** - Full server deployment (1-2 hours)
 - **[📖 User Guide](docs/USER_GUIDE.md)** - Usage, testing, troubleshooting
-- **[🏃 Runbook](RUNBOOK.md)** - Operations and daemon architecture
+- **[🏃 Runbook](docs/RUNBOOK.md)** - Operations and daemon architecture
 
 ---
 
@@ -124,45 +156,33 @@ RoboMonkey MCP is an AI-powered code search and analysis tool that:
 
 ## Installation
 
-### Prerequisites
-- Python 3.11+
-- PostgreSQL 16 with pgvector
-- Docker (recommended) or native PostgreSQL
-- Ollama for embeddings
+### Recommended: Use Automated Scripts
 
-### Quick Install
+The fastest way to install and configure RoboMonkey is with the automated setup:
 
 ```bash
-# 1. Clone and setup
-git clone https://github.com/yourusername/robomonkey-mcp.git
-cd robomonkey-mcp
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-# 2. Start database
-docker-compose up -d
-
-# 3. Install Ollama and model
-curl -fsSL https://ollama.ai/install.sh | sh
-ollama pull snowflake-arctic-embed2:latest
-
-# 4. Configure
-cp .env.example .env
-nano .env  # Edit settings
-
-# 5. Initialize
-robomonkey db init
-
-# 6. Index a repository
-robomonkey index --repo /path/to/repo --name myrepo
-
-# 7. Generate embeddings
-python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
+./quick_start.sh
 ```
 
-**👉 For detailed installation:** See [docs/INSTALL.md](docs/INSTALL.md)  
-**👉 For beginners:** See [docs/QUICKSTART.md](docs/QUICKSTART.md)
+See the [Quick Start](#-quick-start) section above for details.
+
+### Manual Installation
+
+For manual setup or custom configurations:
+
+**📦 Full guide:** [docs/INSTALL.md](docs/INSTALL.md) - Complete installation walkthrough
+**🎯 Beginner guide:** [docs/QUICKSTART.md](docs/QUICKSTART.md) - Step-by-step for newcomers
+
+**Quick manual steps:**
+1. Clone repo and create virtual environment
+2. Start PostgreSQL with pgvector (Docker or native)
+3. Install Ollama and pull embedding model
+4. Configure `.env` file
+5. Initialize database: `robomonkey db init`
+6. Index repository: `robomonkey index --repo /path --name myrepo`
+7. Start daemon: `robomonkey daemon`
+
+> **💡 Recommendation:** Use `./quick_start.sh` instead - it automates all these steps with interactive prompts and handles daemon setup.
 
 ---
 
@@ -248,7 +268,7 @@ See [TODO.md](TODO.md) for detailed roadmap.
 - **[🎯 Quick Start](docs/QUICKSTART.md)** - Beginner-friendly setup (30 min)
 - **[📦 Installation](docs/INSTALL.md)** - Full server deployment
 - **[📖 User Guide](docs/USER_GUIDE.md)** - Usage, testing, troubleshooting
-- **[🏃 Runbook](RUNBOOK.md)** - Operations and architecture
+- **[🏃 Runbook](docs/RUNBOOK.md)** - Operations and architecture
 - **[💻 Developer Guide](CLAUDE.md)** - For contributors
 
 ---

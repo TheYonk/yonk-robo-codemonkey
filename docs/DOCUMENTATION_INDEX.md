@@ -124,7 +124,7 @@ docker logs robomonkey-postgres  # View database logs
 - You need to understand the daemon architecture
 - You want to monitor system health
 
-### [TODO.md](TODO.md)
+### [TODO.md](../TODO.md)
 **Development roadmap** - Current phase, completed features, and upcoming work.
 
 **Read this if:**
@@ -158,7 +158,7 @@ docker logs robomonkey-postgres  # View database logs
 → See [USER_GUIDE.md - Logs](USER_GUIDE.md#where-are-the-logs)
 
 ### "I'm a developer working on RoboMonkey"
-→ Check [CLAUDE.md](CLAUDE.md) and [TODO.md](TODO.md)
+→ Check [CLAUDE.md](../CLAUDE.md) and [TODO.md](../TODO.md)
 
 ---
 
@@ -170,8 +170,8 @@ docker logs robomonkey-postgres  # View database logs
 | INSTALL.md | ✅ Complete | 2025-12-31 | 100% |
 | USER_GUIDE.md | ✅ Complete | 2025-12-31 | 100% |
 | RUNBOOK.md | ✅ Complete | 2025-12-30 | 95% |
-| CLAUDE.md | ✅ Complete | 2025-12-30 | 100% |
-| TODO.md | 🔄 In Progress | 2025-12-30 | 90% |
+| ../CLAUDE.md | ✅ Complete | 2025-12-30 | 100% |
+| ../TODO.md | 🔄 In Progress | 2025-12-30 | 90% |
 
 ---
 
@@ -196,7 +196,7 @@ docker logs robomonkey-postgres  # View database logs
 3. Set up IDE integration - 30 min
 4. Read [RUNBOOK.md](RUNBOOK.md) - 1 hour
 5. Study [USER_GUIDE.md](USER_GUIDE.md) troubleshooting - 45 min
-6. Review [CLAUDE.md](CLAUDE.md) for architecture - 45 min
+6. Review [CLAUDE.md](../CLAUDE.md) for architecture - 45 min
 
 ---
 
