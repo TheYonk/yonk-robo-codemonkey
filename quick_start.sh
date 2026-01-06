@@ -371,7 +371,8 @@ case "$LLM_PROVIDER" in
         echo -e "${BLUE}Recommended Ollama LLM models:${NC}"
         echo "  - qwen2.5-coder:7b (fast, good quality)"
         echo "  - qwen2.5-coder:14b (balanced)"
-        echo "  - deepseek-coder:33b (best quality, slower)"
+        echo "  - qwen3-coder:30b (best quality, slower)"
+        echo "  - deepseek-coder:33b (high quality, slower)"
         read -p "LLM model [qwen2.5-coder:7b]: " LLM_MODEL
         LLM_MODEL=${LLM_MODEL:-qwen2.5-coder:7b}
         ;;
@@ -443,6 +444,44 @@ echo -e "${GREEN}✓ Configuration saved to .env${NC}"
 if [ -n "$EMBEDDINGS_API_KEY" ] || [ -n "$LLM_API_KEY" ]; then
     echo -e "${YELLOW}⚠ API keys stored in .env - keep this file secure!${NC}"
 fi
+echo ""
+
+# Create daemon configuration file
+echo -e "${YELLOW}Creating daemon configuration...${NC}"
+mkdir -p config
+cat > config/robomonkey-daemon.yaml <<DAEMONEOF
+# RoboMonkey Daemon Configuration
+# This file configures the background daemon that processes embedding and summary jobs
+
+database_url: "postgresql://postgres:postgres@localhost:5433/robomonkey"
+
+# Embedding worker configuration
+embeddings:
+  enabled: true
+  check_interval_minutes: 5
+  batch_size: ${EMBEDDING_BATCH_SIZE:-100}
+  provider: "$EMBEDDINGS_PROVIDER"
+  model: "$EMBEDDINGS_MODEL"
+  base_url: "$EMBEDDINGS_BASE_URL"
+  dimension: $EMBEDDINGS_DIMENSION
+  max_chunk_length: ${MAX_CHUNK_LENGTH:-8192}
+
+# Summary generation configuration
+summaries:
+  enabled: true
+  check_interval_minutes: 60
+  batch_size: 10
+  model: "$LLM_MODEL"
+  base_url: "$LLM_BASE_URL"
+  provider: "$LLM_PROVIDER"
+
+# File watcher configuration (watch mode for auto-reindexing)
+watcher:
+  enabled: false
+  debounce_seconds: 2
+DAEMONEOF
+
+echo -e "${GREEN}✓ Daemon configuration saved to config/robomonkey-daemon.yaml${NC}"
 echo ""
 
 # Prompt for repository details

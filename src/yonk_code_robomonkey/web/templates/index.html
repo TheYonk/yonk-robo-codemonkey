@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Repository Dashboard - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-0">
+    <h2 class="text-2xl font-bold text-gray-900 mb-6">Indexed Repositories</h2>
+
+    <div id="loading" class="text-center py-12">
+        <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <p class="mt-4 text-gray-600">Loading repositories...</p>
+    </div>
+
+    <div id="repo-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" style="display: none;">
+        <!-- Populated by JavaScript -->
+    </div>
+
+    <div id="no-repos" class="text-center py-12" style="display: none;">
+        <p class="text-gray-500 text-lg">No repositories indexed yet</p>
+        <p class="text-gray-400 mt-2">Run <code class="bg-gray-100 px-2 py-1 rounded">robomonkey index</code> to index a repository</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadRepositories();
+});
+
+async function loadRepositories() {
+    try {
+        const response = await fetch('/api/repos');
+        const data = await response.json();
+
+        document.getElementById('loading').style.display = 'none';
+
+        if (data.repositories.length === 0) {
+            document.getElementById('no-repos').style.display = 'block';
+            return;
+        }
+
+        renderRepositories(data.repositories);
+        document.getElementById('repo-grid').style.display = 'grid';
+    } catch (error) {
+        console.error('Error loading repositories:', error);
+        document.getElementById('loading').innerHTML = `
+            <p class="text-red-600">Error loading repositories: ${error.message}</p>
+        `;
+    }
+}
+
+function renderRepositories(repos) {
+    const grid = document.getElementById('repo-grid');
+    grid.innerHTML = '';
+
+    repos.forEach(repo => {
+        const card = document.createElement('div');
+        card.className = 'bg-white shadow rounded-lg p-6 hover:shadow-lg transition';
+
+        const embeddingPercent = repo.stats.embedding_percent || 0;
+
+        card.innerHTML = `
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-900">${repo.name}</h3>
+                    <p class="text-sm text-gray-500 truncate">${repo.root_path}</p>
+                </div>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    embeddingPercent >= 90 ? 'bg-green-100 text-green-800' :
+                    embeddingPercent >= 50 ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-gray-100 text-gray-800'
+                }">
+                    ${embeddingPercent}%
+                </span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <p class="text-xs text-gray-500">Files</p>
+                    <p class="text-xl font-bold text-gray-900">${repo.stats.files.toLocaleString()}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500">Symbols</p>
+                    <p class="text-xl font-bold text-gray-900">${repo.stats.symbols.toLocaleString()}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500">Chunks</p>
+                    <p class="text-xl font-bold text-gray-900">${repo.stats.chunks.toLocaleString()}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500">Embeddings</p>
+                    <p class="text-xl font-bold text-gray-900">${repo.stats.embeddings.toLocaleString()}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500">Summaries</p>
+                    <p class="text-xl font-bold text-gray-900">${(repo.stats.total_summaries || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500">Documents</p>
+                    <p class="text-xl font-bold text-gray-900">${repo.stats.documents.toLocaleString()}</p>
+                </div>
+            </div>
+
+            <div class="mb-3 space-y-1">
+                ${repo.last_indexed ? `
+                    <p class="text-xs text-gray-500">
+                        Last indexed: ${new Date(repo.last_indexed).toLocaleString()}
+                    </p>
+                ` : ''}
+                ${repo.last_scan_commit ? `
+                    <p class="text-xs text-gray-500 font-mono">
+                        Commit: ${repo.last_scan_commit.substring(0, 8)}
+                    </p>
+                ` : ''}
+            </div>
+
+            <div class="flex gap-2">
+                <a
+                    href="/explorer?schema=${repo.schema}"
+                    class="flex-1 text-center bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700"
+                >
+                    Explore
+                </a>
+                <a
+                    href="/tools"
+                    class="flex-1 text-center bg-gray-200 text-gray-700 px-3 py-2 rounded text-sm hover:bg-gray-300"
+                >
+                    Test Tools
+                </a>
+            </div>
+        `;
+
+        grid.appendChild(card);
+    });
+}
+</script>
+{% endblock %}

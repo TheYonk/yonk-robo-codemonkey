@@ -8,10 +8,14 @@ import hashlib
 import asyncpg
 
 from .repo_scanner import scan_repo
-from .treesitter.parsers import parse_file
+from .language_detect import is_template_file
+from .script_extractor import extract_script_blocks, combine_script_blocks
+from .treesitter.parsers import parse_file, get_parser
 from .treesitter.extract_symbols import extract_symbols
 from .treesitter.extract_edges import extract_edges
 from .treesitter.chunking import create_chunks, Chunk
+from .doc_ingester import ingest_documents
+from .sql_chunker import chunk_sql_file, get_sql_stats
 from yonk_code_robomonkey.db.schema_manager import ensure_schema_initialized, schema_context
 
 
@@ -19,7 +23,8 @@ async def index_repository(
     repo_path: str,
     repo_name: str,
     database_url: str,
-    force: bool = False
+    force: bool = False,
+    max_file_size_mb: int = 100
 ) -> dict[str, int]:
     """Index a repository into the database.
 
@@ -28,6 +33,7 @@ async def index_repository(
         repo_name: Name for the repository
         database_url: Database connection string
         force: If True, reinitialize schema even if it exists
+        max_file_size_mb: Skip files larger than this (in MB), default 100
 
     Returns:
         Dictionary with counts of indexed entities
@@ -49,6 +55,7 @@ async def index_repository(
                 "files_scanned": 0,
                 "files_indexed": 0,
                 "files_skipped": 0,
+                "files_too_large": 0,
                 "symbols": 0,
                 "chunks": 0,
                 "edges": 0,
@@ -59,14 +66,28 @@ async def index_repository(
             for file_path, language in scan_repo(repo_root):
                 stats["files_scanned"] += 1
                 try:
-                    indexed = await _index_file(conn, repo_id, file_path, language, repo_root)
-                    if indexed:
+                    indexed = await _index_file(conn, repo_id, file_path, language, repo_root, max_file_size_mb)
+                    if indexed == "too_large":
+                        stats["files_too_large"] += 1
+                    elif indexed:
                         stats["files_indexed"] += 1
                     else:
                         stats["files_skipped"] += 1
                 except Exception as e:
                     print(f"Warning: Failed to index {file_path}: {e}")
                     continue
+
+            # Index documentation files
+            print("Indexing documentation files...")
+            doc_stats = await ingest_documents(
+                repo_id=repo_id,
+                repo_root=repo_root,
+                database_url=database_url,
+                schema_name=schema_name
+            )
+            stats["documents"] = doc_stats.get("documents", 0) + doc_stats.get("updated", 0)
+            stats["documents_skipped"] = doc_stats.get("skipped", 0)
+            print(f"Indexed {stats['documents']} documentation files ({stats['documents_skipped']} skipped)")
 
             # Get final counts
             stats["symbols"] = await conn.fetchval(
@@ -133,8 +154,9 @@ async def _index_file(
     repo_id: str,
     file_path: Path,
     language: str,
-    repo_root: Path
-) -> bool:
+    repo_root: Path,
+    max_file_size_mb: int = 100
+) -> bool | str:
     """Index a single file (transactional).
 
     Args:
@@ -143,37 +165,90 @@ async def _index_file(
         file_path: Path to file
         language: Language identifier
         repo_root: Repository root for relative path
+        max_file_size_mb: Skip files larger than this (in MB)
 
     Returns:
-        True if file was indexed, False if skipped (unchanged)
+        True if file was indexed, False if skipped (unchanged), "too_large" if file too big
     """
-    # Try to parse file with tree-sitter
-    result = parse_file(str(file_path), language)
+    # Check file size first
+    file_size_bytes = file_path.stat().st_size
+    file_size_mb = file_size_bytes / (1024 * 1024)
 
-    if result:
-        # Tree-sitter parsing succeeded
-        source, tree = result
-        # Extract symbols
-        symbols = extract_symbols(source, tree, language, str(file_path))
-        # Extract edges
-        edges = extract_edges(source, tree, language, str(file_path))
-        # Create chunks
-        chunks = create_chunks(source, symbols, language)
-    else:
-        # No tree-sitter parser available (e.g., SQL files)
-        # Index as plain text with simple chunking
+    if file_size_mb > max_file_size_mb:
+        rel_path = str(file_path.relative_to(repo_root))
+        print(f"  Skipping large file ({file_size_mb:.1f} MB): {rel_path}")
+        return "too_large"
+    # Check if this is a template file that needs script extraction
+    line_map = None  # Maps parsed line numbers to original file line numbers
+    if is_template_file(file_path):
+        # Extract JavaScript/TypeScript from <script> tags
         try:
-            with open(file_path, "rb") as f:
-                source = f.read()
-        except Exception:
+            with open(file_path, "r", encoding="utf-8") as f:
+                template_content = f.read()
+
+            file_ext = file_path.suffix.lower()
+            script_blocks = extract_script_blocks(template_content, file_ext)
+
+            if script_blocks:
+                # Combine script blocks into single source
+                script_source, line_map = combine_script_blocks(script_blocks)
+                source = script_source.encode('utf-8')
+
+                # Parse the extracted JavaScript/TypeScript
+                parser = get_parser(language)
+                if parser:
+                    tree = parser.parse(source)
+                    # Extract symbols and edges from extracted scripts
+                    symbols = extract_symbols(source, tree, language, str(file_path))
+                    edges = extract_edges(source, tree, language, str(file_path))
+                    chunks = create_chunks(source, symbols, language)
+
+                    # Adjust line numbers using line_map
+                    symbols = _adjust_symbol_lines(symbols, line_map)
+                    edges = _adjust_edge_lines(edges, line_map)
+                    chunks = _adjust_chunk_lines(chunks, line_map)
+                else:
+                    # No parser for this language
+                    symbols, edges, chunks = [], [], []
+            else:
+                # No script blocks found in template
+                symbols, edges, chunks = [], [], []
+                source = b''  # Empty source
+        except Exception as e:
+            # Template extraction failed, skip file
+            print(f"Warning: Script extraction failed for {file_path}: {e}")
             return
+    else:
+        # Regular file: Try to parse with tree-sitter
+        result = parse_file(str(file_path), language)
 
-        # No symbols or edges for plain text files
-        symbols = []
-        edges = []
+        if result:
+            # Tree-sitter parsing succeeded
+            source, tree = result
+            # Extract symbols
+            symbols = extract_symbols(source, tree, language, str(file_path))
+            # Extract edges
+            edges = extract_edges(source, tree, language, str(file_path))
+            # Create chunks
+            chunks = create_chunks(source, symbols, language)
+        else:
+            # No tree-sitter parser available (e.g., SQL files)
+            try:
+                with open(file_path, "rb") as f:
+                    source = f.read()
+            except Exception:
+                return
 
-        # Create simple text-based chunks
-        chunks = _create_plain_text_chunks(source, language)
+            # No symbols or edges for plain text files
+            symbols = []
+            edges = []
+
+            # Use SQL-specific chunking for SQL files
+            if language == "sql":
+                chunks = _create_sql_chunks(source, file_path)
+            else:
+                # Create simple text-based chunks for other files
+                chunks = _create_plain_text_chunks(source, language)
 
     # Calculate relative path
     rel_path = str(file_path.relative_to(repo_root))
@@ -218,9 +293,17 @@ async def _index_file(
         await conn.execute("DELETE FROM chunk WHERE file_id = $1", file_id)
         await conn.execute("DELETE FROM edge WHERE evidence_file_id = $1", file_id)
 
-        # Insert symbols
+        # Insert symbols (deduplicate by FQN to avoid constraint violations)
         symbol_id_map = {}  # Map FQN to UUID
+        seen_fqns = set()  # Track FQNs we've already inserted
+
         for symbol in symbols:
+            # Skip if we've already inserted this FQN (handles duplicate symbols in minified files)
+            if symbol.fqn in seen_fqns:
+                continue
+
+            seen_fqns.add(symbol.fqn)
+
             symbol_id = await conn.fetchval(
                 """
                 INSERT INTO symbol (
@@ -236,8 +319,19 @@ async def _index_file(
             )
             symbol_id_map[symbol.fqn] = symbol_id
 
-        # Insert chunks
+        # Insert chunks (deduplicate to avoid constraint violations)
+        seen_chunks = set()  # Track (start_line, end_line, content_hash) tuples
+
         for chunk in chunks:
+            # Create unique key for this chunk
+            chunk_key = (chunk.start_line, chunk.end_line, chunk.content_hash)
+
+            # Skip if we've already inserted this chunk (handles duplicate chunks in minified files)
+            if chunk_key in seen_chunks:
+                continue
+
+            seen_chunks.add(chunk_key)
+
             # Get symbol_id if this is a symbol chunk
             chunk_symbol_id = symbol_id_map.get(chunk.symbol_id) if chunk.symbol_id else None
 
@@ -368,5 +462,151 @@ def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100
         ))
 
         current_line = end_line
+
+    return chunks
+
+
+def _create_sql_chunks(source: bytes, file_path: Path, skip_data_statements: bool = True) -> list[Chunk]:
+    """Create SQL-aware chunks for SQL files.
+
+    Uses smart SQL parsing to chunk by statements, optionally skipping
+    large data INSERT/COPY statements.
+
+    Args:
+        source: SQL file content as bytes
+        file_path: Path to SQL file (for logging)
+        skip_data_statements: If True, skip INSERT/COPY/LOAD statements
+
+    Returns:
+        List of chunks
+    """
+    chunks = []
+
+    try:
+        sql_text = source.decode("utf-8", errors="replace")
+    except Exception:
+        # If decoding fails, fall back to plain text chunking
+        return _create_plain_text_chunks(source, "sql")
+
+    # Get stats to decide whether to skip data statements
+    stats = get_sql_stats(sql_text)
+    total_statements = stats['total_statements']
+    data_statements = stats['data_statements']
+
+    # Auto-skip data statements if they make up >50% of file and file is large
+    auto_skip = (
+        skip_data_statements and
+        total_statements > 100 and
+        data_statements > total_statements * 0.5
+    )
+
+    if auto_skip:
+        print(f"  Skipping {data_statements} data statements in {file_path.name} (keeping {total_statements - data_statements} schema statements)")
+
+    # Chunk the SQL file
+    try:
+        sql_chunks = list(chunk_sql_file(
+            sql_text,
+            skip_data_statements=auto_skip or skip_data_statements,
+            max_chunk_size=5000,  # 5KB per chunk
+            max_statements_per_chunk=50
+        ))
+
+        for sql_chunk in sql_chunks:
+            content_hash = hashlib.sha256(sql_chunk.content.encode("utf-8")).hexdigest()[:16]
+
+            chunks.append(Chunk(
+                start_line=sql_chunk.start_line,
+                end_line=sql_chunk.end_line,
+                content=sql_chunk.content,
+                content_hash=content_hash,
+                symbol_id=None
+            ))
+
+    except Exception as e:
+        print(f"  Warning: SQL chunking failed for {file_path.name}: {e}, falling back to plain text")
+        # Fall back to plain text chunking
+        return _create_plain_text_chunks(source, "sql", max_lines=100)
+
+    # If no chunks created (all statements skipped), create one summary chunk
+    if not chunks:
+        summary = f"SQL file with {data_statements} data statements (schema statements extracted separately)"
+        content_hash = hashlib.sha256(summary.encode("utf-8")).hexdigest()[:16]
+        chunks.append(Chunk(
+            start_line=1,
+            end_line=1,
+            content=summary,
+            content_hash=content_hash,
+            symbol_id=None
+        ))
+
+    return chunks
+
+
+def _adjust_symbol_lines(symbols: list, line_map: dict[int, int]) -> list:
+    """Adjust symbol line numbers using line map from template extraction.
+
+    Args:
+        symbols: List of Symbol objects
+        line_map: Map from extracted line numbers to original file line numbers
+
+    Returns:
+        Symbols with adjusted line numbers
+    """
+    if not line_map:
+        return symbols
+
+    for symbol in symbols:
+        # Map start and end lines to original file lines
+        if symbol.start_line in line_map:
+            symbol.start_line = line_map[symbol.start_line]
+        if symbol.end_line in line_map:
+            symbol.end_line = line_map[symbol.end_line]
+
+    return symbols
+
+
+def _adjust_edge_lines(edges: list, line_map: dict[int, int]) -> list:
+    """Adjust edge evidence line numbers using line map from template extraction.
+
+    Args:
+        edges: List of Edge objects
+        line_map: Map from extracted line numbers to original file line numbers
+
+    Returns:
+        Edges with adjusted line numbers
+    """
+    if not line_map:
+        return edges
+
+    for edge in edges:
+        # Map evidence lines to original file lines
+        if edge.evidence_start_line in line_map:
+            edge.evidence_start_line = line_map[edge.evidence_start_line]
+        if edge.evidence_end_line in line_map:
+            edge.evidence_end_line = line_map[edge.evidence_end_line]
+
+    return edges
+
+
+def _adjust_chunk_lines(chunks: list[Chunk], line_map: dict[int, int]) -> list[Chunk]:
+    """Adjust chunk line numbers using line map from template extraction.
+
+    Args:
+        chunks: List of Chunk objects
+        line_map: Map from extracted line numbers to original file line numbers
+
+    Returns:
+        Chunks with adjusted line numbers
+    """
+    if not line_map:
+        return chunks
+
+    for chunk in chunks:
+        # Map chunk lines to original file lines
+        if chunk.start_line in line_map:
+            chunk.start_line = line_map[chunk.start_line]
+        if chunk.end_line in line_map:
+            chunk.end_line = line_map[chunk.end_line]
 
     return chunks

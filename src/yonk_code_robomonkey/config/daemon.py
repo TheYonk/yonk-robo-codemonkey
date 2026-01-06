@@ -92,8 +92,20 @@ class WatchingConfig(BaseModel):
     enabled: bool = Field(True, description="Enable file watching")
     debounce_seconds: int = Field(2, ge=1, le=60, description="Debounce delay")
     ignore_patterns: list[str] = Field(
-        default_factory=lambda: ["*.pyc", "__pycache__", ".git", "node_modules", ".venv"],
+        default_factory=lambda: ["*.pyc", "__pycache__", ".git", "node_modules", ".venv", "dist", "build", ".next"],
         description="Patterns to ignore"
+    )
+    code_extensions: list[str] = Field(
+        default_factory=lambda: [
+            ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java",
+            ".ejs", ".hbs", ".handlebars", ".html", ".htm",
+            ".vue", ".svelte", ".astro"
+        ],
+        description="File extensions to watch for code changes"
+    )
+    doc_extensions: list[str] = Field(
+        default_factory=lambda: [".md", ".rst", ".adoc"],
+        description="File extensions to watch for documentation changes"
     )
 
 
@@ -120,11 +132,31 @@ class DevModeConfig(BaseModel):
     verbose: bool = Field(False, description="Verbose logging")
 
 
+class SummariesConfig(BaseModel):
+    """Auto-summary generation configuration."""
+    enabled: bool = Field(True, description="Enable auto-summary generation")
+    check_interval_minutes: int = Field(60, ge=1, le=1440, description="How often to check for changes (1-1440 minutes)")
+    generate_on_index: bool = Field(False, description="Generate summaries immediately after indexing")
+    provider: Literal["ollama", "vllm"] = Field("ollama", description="LLM provider")
+    model: str = Field("qwen3-coder:30b", description="Model name for summaries")
+    base_url: str = Field("http://localhost:11434", description="LLM endpoint")
+    batch_size: int = Field(10, ge=1, le=100, description="Batch size for summary generation")
+
+    @field_validator("check_interval_minutes")
+    @classmethod
+    def validate_check_interval(cls, v: int) -> int:
+        """Validate check interval is within reasonable bounds."""
+        if v < 1 or v > 1440:
+            raise ValueError("check_interval_minutes must be between 1 and 1440 (24 hours)")
+        return v
+
+
 class DaemonConfig(BaseModel):
     """Complete daemon configuration."""
     daemon_id: str = Field(default_factory=lambda: f"robomonkey-{os.getpid()}", description="Unique daemon ID")
     database: DatabaseConfig
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
+    summaries: SummariesConfig = Field(default_factory=SummariesConfig)
     workers: WorkersConfig = Field(default_factory=WorkersConfig)
     watching: WatchingConfig = Field(default_factory=WatchingConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)

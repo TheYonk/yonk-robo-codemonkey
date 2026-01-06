@@ -217,6 +217,7 @@ async def list_repo_schemas(conn: asyncpg.Connection) -> list[dict]:
                         r.name as repo_name,
                         r.root_path,
                         ris.last_indexed_at,
+                        ris.last_scan_commit,
                         ris.file_count,
                         ris.symbol_count,
                         ris.chunk_count
@@ -233,6 +234,7 @@ async def list_repo_schemas(conn: asyncpg.Connection) -> list[dict]:
                         'repo_id': str(repo['repo_id']),
                         'root_path': repo['root_path'],
                         'last_indexed_at': repo['last_indexed_at'],
+                        'last_scan_commit': repo['last_scan_commit'],
                         'file_count': repo['file_count'] or 0,
                         'symbol_count': repo['symbol_count'] or 0,
                         'chunk_count': repo['chunk_count'] or 0,
@@ -300,3 +302,119 @@ async def resolve_repo_to_schema(
             continue
 
     raise ValueError(f"Repository '{repo}' not found in any schema")
+
+
+async def suggest_similar_repos(
+    conn: asyncpg.Connection,
+    query: str,
+    threshold: float = 0.6,
+    max_suggestions: int = 3
+) -> list[dict]:
+    """Find similar repository names using fuzzy string matching.
+
+    Uses SequenceMatcher for similarity scoring. Useful when a repo name
+    has a typo or the user doesn't remember the exact name.
+
+    Args:
+        conn: Database connection
+        query: The repo name that wasn't found
+        threshold: Similarity threshold (0.0-1.0), default 0.6
+        max_suggestions: Maximum suggestions to return
+
+    Returns:
+        List of {name, schema, similarity, file_count, last_indexed_at} dicts,
+        sorted by similarity score descending.
+
+    Example:
+        suggestions = await suggest_similar_repos(conn, "yonk-redo-wrestling-game")
+        # Returns: [{"name": "wrestling-game", "similarity": 0.73, ...}]
+    """
+    from difflib import SequenceMatcher
+
+    all_repos = await list_repo_schemas(conn)
+
+    similarities = []
+    for repo in all_repos:
+        score = SequenceMatcher(None, query.lower(), repo['repo_name'].lower()).ratio()
+        if score >= threshold:
+            similarities.append({
+                'name': repo['repo_name'],
+                'schema': repo['schema_name'],
+                'similarity': round(score, 2),
+                'file_count': repo['file_count'],
+                'last_indexed_at': repo['last_indexed_at'].isoformat() if repo['last_indexed_at'] else None
+            })
+
+    # Sort by similarity score descending
+    similarities.sort(key=lambda x: x['similarity'], reverse=True)
+
+    return similarities[:max_suggestions]
+
+
+async def resolve_repo_with_suggestions(
+    conn: asyncpg.Connection,
+    repo: str
+) -> dict:
+    """Resolve repo to schema or return actionable error with suggestions.
+
+    This is an enhanced version of resolve_repo_to_schema that provides
+    fuzzy matching suggestions when a repo is not found, making errors
+    more actionable for agents.
+
+    Args:
+        conn: Database connection
+        repo: Repository name or UUID
+
+    Returns:
+        On success: {"repo_id": str, "schema": str}
+        On error with suggestions: {
+            "error": str,
+            "query": str,
+            "suggestions": [{"name": str, "similarity": float, ...}],
+            "why": str,
+            "recovery_hint": str
+        }
+        On error without suggestions: {
+            "error": str,
+            "query": str,
+            "available_repos": [str],
+            "why": str,
+            "recovery_hint": str
+        }
+
+    Example:
+        result = await resolve_repo_with_suggestions(conn, "yonk-redo-wrestling-game")
+        if "error" in result:
+            # Returns suggestions for "wrestling-game"
+            print(result["suggestions"])
+        else:
+            repo_id = result["repo_id"]
+            schema = result["schema"]
+    """
+    try:
+        repo_id, schema = await resolve_repo_to_schema(conn, repo)
+        return {"repo_id": repo_id, "schema": schema}
+    except ValueError:
+        # Get suggestions
+        suggestions = await suggest_similar_repos(conn, repo)
+
+        if suggestions:
+            return {
+                "error": f"Repository '{repo}' not found",
+                "query": repo,
+                "suggestions": suggestions,
+                "why": "Repository not found in any schema",
+                "recovery_hint": "Did you mean one of the suggested repositories? Or use list_repos to see all available repositories."
+            }
+        else:
+            # No suggestions - list all repos
+            all_repos = await list_repo_schemas(conn)
+            repo_names = [r['repo_name'] for r in all_repos]
+
+            return {
+                "error": f"Repository '{repo}' not found",
+                "query": repo,
+                "available_repos": repo_names,
+                "why": "Repository not found in any schema",
+                "recovery_hint": f"Available repositories: {', '.join(repo_names[:5])}{'...' if len(repo_names) > 5 else ''}. Use list_repos for full details."
+            }

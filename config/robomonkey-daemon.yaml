@@ -26,7 +26,9 @@ embeddings:
   # Model configuration
   model: "snowflake-arctic-embed2:latest"
   dimension: 1024
-  max_chunk_length: 8192
+  # Reduced to 4000 chars to stay safely under 8192 token limit
+  # (minified JS/dense data can have very poor character:token ratios ~1:2)
+  max_chunk_length: 4000
   batch_size: 100
   
   # Provider-specific settings
@@ -36,6 +38,32 @@ embeddings:
   vllm:
     base_url: "http://localhost:8000"
     api_key: "local-key"
+
+# Auto-Summary Generation
+summaries:
+  # Enable/disable automatic summary generation
+  enabled: true
+
+  # How often to check for entities needing summaries (minutes: 1-1440)
+  # Default: 60 (check every hour)
+  # Reduced to 10 minutes for more responsive summary generation
+  check_interval_minutes: 10
+
+  # Generate summaries immediately after indexing (not just on schedule)
+  generate_on_index: true
+
+  # LLM provider for summary generation: "ollama" or "vllm"
+  provider: "ollama"
+
+  # Model to use for generating summaries
+  # Using Qwen3 Coder 30B Instruct for better code understanding
+  model: "mdq100/Qwen3-Coder-30B-A3B-Instruct:30b"
+
+  # LLM endpoint
+  base_url: "http://localhost:11434"
+
+  # Batch size for summary generation (1-100)
+  batch_size: 10
 
 # Job Workers Configuration
 workers:
@@ -63,10 +91,10 @@ workers:
 watching:
   # Enable file system watching for indexed repos
   enabled: true
-  
+
   # Debounce interval (seconds) - wait this long after last change
   debounce_seconds: 2
-  
+
   # Patterns to ignore (in addition to .gitignore)
   ignore_patterns:
     - "*.pyc"
@@ -74,6 +102,30 @@ watching:
     - ".git"
     - "node_modules"
     - ".venv"
+
+  # File extensions to watch for code changes
+  code_extensions:
+    - ".py"
+    - ".js"
+    - ".jsx"
+    - ".ts"
+    - ".tsx"
+    - ".go"
+    - ".java"
+    - ".ejs"      # EJS templates
+    - ".hbs"      # Handlebars templates
+    - ".handlebars"
+    - ".html"     # HTML with embedded scripts
+    - ".htm"
+    - ".vue"      # Vue.js components
+    - ".svelte"   # Svelte components
+    - ".astro"    # Astro components
+
+  # File extensions to watch for documentation changes
+  doc_extensions:
+    - ".md"       # Markdown
+    - ".rst"      # ReStructuredText
+    - ".adoc"     # AsciiDoc
 
 # Daemon Health & Monitoring
 monitoring:

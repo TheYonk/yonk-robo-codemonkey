@@ -96,6 +96,22 @@ def run() -> None:
     features_list.add_argument("--prefix", default="", help="Name prefix filter")
     features_list.add_argument("--limit", type=int, default=50, help="Max features to show")
 
+    # Summary commands
+    summaries = sub.add_parser("summaries", help="Summary generation commands")
+    summaries_sub = summaries.add_subparsers(dest="summaries_cmd", required=True)
+
+    summaries_status = summaries_sub.add_parser("status", help="Show summary coverage statistics")
+    summaries_status.add_argument("--repo-name", required=True, help="Repository name")
+
+    summaries_generate = summaries_sub.add_parser("generate", help="Generate summaries manually")
+    summaries_generate.add_argument("--repo-name", required=True, help="Repository name")
+    summaries_generate.add_argument("--type", choices=["files", "symbols", "modules", "all"], default="all",
+                                    help="Type of summaries to generate (default: all)")
+    summaries_generate.add_argument("--force", action="store_true",
+                                    help="Force regenerate all summaries")
+    summaries_generate.add_argument("--limit", type=int, default=None,
+                                    help="Limit number of entities to summarize")
+
     # Daemon command
     daemon = sub.add_parser("daemon", help="Daemon management commands")
     daemon_sub = daemon.add_subparsers(dest="daemon_cmd", required=True)
@@ -172,6 +188,20 @@ def run() -> None:
                 args.regenerate,
                 args.max_modules
             ))
+        elif args.cmd == "summaries":
+            if args.summaries_cmd == "status":
+                asyncio.run(summaries_status_cmd(
+                    args.repo_name,
+                    settings.database_url
+                ))
+            elif args.summaries_cmd == "generate":
+                asyncio.run(summaries_generate_cmd(
+                    args.repo_name,
+                    settings.database_url,
+                    args.type,
+                    args.force,
+                    args.limit
+                ))
         elif args.cmd == "daemon":
             if args.daemon_cmd == "run":
                 from yonk_code_robomonkey.daemon.main import main
@@ -735,16 +765,14 @@ async def generate_review(
         max_modules: Maximum modules to include
     """
     from yonk_code_robomonkey.reports.generator import generate_comprehensive_review
+    from yonk_code_robomonkey.db.schema_manager import resolve_repo_to_schema
 
-    # Get repo_id
+    # Get repo_id and schema_name
     conn = await asyncpg.connect(dsn=database_url)
     try:
-        repo_id = await conn.fetchval(
-            "SELECT id FROM repo WHERE name = $1",
-            repo_name
-        )
-
-        if not repo_id:
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo_name)
+        except ValueError:
             raise RuntimeError(
                 f"Repository not found in database. Please index it first:\n"
                 f"  codegraph index --repo {repo_path} --name {repo_name}"
@@ -758,7 +786,8 @@ async def generate_review(
         repo_id=repo_id,
         database_url=database_url,
         regenerate=regenerate,
-        max_modules=max_modules
+        max_modules=max_modules,
+        schema_name=schema_name
     )
 
     print(f"\n✓ Review {'regenerated' if not result.cached else 'retrieved from cache'}")
@@ -852,6 +881,204 @@ async def list_features_cmd(
             if feature['description']:
                 print(f"    {feature['description']}")
             print()
+
+    finally:
+        await conn.close()
+
+
+async def summaries_status_cmd(
+    repo_name: str,
+    database_url: str
+) -> None:
+    """Show summary coverage statistics for a repository.
+
+    Args:
+        repo_name: Repository name
+        database_url: PostgreSQL connection string
+    """
+    from yonk_code_robomonkey.db.schema_manager import resolve_repo_to_schema, schema_context
+    from yonk_code_robomonkey.summaries.queries import get_summary_stats
+
+    conn = await asyncpg.connect(dsn=database_url)
+
+    try:
+        # Resolve repo to schema
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo_name)
+        except ValueError:
+            raise RuntimeError(
+                f"Repository '{repo_name}' not found in database. Please index it first:\n"
+                f"  robomonkey index --repo <path> --name {repo_name}"
+            )
+
+        print(f"Repository: {repo_name}")
+        print(f"Schema: {schema_name}")
+        print(f"ID: {repo_id}")
+        print()
+
+        # Get summary stats
+        async with schema_context(conn, schema_name):
+            stats = await get_summary_stats(conn, repo_id)
+
+        # Display stats
+        print("Summary Coverage:")
+        print("=" * 60)
+
+        print(f"\nFiles:")
+        print(f"  Total:           {stats['files']['total']}")
+        print(f"  With summaries:  {stats['files']['with_summaries']}")
+        print(f"  Coverage:        {stats['files']['coverage_pct']}%")
+
+        print(f"\nSymbols:")
+        print(f"  Total:           {stats['symbols']['total']}")
+        print(f"  With summaries:  {stats['symbols']['with_summaries']}")
+        print(f"  Coverage:        {stats['symbols']['coverage_pct']}%")
+
+        print(f"\nModules:")
+        print(f"  Total:           {stats['modules']['total']}")
+        print(f"  With summaries:  {stats['modules']['with_summaries']}")
+        print(f"  Coverage:        {stats['modules']['coverage_pct']}%")
+
+        # Show overall summary
+        total_entities = stats['files']['total'] + stats['symbols']['total'] + stats['modules']['total']
+        total_with_summaries = (
+            stats['files']['with_summaries'] +
+            stats['symbols']['with_summaries'] +
+            stats['modules']['with_summaries']
+        )
+        overall_pct = round(total_with_summaries / total_entities * 100, 1) if total_entities > 0 else 0.0
+
+        print(f"\nOverall:")
+        print(f"  Total entities:  {total_entities}")
+        print(f"  With summaries:  {total_with_summaries}")
+        print(f"  Coverage:        {overall_pct}%")
+
+    finally:
+        await conn.close()
+
+
+async def summaries_generate_cmd(
+    repo_name: str,
+    database_url: str,
+    summary_type: str,
+    force: bool,
+    limit: int | None
+) -> None:
+    """Generate summaries manually for a repository.
+
+    Args:
+        repo_name: Repository name
+        database_url: PostgreSQL connection string
+        summary_type: Type of summaries to generate ("files", "symbols", "modules", or "all")
+        force: Force regenerate all summaries
+        limit: Maximum entities to summarize
+    """
+    from yonk_code_robomonkey.db.schema_manager import resolve_repo_to_schema, schema_context
+    from yonk_code_robomonkey.summaries.queries import (
+        find_files_needing_summaries,
+        find_symbols_needing_summaries,
+        find_modules_needing_summaries
+    )
+    from yonk_code_robomonkey.summaries.batch_generator import (
+        generate_file_summaries_batch,
+        generate_symbol_summaries_batch,
+        generate_module_summaries_batch
+    )
+    from yonk_code_robomonkey.config import settings
+
+    conn = await asyncpg.connect(dsn=database_url)
+
+    try:
+        # Resolve repo to schema
+        try:
+            repo_id, schema_name = await resolve_repo_to_schema(conn, repo_name)
+        except ValueError:
+            raise RuntimeError(
+                f"Repository '{repo_name}' not found in database. Please index it first:\n"
+                f"  robomonkey index --repo <path> --name {repo_name}"
+            )
+
+        print(f"Generating summaries for repository: {repo_name}")
+        print(f"Type: {summary_type}")
+        print(f"LLM: {settings.llm_model} @ {settings.llm_base_url}")
+        print()
+
+        # Set large check interval if force=True (to get all entities)
+        check_interval = 999999 if force else 60
+
+        # Generate summaries
+        async with schema_context(conn, schema_name):
+            if summary_type in ("files", "all"):
+                print("Finding files needing summaries...")
+                files_to_summarize = await find_files_needing_summaries(
+                    conn, repo_id, check_interval, limit=limit or 1000
+                )
+
+                if files_to_summarize:
+                    print(f"Generating summaries for {len(files_to_summarize)} files...")
+                    file_ids = [f['file_id'] for f in files_to_summarize]
+                    file_result = await generate_file_summaries_batch(
+                        file_ids=file_ids,
+                        database_url=database_url,
+                        llm_provider="ollama",
+                        llm_model=settings.llm_model,
+                        llm_base_url=settings.llm_base_url,
+                        batch_size=10,
+                        schema_name=schema_name
+                    )
+                    print(f"  ✓ {file_result.success} success, {file_result.failed} failed, {file_result.total} total")
+                else:
+                    print("  No files need summaries")
+
+                print()
+
+            if summary_type in ("symbols", "all"):
+                print("Finding symbols needing summaries...")
+                symbols_to_summarize = await find_symbols_needing_summaries(
+                    conn, repo_id, check_interval, limit=limit or 5000
+                )
+
+                if symbols_to_summarize:
+                    print(f"Generating summaries for {len(symbols_to_summarize)} symbols...")
+                    symbol_ids = [s['symbol_id'] for s in symbols_to_summarize]
+                    symbol_result = await generate_symbol_summaries_batch(
+                        symbol_ids=symbol_ids,
+                        database_url=database_url,
+                        llm_provider="ollama",
+                        llm_model=settings.llm_model,
+                        llm_base_url=settings.llm_base_url,
+                        batch_size=10,
+                        schema_name=schema_name
+                    )
+                    print(f"  ✓ {symbol_result.success} success, {symbol_result.failed} failed, {symbol_result.total} total")
+                else:
+                    print("  No symbols need summaries")
+
+                print()
+
+            if summary_type in ("modules", "all"):
+                print("Finding modules needing summaries...")
+                modules_to_summarize = await find_modules_needing_summaries(
+                    conn, repo_id, check_interval, limit=limit or 500
+                )
+
+                if modules_to_summarize:
+                    print(f"Generating summaries for {len(modules_to_summarize)} modules...")
+                    module_result = await generate_module_summaries_batch(
+                        modules=modules_to_summarize,
+                        repo_id=repo_id,
+                        database_url=database_url,
+                        llm_provider="ollama",
+                        llm_model=settings.llm_model,
+                        llm_base_url=settings.llm_base_url,
+                        batch_size=5,
+                        schema_name=schema_name
+                    )
+                    print(f"  ✓ {module_result.success} success, {module_result.failed} failed, {module_result.total} total")
+                else:
+                    print("  No modules need summaries")
+
+        print("\n✓ Summary generation complete!")
 
     finally:
         await conn.close()

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Statistics - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <h2 class="text-2xl font-bold text-gray-900">System Statistics</h2>
+
+    <!-- Overview Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6" id="overview-stats">
+        <!-- Populated by JavaScript -->
+    </div>
+
+    <!-- Job Queue Stats -->
+    <div class="bg-white shadow rounded-lg p-6" id="job-stats">
+        <h3 class="text-lg font-semibold mb-4">Job Queue</h3>
+        <div id="job-content">
+            <!-- Populated by JavaScript -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadStats();
+});
+
+async function loadStats() {
+    // Load overview stats
+    const overviewResponse = await fetch('/api/stats/overview');
+    const overview = await overviewResponse.json();
+
+    const overviewDiv = document.getElementById('overview-stats');
+    overviewDiv.innerHTML = Object.entries(overview).map(([key, value]) => `
+        <div class="bg-white shadow rounded-lg p-6">
+            <p class="text-sm text-gray-500 capitalize">${key}</p>
+            <p class="text-3xl font-bold text-gray-900">${value.toLocaleString()}</p>
+        </div>
+    `).join('');
+
+    // Load job stats
+    const jobResponse = await fetch('/api/stats/jobs');
+    const jobs = await jobResponse.json();
+
+    const jobContent = document.getElementById('job-content');
+    if (!jobs.enabled) {
+        jobContent.innerHTML = '<p class="text-gray-500">Job queue not configured</p>';
+        return;
+    }
+
+    jobContent.innerHTML = `
+        <div class="grid grid-cols-4 gap-4 mb-4">
+            <div class="text-center">
+                <p class="text-sm text-gray-500">Pending</p>
+                <p class="text-2xl font-bold text-yellow-600">${jobs.pending}</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-500">Claimed</p>
+                <p class="text-2xl font-bold text-blue-600">${jobs.claimed}</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-500">Done</p>
+                <p class="text-2xl font-bold text-green-600">${jobs.done}</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-500">Failed</p>
+                <p class="text-2xl font-bold text-red-600">${jobs.failed}</p>
+            </div>
+        </div>
+
+        ${jobs.recent_failures.length > 0 ? `
+            <h4 class="font-semibold mt-6 mb-2">Recent Failures</h4>
+            <div class="space-y-2">
+                ${jobs.recent_failures.map(job => `
+                    <div class="bg-red-50 border border-red-200 rounded p-3">
+                        <p class="text-sm font-medium">${job.repo} - ${job.job_type}</p>
+                        <p class="text-xs text-red-700">${job.error}</p>
+                        <p class="text-xs text-gray-500 mt-1">${new Date(job.created_at).toLocaleString()}</p>
+                    </div>
+                `).join('')}
+            </div>
+        ` : ''}
+    `;
+}
+</script>
+{% endblock %}

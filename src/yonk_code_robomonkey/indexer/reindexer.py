@@ -12,6 +12,7 @@ from .treesitter.parsers import parse_file
 from .treesitter.extract_symbols import extract_symbols
 from .treesitter.extract_edges import extract_edges
 from .treesitter.chunking import create_chunks
+from .tagger.auto_tagger import AutoTagger, initialize_default_tags
 
 
 async def reindex_file(
@@ -19,7 +20,8 @@ async def reindex_file(
     abs_path: Path,
     op: Literal["DELETE", "UPSERT"],
     database_url: str,
-    repo_root: Path
+    repo_root: Path,
+    schema_name: str = None
 ) -> dict[str, any]:
     """Reindex a single file with transactional guarantees.
 
@@ -29,6 +31,7 @@ async def reindex_file(
         op: Operation type - DELETE or UPSERT
         database_url: Database connection string
         repo_root: Repository root for relative paths
+        schema_name: Schema name to use (if None, uses default)
 
     Returns:
         Dictionary with operation results and stats
@@ -36,10 +39,14 @@ async def reindex_file(
     conn = await asyncpg.connect(dsn=database_url)
 
     try:
+        # Set search_path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         if op == "DELETE":
             return await _reindex_delete(conn, repo_id, abs_path, repo_root)
         elif op == "UPSERT":
-            return await _reindex_upsert(conn, repo_id, abs_path, repo_root)
+            return await _reindex_upsert(conn, repo_id, abs_path, repo_root, schema_name)
         else:
             raise ValueError(f"Unknown operation: {op}")
     finally:
@@ -172,7 +179,8 @@ async def _reindex_upsert(
     conn: asyncpg.Connection,
     repo_id: str,
     abs_path: Path,
-    repo_root: Path
+    repo_root: Path,
+    schema_name: str = None
 ) -> dict[str, any]:
     """Upsert a file and all derived data transactionally.
 
@@ -329,6 +337,15 @@ async def _reindex_upsert(
 
         # Delete old edges with this file as evidence
         await conn.execute("DELETE FROM edge WHERE evidence_file_id = $1", file_id)
+
+        # Apply auto-tagging to file
+        if schema_name:
+            # Initialize default tags if needed (idempotent)
+            await initialize_default_tags(conn, schema_name)
+
+            # Apply path-based tags to file
+            tagger = AutoTagger(conn, schema_name, repo_id)
+            await tagger.apply_file_tags(file_id, rel_path)
 
         # Insert new symbols
         symbol_id_map = {}  # Map FQN to UUID

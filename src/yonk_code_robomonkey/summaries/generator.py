@@ -21,7 +21,8 @@ async def generate_file_summary(
     database_url: str,
     llm_provider: str = "ollama",
     llm_model: str = "llama3.2:3b",
-    llm_base_url: str = "http://localhost:11434"
+    llm_base_url: str = "http://localhost:11434",
+    schema_name: str | None = None
 ) -> SummaryResult:
     """Generate a summary for a file.
 
@@ -31,12 +32,17 @@ async def generate_file_summary(
         llm_provider: LLM provider ('ollama' or 'vllm')
         llm_model: Model name
         llm_base_url: Base URL for LLM endpoint
+        schema_name: Schema name to use (if None, uses default)
 
     Returns:
         SummaryResult with generated summary
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search_path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         # Get file content and metadata
         row = await conn.fetchrow(
             """
@@ -89,7 +95,8 @@ async def generate_symbol_summary(
     database_url: str,
     llm_provider: str = "ollama",
     llm_model: str = "llama3.2:3b",
-    llm_base_url: str = "http://localhost:11434"
+    llm_base_url: str = "http://localhost:11434",
+    schema_name: str | None = None
 ) -> SummaryResult:
     """Generate a summary for a symbol.
 
@@ -99,12 +106,17 @@ async def generate_symbol_summary(
         llm_provider: LLM provider ('ollama' or 'vllm')
         llm_model: Model name
         llm_base_url: Base URL for LLM endpoint
+        schema_name: Schema name to use (if None, uses default)
 
     Returns:
         SummaryResult with generated summary
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search_path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         # Get symbol content
         row = await conn.fetchrow(
             """
@@ -164,7 +176,8 @@ async def generate_module_summary(
     database_url: str,
     llm_provider: str = "ollama",
     llm_model: str = "llama3.2:3b",
-    llm_base_url: str = "http://localhost:11434"
+    llm_base_url: str = "http://localhost:11434",
+    schema_name: str | None = None
 ) -> SummaryResult:
     """Generate a summary for a module/directory.
 
@@ -175,12 +188,17 @@ async def generate_module_summary(
         llm_provider: LLM provider ('ollama' or 'vllm')
         llm_model: Model name
         llm_base_url: Base URL for LLM endpoint
+        schema_name: Schema name to use (if None, uses default)
 
     Returns:
         SummaryResult with generated summary
     """
     conn = await asyncpg.connect(dsn=database_url)
     try:
+        # Set search_path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         # Get files in module
         rows = await conn.fetch(
             """

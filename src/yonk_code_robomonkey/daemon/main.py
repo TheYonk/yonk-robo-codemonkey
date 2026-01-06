@@ -154,6 +154,13 @@ class CodeGraphDaemon:
         health_task = await health_monitor.start()
         logger.info("Health monitor started")
 
+        # Start summary worker if enabled
+        summary_task = None
+        if self.config.summaries.enabled:
+            from yonk_code_robomonkey.daemon.summary_worker import summary_worker
+            summary_task = asyncio.create_task(summary_worker(self.config))
+            logger.info(f"Summary worker started (check interval: {self.config.summaries.check_interval_minutes} min)")
+
         logger.info("Daemon running - waiting for jobs")
 
         # Wait for shutdown signal
@@ -168,6 +175,8 @@ class CodeGraphDaemon:
         worker_task.cancel()
         if watcher_task:
             watcher_task.cancel()
+        if summary_task:
+            summary_task.cancel()
         health_monitor.stop()
         health_task.cancel()
 
@@ -175,6 +184,8 @@ class CodeGraphDaemon:
         tasks = [heartbeat_task, worker_task, health_task]
         if watcher_task:
             tasks.append(watcher_task)
+        if summary_task:
+            tasks.append(summary_task)
 
         await asyncio.gather(*tasks, return_exceptions=True)
 

@@ -35,7 +35,8 @@ async def generate_comprehensive_review(
     regenerate: bool = False,
     max_modules: int = 25,
     max_files_per_module: int = 20,
-    include_sections: list[str] | None = None
+    include_sections: list[str] | None = None,
+    schema_name: str = None
 ) -> ReportResult:
     """Generate a comprehensive architecture report for a repository.
 
@@ -46,6 +47,7 @@ async def generate_comprehensive_review(
         max_modules: Maximum modules to include
         max_files_per_module: Maximum files per module
         include_sections: Sections to include (default: all)
+        schema_name: Schema name to use (if None, uses default)
 
     Returns:
         ReportResult with JSON and markdown report
@@ -53,6 +55,10 @@ async def generate_comprehensive_review(
     conn = await asyncpg.connect(dsn=database_url)
 
     try:
+        # Set search_path if schema provided
+        if schema_name:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         # Get repo info
         repo = await conn.fetchrow(
             "SELECT name, root_path FROM repo WHERE id = $1", repo_id

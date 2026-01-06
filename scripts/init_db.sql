@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS symbol (
   fts tsvector,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(repo_id, fqn)
+  UNIQUE(repo_id, file_id, fqn)
 );
 
 CREATE TABLE IF NOT EXISTS edge (

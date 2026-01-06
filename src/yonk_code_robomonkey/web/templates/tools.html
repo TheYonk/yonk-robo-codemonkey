@@ -1,0 +1,729 @@
+{% extends "base.html" %}
+
+{% block title %}MCP Tool Tester - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-12 gap-6">
+    <!-- Tool List Sidebar -->
+    <div class="col-span-3">
+        <div class="bg-white shadow rounded-lg p-4">
+            <h2 class="text-lg font-semibold mb-4">MCP Tools</h2>
+            <div class="mb-4">
+                <input
+                    type="text"
+                    id="tool-search"
+                    placeholder="Search tools..."
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                    oninput="filterTools(this.value)"
+                >
+            </div>
+            <div id="tool-categories" class="space-y-4 overflow-y-auto" style="max-height: calc(100vh - 250px);">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Tool Form and Results -->
+    <div class="col-span-9">
+        <!-- Tool Info -->
+        <div class="bg-white shadow rounded-lg p-6 mb-6">
+            <div id="tool-header">
+                <h2 class="text-2xl font-bold text-gray-500">Select a tool from the sidebar</h2>
+                <p class="text-gray-600 mt-2">Choose an MCP tool to test it with custom parameters</p>
+            </div>
+        </div>
+
+        <!-- Tool Form -->
+        <div id="tool-form-container" class="bg-white shadow rounded-lg p-6 mb-6" style="display: none;">
+            <h3 class="text-lg font-semibold mb-4">Parameters</h3>
+            <form id="tool-form" class="space-y-4">
+                <!-- Dynamically populated -->
+            </form>
+            <div class="mt-6 flex gap-3">
+                <button
+                    onclick="executeTool()"
+                    class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                    Run Tool
+                </button>
+                <button
+                    onclick="clearForm()"
+                    type="button"
+                    class="bg-gray-200 text-gray-700 px-6 py-2 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                >
+                    Clear
+                </button>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div id="results-container" class="bg-white shadow rounded-lg p-6" style="display: none;">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold">Results</h3>
+                <div class="flex gap-2">
+                    <span id="execution-time" class="text-sm text-gray-600"></span>
+                    <button onclick="copyResults()" class="text-sm text-blue-600 hover:text-blue-700">
+                        Copy JSON
+                    </button>
+                </div>
+            </div>
+            <div id="results-status" class="mb-3"></div>
+
+            <!-- View Tabs -->
+            <div class="border-b border-gray-200 mb-4">
+                <nav class="flex -mb-px">
+                    <button
+                        id="tab-formatted"
+                        onclick="switchTab('formatted')"
+                        class="tab-button border-b-2 border-blue-500 text-blue-600 px-4 py-2 font-medium text-sm"
+                    >
+                        📄 Formatted
+                    </button>
+                    <button
+                        id="tab-json"
+                        onclick="switchTab('json')"
+                        class="tab-button border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 px-4 py-2 font-medium text-sm"
+                    >
+                        { } Raw JSON
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Formatted View -->
+            <div id="view-formatted" class="formatted-view">
+                <!-- Populated by JavaScript -->
+            </div>
+
+            <!-- JSON View -->
+            <pre id="results-json" class="json-view" style="display: none;"></pre>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="hidden bg-white shadow rounded-lg p-6 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <p class="mt-2 text-gray-600">Executing tool...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentTool = null;
+let allTools = [];
+
+// Load tools on page load
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadTools();
+});
+
+async function loadTools() {
+    try {
+        const response = await fetch('/api/mcp/tools');
+        const data = await response.json();
+        allTools = data.tools;
+
+        renderToolCategories(data.categorized);
+    } catch (error) {
+        console.error('Error loading tools:', error);
+        alert('Failed to load tools: ' + error.message);
+    }
+}
+
+function renderToolCategories(categorized) {
+    const container = document.getElementById('tool-categories');
+    container.innerHTML = '';
+
+    for (const [category, tools] of Object.entries(categorized)) {
+        const categoryDiv = document.createElement('div');
+        categoryDiv.innerHTML = `
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">${category}</h3>
+            <div class="space-y-1">
+                ${tools.map(tool => `
+                    <button
+                        onclick="selectTool('${tool.name}')"
+                        class="tool-item w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 transition"
+                        data-tool="${tool.name}"
+                        data-description="${tool.description.toLowerCase()}"
+                    >
+                        ${tool.name}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+        container.appendChild(categoryDiv);
+    }
+}
+
+function filterTools(query) {
+    const lowerQuery = query.toLowerCase();
+    const toolItems = document.querySelectorAll('.tool-item');
+
+    toolItems.forEach(item => {
+        const name = item.getAttribute('data-tool').toLowerCase();
+        const desc = item.getAttribute('data-description');
+        const matches = name.includes(lowerQuery) || desc.includes(lowerQuery);
+        item.style.display = matches ? 'block' : 'none';
+    });
+}
+
+async function selectTool(toolName) {
+    currentTool = toolName;
+
+    // Highlight selected tool
+    document.querySelectorAll('.tool-item').forEach(item => {
+        item.classList.remove('bg-blue-100', 'text-blue-700');
+        if (item.getAttribute('data-tool') === toolName) {
+            item.classList.add('bg-blue-100', 'text-blue-700');
+        }
+    });
+
+    // Load tool schema
+    try {
+        const response = await fetch(`/api/mcp/tools/${toolName}/schema`);
+        const schema = await response.json();
+
+        renderToolForm(schema);
+    } catch (error) {
+        console.error('Error loading tool schema:', error);
+        alert('Failed to load tool schema: ' + error.message);
+    }
+}
+
+function renderToolForm(schema) {
+    // Update header
+    document.getElementById('tool-header').innerHTML = `
+        <h2 class="text-2xl font-bold text-gray-900">${schema.name}</h2>
+        <p class="text-gray-600 mt-2">${schema.description}</p>
+    `;
+
+    // Build form
+    const form = document.getElementById('tool-form');
+    form.innerHTML = '';
+
+    schema.parameters.forEach(param => {
+        const fieldDiv = document.createElement('div');
+        const inputId = `param-${param.name}`;
+
+        let inputHtml = '';
+        if (param.type === 'bool' || param.type === 'boolean') {
+            inputHtml = `
+                <input
+                    type="checkbox"
+                    id="${inputId}"
+                    name="${param.name}"
+                    ${param.default ? 'checked' : ''}
+                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                >
+            `;
+        } else if (param.type === 'int' || param.type === 'integer') {
+            inputHtml = `
+                <input
+                    type="number"
+                    id="${inputId}"
+                    name="${param.name}"
+                    ${param.default !== null ? `value="${param.default}"` : ''}
+                    ${param.required ? 'required' : ''}
+                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                >
+            `;
+        } else {
+            // Text input for strings and others
+            inputHtml = `
+                <input
+                    type="text"
+                    id="${inputId}"
+                    name="${param.name}"
+                    ${param.default !== null ? `value="${param.default}"` : ''}
+                    ${param.required ? 'required' : ''}
+                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    placeholder="${param.description || ''}"
+                >
+            `;
+        }
+
+        fieldDiv.innerHTML = `
+            <label for="${inputId}" class="block text-sm font-medium text-gray-700">
+                ${param.name}
+                ${param.required ? '<span class="text-red-500">*</span>' : '<span class="text-gray-400">(optional)</span>'}
+                <span class="text-gray-500 font-normal">${param.type}</span>
+            </label>
+            ${inputHtml}
+            ${param.description ? `<p class="mt-1 text-xs text-gray-500">${param.description}</p>` : ''}
+        `;
+
+        form.appendChild(fieldDiv);
+    });
+
+    // Show form
+    document.getElementById('tool-form-container').style.display = 'block';
+    document.getElementById('results-container').style.display = 'none';
+}
+
+async function executeTool() {
+    if (!currentTool) return;
+
+    // Collect form data
+    const form = document.getElementById('tool-form');
+    const formData = new FormData(form);
+    const params = {};
+
+    for (const [key, value] of formData.entries()) {
+        const input = form.elements[key];
+        if (input.type === 'checkbox') {
+            params[key] = input.checked;
+        } else if (input.type === 'number') {
+            params[key] = value ? parseFloat(value) : null;
+        } else if (value) {
+            params[key] = value;
+        }
+    }
+
+    // Show loading
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('results-container').style.display = 'none';
+
+    try {
+        const response = await fetch(`/api/mcp/tools/${currentTool}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ params })
+        });
+
+        const result = await response.json();
+
+        // Display results
+        displayResults(result);
+    } catch (error) {
+        displayResults({
+            error: error.message,
+            success: false
+        });
+    } finally {
+        document.getElementById('loading').classList.add('hidden');
+    }
+}
+
+function switchTab(tab) {
+    // Update tab buttons
+    document.getElementById('tab-formatted').className = tab === 'formatted'
+        ? 'tab-button border-b-2 border-blue-500 text-blue-600 px-4 py-2 font-medium text-sm'
+        : 'tab-button border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 px-4 py-2 font-medium text-sm';
+
+    document.getElementById('tab-json').className = tab === 'json'
+        ? 'tab-button border-b-2 border-blue-500 text-blue-600 px-4 py-2 font-medium text-sm'
+        : 'tab-button border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 px-4 py-2 font-medium text-sm';
+
+    // Show/hide views
+    document.getElementById('view-formatted').style.display = tab === 'formatted' ? 'block' : 'none';
+    document.getElementById('results-json').style.display = tab === 'json' ? 'block' : 'none';
+}
+
+function displayResults(result) {
+    document.getElementById('results-container').style.display = 'block';
+
+    // Show execution time
+    if (result.execution_time_ms) {
+        document.getElementById('execution-time').textContent = `⏱️ ${result.execution_time_ms}ms`;
+    }
+
+    // Show status
+    const statusDiv = document.getElementById('results-status');
+    if (result.success) {
+        statusDiv.innerHTML = '<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-2 rounded">✓ Success</div>';
+    } else {
+        statusDiv.innerHTML = '<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">✗ Error</div>';
+    }
+
+    // Format and display JSON
+    const jsonView = document.getElementById('results-json');
+    jsonView.textContent = JSON.stringify(result, null, 2);
+
+    // Generate formatted view
+    const formattedView = document.getElementById('view-formatted');
+    formattedView.innerHTML = formatToolResult(currentTool, result);
+
+    // Show formatted view by default
+    switchTab('formatted');
+}
+
+function formatToolResult(toolName, result) {
+    // Handle errors
+    if (!result.success || result.error) {
+        return `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                <h4 class="font-semibold text-red-800 mb-2">Error</h4>
+                <p class="text-red-700">${result.error || 'Unknown error'}</p>
+                ${result.error_type ? `<p class="text-sm text-red-600 mt-2">Type: ${result.error_type}</p>` : ''}
+            </div>
+        `;
+    }
+
+    // Special formatting for ask_codebase tool
+    if (toolName === 'ask_codebase' && result.result) {
+        return formatAskCodebaseResult(result.result);
+    }
+
+    // Default formatting for other tools
+    return formatGenericResult(result.result);
+}
+
+function formatAskCodebaseResult(data) {
+    let html = '';
+
+    // Header
+    html += `
+        <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 mb-2">${escapeHtml(data.question || 'Question')}</h2>
+            <div class="flex gap-4 text-sm text-gray-600">
+                <span>📁 <strong>Repository:</strong> ${escapeHtml(data.repo_name || 'N/A')}</span>
+                <span>📊 <strong>Total Results:</strong> ${data.total_results_found || 0}</span>
+            </div>
+            ${data.search_strategies_used && data.search_strategies_used.length > 0
+                ? `<div class="mt-2 text-sm text-gray-600">🔍 <strong>Strategies:</strong> ${data.search_strategies_used.join(', ')}</div>`
+                : ''}
+        </div>
+    `;
+
+    // Summary
+    if (data.summary) {
+        html += `
+            <div class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 class="text-lg font-semibold text-blue-900 mb-2">💡 Summary</h3>
+                <p class="text-blue-800">${escapeHtml(data.summary)}</p>
+            </div>
+        `;
+    }
+
+    // Documentation
+    if (data.documentation && data.documentation.length > 0) {
+        html += formatSection('📚 Documentation', data.documentation, (doc, i) => {
+            const docId = `doc-${i}`;
+            const content = doc.summary || doc.content || '';
+            const isLong = content.length > 300;
+            const preview = isLong ? content.substring(0, 300) + '...' : content;
+
+            return `
+                <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-300">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-lg text-gray-900">${escapeHtml(doc.title || 'Untitled')}</h4>
+                            <div class="text-sm text-gray-600 mt-1">
+                                <span class="font-mono bg-gray-200 px-2 py-0.5 rounded">📄 ${escapeHtml(doc.file_path || 'N/A')}</span>
+                                <span class="ml-3 font-semibold">⭐ ${(doc.relevance_score || 0).toFixed(3)}</span>
+                            </div>
+                        </div>
+                        ${isLong ? `
+                            <button
+                                onclick="toggleExpand('${docId}')"
+                                class="ml-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                id="${docId}-btn"
+                            >
+                                ▼ Expand
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div class="mt-3 text-gray-700 prose prose-sm max-w-none">
+                        <div id="${docId}-preview" ${!isLong ? '' : ''}>
+                            ${escapeHtml(preview)}
+                        </div>
+                        ${isLong ? `
+                            <div id="${docId}-full" style="display: none;">
+                                ${escapeHtml(content)}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    // Code Files
+    if (data.code_files && data.code_files.length > 0) {
+        html += formatSection('💻 Code Files', data.code_files, (code, i) => {
+            const codeId = `code-${i}`;
+            const snippet = code.snippet || '';
+            const isLong = snippet.split('\n').length > 15;
+            const previewLines = isLong ? snippet.split('\n').slice(0, 15).join('\n') + '\n...' : snippet;
+
+            return `
+                <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-300">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-lg text-gray-900">
+                                <span class="font-mono bg-blue-100 px-2 py-0.5 rounded text-blue-900">
+                                    ${escapeHtml(code.file_path || 'Unknown')}
+                                </span>
+                            </h4>
+                            <div class="text-sm text-gray-600 mt-2">
+                                <span class="bg-gray-200 px-2 py-0.5 rounded">📍 Lines ${code.line_range ? code.line_range.join('-') : 'N/A'}</span>
+                                <span class="ml-2 bg-gray-200 px-2 py-0.5 rounded">🔤 ${escapeHtml(code.language || 'unknown')}</span>
+                                <span class="ml-2 font-semibold">⭐ ${(code.relevance_score || 0).toFixed(3)}</span>
+                            </div>
+                            ${code.context ? `<p class="text-sm text-gray-700 mt-2 italic">${escapeHtml(code.context)}</p>` : ''}
+                        </div>
+                        ${isLong && snippet ? `
+                            <button
+                                onclick="toggleExpand('${codeId}')"
+                                class="ml-2 text-blue-600 hover:text-blue-800 text-sm font-medium whitespace-nowrap"
+                                id="${codeId}-btn"
+                            >
+                                ▼ Expand
+                            </button>
+                        ` : ''}
+                    </div>
+                    ${snippet ? `
+                        <div id="${codeId}-preview" class="mt-3">
+                            <pre class="p-3 bg-gray-900 text-gray-100 rounded overflow-x-auto text-xs"><code>${escapeHtml(previewLines)}</code></pre>
+                        </div>
+                        ${isLong ? `
+                            <div id="${codeId}-full" style="display: none;" class="mt-3">
+                                <pre class="p-3 bg-gray-900 text-gray-100 rounded overflow-x-auto text-xs"><code>${escapeHtml(snippet)}</code></pre>
+                            </div>
+                        ` : ''}
+                    ` : ''}
+                </div>
+            `;
+        });
+    }
+
+    // Symbols
+    if (data.symbols && data.symbols.length > 0) {
+        html += formatSection('🔧 Key Symbols', data.symbols, sym => `
+            <div class="mb-3 p-3 bg-gray-50 rounded-lg">
+                <h4 class="font-semibold">${escapeHtml(sym.name || 'Unknown')}</h4>
+                <div class="text-sm text-gray-600 mt-1">
+                    <span>🏷️ ${escapeHtml(sym.kind || 'symbol')}</span>
+                    <span class="ml-3">📍 ${escapeHtml(sym.file_path || 'N/A')}:${sym.line || '?'}</span>
+                    <span class="ml-3">⭐ ${(sym.relevance_score || 0).toFixed(2)}</span>
+                </div>
+                ${sym.signature ? `<code class="text-sm text-gray-700 mt-1 block">${escapeHtml(sym.signature)}</code>` : ''}
+                ${sym.description ? `<p class="text-sm text-gray-700 mt-1">${escapeHtml(sym.description)}</p>` : ''}
+            </div>
+        `);
+    }
+
+    // File Summaries
+    if (data.file_summaries && data.file_summaries.length > 0) {
+        html += formatSection('📄 File Summaries', data.file_summaries, (fs, i) => {
+            const fsId = `fs-${i}`;
+            const summary = fs.summary || '';
+            const isLong = summary.length > 200;
+            const preview = isLong ? summary.substring(0, 200) + '...' : summary;
+
+            return `
+                <div class="mb-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-green-900">
+                                <span class="font-mono bg-green-100 px-2 py-0.5 rounded">
+                                    📄 ${escapeHtml(fs.name || 'Unknown')}
+                                </span>
+                            </h4>
+                            <div class="text-sm text-green-700 mt-1 font-semibold">⭐ ${(fs.relevance_score || 0).toFixed(3)}</div>
+                        </div>
+                        ${isLong ? `
+                            <button
+                                onclick="toggleExpand('${fsId}')"
+                                class="ml-2 text-green-700 hover:text-green-900 text-sm font-medium"
+                                id="${fsId}-btn"
+                            >
+                                ▼ Expand
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div id="${fsId}-preview" class="mt-2 text-green-800">
+                        ${escapeHtml(preview)}
+                    </div>
+                    ${isLong ? `
+                        <div id="${fsId}-full" style="display: none;" class="mt-2 text-green-800">
+                            ${escapeHtml(summary)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        });
+    }
+
+    // Module Summaries
+    if (data.module_summaries && data.module_summaries.length > 0) {
+        html += formatSection('📁 Module Summaries', data.module_summaries, (ms, i) => {
+            const msId = `ms-${i}`;
+            const summary = ms.summary || '';
+            const isLong = summary.length > 200;
+            const preview = isLong ? summary.substring(0, 200) + '...' : summary;
+
+            return `
+                <div class="mb-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-purple-900">
+                                <span class="font-mono bg-purple-100 px-2 py-0.5 rounded">
+                                    📁 ${escapeHtml(ms.name || 'Unknown')}
+                                </span>
+                            </h4>
+                            <div class="text-sm text-purple-700 mt-1 font-semibold">⭐ ${(ms.relevance_score || 0).toFixed(3)}</div>
+                        </div>
+                        ${isLong ? `
+                            <button
+                                onclick="toggleExpand('${msId}')"
+                                class="ml-2 text-purple-700 hover:text-purple-900 text-sm font-medium"
+                                id="${msId}-btn"
+                            >
+                                ▼ Expand
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div id="${msId}-preview" class="mt-2 text-purple-800">
+                        ${escapeHtml(preview)}
+                    </div>
+                    ${isLong ? `
+                        <div id="${msId}-full" style="display: none;" class="mt-2 text-purple-800">
+                            ${escapeHtml(summary)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        });
+    }
+
+    // Symbol Summaries
+    if (data.symbol_summaries && data.symbol_summaries.length > 0) {
+        html += formatSection('🔍 Symbol Summaries', data.symbol_summaries, (ss, i) => {
+            const ssId = `ss-${i}`;
+            const summary = ss.summary || '';
+            const isLong = summary.length > 200;
+            const preview = isLong ? summary.substring(0, 200) + '...' : summary;
+
+            return `
+                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-yellow-900">
+                                <span class="font-mono bg-yellow-100 px-2 py-0.5 rounded">
+                                    🔍 ${escapeHtml(ss.name || 'Unknown')}
+                                </span>
+                            </h4>
+                            <div class="text-sm text-yellow-700 mt-1">
+                                ${ss.file_path ? `<span class="font-mono bg-yellow-100 px-2 py-0.5 rounded">📍 ${escapeHtml(ss.file_path)}</span>` : ''}
+                                ${ss.summary_type ? `<span class="ml-2 bg-yellow-100 px-2 py-0.5 rounded">🏷️ ${escapeHtml(ss.summary_type)}</span>` : ''}
+                                <span class="ml-2 font-semibold">⭐ ${(ss.relevance_score || 0).toFixed(3)}</span>
+                            </div>
+                        </div>
+                        ${isLong ? `
+                            <button
+                                onclick="toggleExpand('${ssId}')"
+                                class="ml-2 text-yellow-700 hover:text-yellow-900 text-sm font-medium"
+                                id="${ssId}-btn"
+                            >
+                                ▼ Expand
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div id="${ssId}-preview" class="mt-2 text-yellow-800">
+                        ${escapeHtml(preview)}
+                    </div>
+                    ${isLong ? `
+                        <div id="${ssId}-full" style="display: none;" class="mt-2 text-yellow-800">
+                            ${escapeHtml(summary)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        });
+    }
+
+    // Key Files
+    if (data.key_files && data.key_files.length > 0) {
+        html += `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3">📁 Key Files to Examine</h3>
+                <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+                    ${data.key_files.map(file => `<li><code class="bg-gray-100 px-1 rounded">${escapeHtml(file)}</code></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    // Suggested Actions
+    if (data.suggested_actions && data.suggested_actions.length > 0) {
+        html += `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3">🎯 Suggested Next Steps</h3>
+                <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+                    ${data.suggested_actions.map(action => `<li>${escapeHtml(action)}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    return html || '<p class="text-gray-500">No results to display</p>';
+}
+
+function formatSection(title, items, formatter) {
+    if (!items || items.length === 0) return '';
+    return `
+        <div class="mb-6">
+            <h3 class="text-lg font-semibold mb-3">${title}</h3>
+            ${items.map((item, i) => formatter(item, i)).join('')}
+        </div>
+    `;
+}
+
+function formatGenericResult(data) {
+    if (!data) return '<p class="text-gray-500">No data returned</p>';
+
+    // Pretty print object/array
+    if (typeof data === 'object') {
+        return `<pre class="bg-gray-50 p-4 rounded-lg overflow-x-auto text-sm">${JSON.stringify(data, null, 2)}</pre>`;
+    }
+
+    return `<div class="bg-gray-50 p-4 rounded-lg">${escapeHtml(String(data))}</div>`;
+}
+
+function escapeHtml(unsafe) {
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function toggleExpand(id) {
+    const preview = document.getElementById(`${id}-preview`);
+    const full = document.getElementById(`${id}-full`);
+    const btn = document.getElementById(`${id}-btn`);
+
+    if (!full || !btn) return;
+
+    const isExpanded = full.style.display !== 'none';
+
+    if (isExpanded) {
+        // Collapse
+        preview.style.display = 'block';
+        full.style.display = 'none';
+        btn.innerHTML = '▼ Expand';
+    } else {
+        // Expand
+        preview.style.display = 'none';
+        full.style.display = 'block';
+        btn.innerHTML = '▲ Collapse';
+    }
+}
+
+function copyResults() {
+    const json = document.getElementById('results-json').textContent;
+    navigator.clipboard.writeText(json).then(() => {
+        alert('Results copied to clipboard!');
+    });
+}
+
+function clearForm() {
+    document.getElementById('tool-form').reset();
+}
+</script>
+{% endblock %}

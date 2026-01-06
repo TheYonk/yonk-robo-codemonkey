@@ -770,5 +770,51 @@ RETURNS: {total_results_found: int, strategies_used: [3 strategies], top_results
             },
             "required": ["query", "repo"]
         }
+    },
+
+    "ask_codebase": {
+        "description": """**NATURAL LANGUAGE CODEBASE Q&A** - RoboMonkey's conversational search tool that answers questions about the codebase using multiple search strategies orchestrated together. Unlike individual search tools, ask_codebase automatically combines documentation search, code search, and symbol search to provide comprehensive answers.
+
+USE THIS WHEN: (1) User asks exploratory questions like "how does X work?", "where is Y implemented?", "show me Z", (2) You want a synthesized answer rather than raw search results, (3) The question spans multiple areas (code + docs + symbols), (4) Better for "explain this feature" type questions.
+
+ALGORITHM: (1) Search documentation for conceptual understanding, (2) Search code for implementation details, (3) Search symbols for specific functions/classes, (4) Combine and format results with cross-references.
+
+DON'T USE WHEN: (1) You know exactly what you're looking for → use hybrid_search or symbol_lookup, (2) Need only documentation → use doc_search, (3) Need raw ranked results → use universal_search.
+
+RETURNS: Structured answer with: top documentation results with summaries, top code files with snippets, top symbols (functions/classes) with definitions, and suggested next steps for deeper exploration.""",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "Natural language question about the codebase (e.g., 'how does authentication work?', 'where is the payment processing?')"
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name to search (use list_repos to see available repos)"
+                },
+                "top_docs": {
+                    "type": "integer",
+                    "description": "Number of documentation results to return (default 3)",
+                    "default": 3
+                },
+                "top_code": {
+                    "type": "integer",
+                    "description": "Number of code file results to return (default 5)",
+                    "default": 5
+                },
+                "top_symbols": {
+                    "type": "integer",
+                    "description": "Number of symbol results to return (default 5)",
+                    "default": 5
+                },
+                "format_as_markdown": {
+                    "type": "boolean",
+                    "description": "Return formatted markdown output (default true)",
+                    "default": True
+                }
+            },
+            "required": ["question", "repo"]
+        }
     }
 }

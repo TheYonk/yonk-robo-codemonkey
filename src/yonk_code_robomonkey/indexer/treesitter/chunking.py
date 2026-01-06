@@ -89,7 +89,8 @@ def _create_header_chunk(
         return []
 
     # Apply sliding window if header is large
-    MAX_CHUNK_SIZE = 7000
+    # Reduced from 7000 to 4000 to match embedding max_chunk_length limit
+    MAX_CHUNK_SIZE = 4000
     OVERLAP = 500
 
     if len(content) <= MAX_CHUNK_SIZE:
@@ -151,8 +152,9 @@ def _create_symbol_chunk(source: bytes, symbol: Symbol) -> list[Chunk]:
     content = source[symbol.start_byte:symbol.end_byte].decode("utf-8", errors="replace")
 
     # Check if symbol is large enough to need splitting
-    MAX_CHUNK_SIZE = 7000  # Safe buffer under 8K model limit
-    OVERLAP = 500  # Overlap on each side
+    # Reduced from 7000 to 4000 to match embedding limit and avoid truncation
+    MAX_CHUNK_SIZE = 4000  # Safe buffer under 8K token limit (accounting for char:token ratio)
+    OVERLAP = 500  # Overlap on each side for context
 
     if len(content) <= MAX_CHUNK_SIZE:
         # Small symbol - single chunk

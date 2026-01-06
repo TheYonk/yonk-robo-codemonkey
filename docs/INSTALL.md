@@ -58,8 +58,12 @@ robomonkey db ping
 # 7. Index your first repository
 robomonkey index --repo /path/to/your/repo --name myrepo
 
-# 8. Generate embeddings
+# 8. Generate embeddings (optional: daemon can do this automatically)
 python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
+
+# 9. Generate summaries (optional: daemon can do this automatically)
+ollama pull qwen2.5-coder:7b  # Pull LLM model for summaries
+robomonkey summaries generate --repo-name myrepo
 ```
 
 ---
@@ -255,7 +259,11 @@ Embedding 12352 chunks in batches of 100...
 
 ## B. Daemon Setup
 
-The daemon provides automatic background processing (embedding generation, file watching, git sync).
+The daemon provides automatic background processing:
+- **Embedding generation** - Automatically generates embeddings for new/modified code chunks
+- **Summary generation** - AI-generated summaries for files, symbols, and modules
+- **File watching** - Automatic reindexing when files change
+- **Git sync** - Track repository changes
 
 **📝 Configuration Change:**
 The daemon uses `config/robomonkey-daemon.yaml`, NOT `.env`. Make sure settings match!
@@ -298,8 +306,47 @@ from yonk_code_robomonkey.config.daemon import load_daemon_config
 config = load_daemon_config()
 print(f'Database: {config.database.control_dsn}')
 print(f'Embeddings: {config.embeddings.model}')
+print(f'Summaries: enabled={config.summaries.enabled}, model={config.summaries.model}')
 print(f'Workers: {config.workers.embed_workers}')
 "
+```
+
+**Summary Configuration:**
+
+The daemon can automatically generate AI summaries for code:
+- **File summaries** - High-level overview of what each file does
+- **Symbol summaries** - Explanation of functions, classes, methods
+- **Module summaries** - Package/directory purpose and structure
+
+To enable summaries, configure in `config/robomonkey-daemon.yaml`:
+```yaml
+summaries:
+  enabled: true                    # Enable summary generation
+  check_interval_minutes: 60       # How often to check for new entities
+  batch_size: 10                   # Process 10 entities at a time
+  model: "qwen2.5-coder:7b"       # Ollama model for summaries
+  base_url: "http://localhost:11434"
+  provider: "ollama"               # ollama, vllm, or openai
+```
+
+**Recommended Ollama models for summaries:**
+- `qwen2.5-coder:7b` - Fast, good quality (recommended)
+- `qwen2.5-coder:14b` - Balanced quality and speed
+- `qwen3-coder:30b` - Best quality, slower
+- `deepseek-coder:33b` - High quality, slower
+
+Pull a model with: `ollama pull qwen2.5-coder:7b`
+
+**Manual summary generation:**
+```bash
+# Generate summaries for a repository
+robomonkey summaries generate --repo-name myrepo
+
+# Check summary coverage
+robomonkey summaries status --repo-name myrepo
+
+# Generate only file summaries
+robomonkey summaries generate --repo-name myrepo --type files
 ```
 
 ### Step 2: Start Daemon

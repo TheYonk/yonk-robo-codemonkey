@@ -206,6 +206,7 @@ def _extract_javascript_edges(source: bytes, tree: any, file_path: str) -> Itera
 
     yield from _extract_javascript_imports(source, root)
     yield from _extract_javascript_inheritance(source, root)
+    yield from _extract_javascript_calls(source, root)
 
 
 def _extract_javascript_imports(source: bytes, root: any) -> Iterator[Edge]:
@@ -260,6 +261,57 @@ def _extract_javascript_inheritance(source: bytes, root: any) -> Iterator[Edge]:
                     )
 
 
+def _extract_javascript_calls(source: bytes, root: any) -> Iterator[Edge]:
+    """Extract JavaScript function calls (best-effort, simple names only)."""
+    # Track function/method definitions to get caller context
+    current_function = None
+
+    for node in _traverse_tree(root):
+        # Track current function context
+        if node.type in ("function_declaration", "function", "method_definition", "arrow_function"):
+            # Try to get function name
+            name_node = None
+            if node.type == "function_declaration":
+                name_node = _find_child(node, "identifier")
+            elif node.type == "method_definition":
+                name_node = _find_child(node, "property_identifier")
+            # Arrow functions and anonymous functions don't have names we can easily extract
+
+            if name_node:
+                current_function = _get_text(source, name_node)
+
+        # Find call expressions
+        if node.type == "call_expression" and current_function:
+            # Get function being called
+            func_node = node.children[0] if node.children else None
+            if not func_node:
+                continue
+
+            # Handle different call patterns
+            called_name = None
+            if func_node.type == "identifier":
+                # Simple call: foo()
+                called_name = _get_text(source, func_node)
+            elif func_node.type == "member_expression":
+                # Method call: obj.foo() - extract just the method name
+                property_node = _find_child(func_node, "property_identifier")
+                if property_node:
+                    called_name = _get_text(source, property_node)
+
+            if called_name:
+                start_line = node.start_point[0] + 1
+                end_line = node.end_point[0] + 1
+
+                yield Edge(
+                    edge_type="CALLS",
+                    from_symbol_fqn=current_function,
+                    to_symbol_fqn=called_name,
+                    confidence=0.5,  # Best-effort
+                    evidence_start_line=start_line,
+                    evidence_end_line=end_line
+                )
+
+
 def _extract_typescript_edges(source: bytes, tree: any, file_path: str) -> Iterator[Edge]:
     """Extract TypeScript edges: imports, inheritance, implements."""
     # Start with JavaScript edges
@@ -299,10 +351,11 @@ def _extract_typescript_edges(source: bytes, tree: any, file_path: str) -> Itera
 # Go edge extraction
 
 def _extract_go_edges(source: bytes, tree: any, file_path: str) -> Iterator[Edge]:
-    """Extract Go edges: imports."""
+    """Extract Go edges: imports, calls."""
     root = tree.root_node
 
     yield from _extract_go_imports(source, root)
+    yield from _extract_go_calls(source, root)
 
 
 def _extract_go_imports(source: bytes, root: any) -> Iterator[Edge]:
@@ -343,6 +396,57 @@ def _extract_go_imports(source: bytes, root: any) -> Iterator[Edge]:
                                 evidence_start_line=start_line,
                                 evidence_end_line=end_line
                             )
+
+
+def _extract_go_calls(source: bytes, root: any) -> Iterator[Edge]:
+    """Extract Go function calls (best-effort, simple names only)."""
+    # Track function/method definitions to get caller context
+    current_function = None
+
+    for node in _traverse_tree(root):
+        # Track current function context
+        if node.type == "function_declaration":
+            # Get function name
+            name_node = _find_child(node, "identifier")
+            if name_node:
+                current_function = _get_text(source, name_node)
+        elif node.type == "method_declaration":
+            # Get method name
+            name_node = _find_child(node, "field_identifier")
+            if name_node:
+                current_function = _get_text(source, name_node)
+
+        # Find call expressions
+        if node.type == "call_expression" and current_function:
+            # Get function being called
+            func_node = node.children[0] if node.children else None
+            if not func_node:
+                continue
+
+            # Handle different call patterns
+            called_name = None
+            if func_node.type == "identifier":
+                # Simple call: foo()
+                called_name = _get_text(source, func_node)
+            elif func_node.type == "selector_expression":
+                # Method call: obj.Foo() or pkg.Func()
+                # Extract just the method/function name
+                field_node = _find_child(func_node, "field_identifier")
+                if field_node:
+                    called_name = _get_text(source, field_node)
+
+            if called_name:
+                start_line = node.start_point[0] + 1
+                end_line = node.end_point[0] + 1
+
+                yield Edge(
+                    edge_type="CALLS",
+                    from_symbol_fqn=current_function,
+                    to_symbol_fqn=called_name,
+                    confidence=0.5,  # Best-effort
+                    evidence_start_line=start_line,
+                    evidence_end_line=end_line
+                )
 
 
 # Java edge extraction

@@ -379,6 +379,60 @@ Embedding 1234 chunks in batches of 100...
 
 ---
 
+## Step 11a: Generate AI Summaries (Optional but Recommended)
+
+This step generates human-readable explanations of your code:
+
+```bash
+# First, pull an LLM model for generating summaries
+ollama pull qwen2.5-coder:7b
+
+# Generate summaries for your repository
+robomonkey summaries generate --repo-name myproject
+```
+
+**💡 What's happening?**
+The AI is creating short summaries explaining what each file, function, and class does. This makes it much easier to understand unfamiliar code!
+
+**Expected output:**
+```
+Generating summaries for repository: myproject
+============================================================
+LLM Model: qwen2.5-coder:7b
+Provider: ollama
+============================================================
+Generating file summaries...
+  ✓ 234/234 files complete
+Generating symbol summaries...
+  ✓ 1234/1234 symbols complete
+Generating module summaries...
+  ✓ 16/16 modules complete
+============================================================
+✓ Summary generation complete!
+  Total entities: 1,484
+  Coverage: 100%
+```
+
+**💡 This might take a while:**
+- Small project (100 files): 5-10 minutes
+- Medium project (500 files): 15-25 minutes
+- Large project (1000+ files): 30-60 minutes
+
+**Check summary coverage:**
+```bash
+robomonkey summaries status --repo-name myproject
+```
+
+**Alternative LLM models:**
+- `qwen2.5-coder:7b` - Fast, good quality (recommended)
+- `qwen3-coder:30b` - Best quality, slower
+- `llama3.2:3b` - Fastest, lower quality
+
+**Skip this step for now?**
+You can always generate summaries later. The daemon can also generate them automatically in the background!
+
+---
+
 ## Step 12: Test It Works!
 
 Let's make sure everything is working:
@@ -572,9 +626,11 @@ cd
    ```bash
    robomonkey index --repo /path/to/another/project --name project2
    python scripts/embed_repo_direct.py project2 robomonkey_project2
+   robomonkey summaries generate --repo-name project2  # Optional
    ```
 
 2. **Set up the daemon for automatic updates:**
+   - The daemon automatically generates embeddings and summaries in the background
    - See [INSTALL.md](INSTALL.md#b-daemon-setup)
 
 3. **Learn advanced searches:**
@@ -630,6 +686,12 @@ robomonkey index --repo /path/to/project --name projectname
 
 # Generate embeddings
 python scripts/embed_repo_direct.py projectname robomonkey_projectname
+
+# Generate summaries (optional)
+robomonkey summaries generate --repo-name projectname
+
+# Check summary coverage
+robomonkey summaries status --repo-name projectname
 
 # Check database status
 docker ps

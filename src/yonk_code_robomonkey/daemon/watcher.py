@@ -22,24 +22,26 @@ logger = logging.getLogger(__name__)
 class RepoEventHandler(FileSystemEventHandler):
     """Handles file system events for a single repo."""
 
-    CODE_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java"}
-    DOC_EXTENSIONS = {".md", ".rst", ".adoc"}
-    SUPPORTED_EXTENSIONS = CODE_EXTENSIONS | DOC_EXTENSIONS
-
     def __init__(self, repo_name: str, schema_name: str, root_path: Path,
-                 ignore_patterns: list[str], event_queue: asyncio.Queue):
+                 ignore_patterns: list[str], code_extensions: list[str],
+                 doc_extensions: list[str], event_queue: asyncio.Queue):
         self.repo_name = repo_name
         self.schema_name = schema_name
         self.root_path = root_path
         self.ignore_patterns = ignore_patterns
         self.event_queue = event_queue
 
+        # Convert to sets for faster lookup
+        self.code_extensions = set(code_extensions)
+        self.doc_extensions = set(doc_extensions)
+        self.supported_extensions = self.code_extensions | self.doc_extensions
+
     def _should_process(self, path: str) -> bool:
         """Check if file should be processed."""
         p = Path(path)
 
         # Check extension
-        if p.suffix not in self.SUPPORTED_EXTENSIONS:
+        if p.suffix not in self.supported_extensions:
             return False
 
         # Check ignore patterns
@@ -52,7 +54,7 @@ class RepoEventHandler(FileSystemEventHandler):
 
     def _is_doc_file(self, path: str) -> bool:
         """Check if file is a documentation file."""
-        return Path(path).suffix in self.DOC_EXTENSIONS
+        return Path(path).suffix in self.doc_extensions
 
     def on_created(self, event: FileSystemEvent):
         if event.is_directory or not self._should_process(event.src_path):
@@ -167,6 +169,8 @@ class RepoWatcher:
                 schema_name=repo["schema_name"],
                 root_path=root_path,
                 ignore_patterns=self.config.watching.ignore_patterns,
+                code_extensions=self.config.watching.code_extensions,
+                doc_extensions=self.config.watching.doc_extensions,
                 event_queue=self.event_queue,
             )
 

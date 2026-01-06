@@ -88,6 +88,7 @@ RoboMonkey MCP is an AI-powered code search and analysis tool that:
 - **Symbol extraction:** Functions, classes, methods, interfaces
 - **Call graph analysis:** Find callers, callees, inheritance chains
 - **Documentation indexing:** READMEs, docs/, inline comments
+- **Auto-summary generation:** AI-generated summaries for files, symbols, and modules
 - **Semantic search:** Natural language queries find relevant code
 - **Tag-based filtering:** Auto-tag by patterns (auth, database, API, etc.)
 
@@ -98,10 +99,11 @@ RoboMonkey MCP is an AI-powered code search and analysis tool that:
 - **Context packing:** Smart token budgeting for LLM context
 
 ### Developer Experience
-- **CLI tools:** `robomonkey index`, `robomonkey status`, `robomonkey embed`
-- **Background daemon:** Automatic embedding generation, file watching
+- **CLI tools:** `robomonkey index`, `robomonkey status`, `robomonkey embed`, `robomonkey summaries`
+- **Background daemon:** Automatic embedding generation, auto-summary updates, file watching
 - **MCP server:** Seamless IDE integration
 - **Schema per repo:** Clean isolation, easy cleanup
+- **Web UI:** Database explorer and MCP tool tester at http://localhost:9832
 
 ---
 

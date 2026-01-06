@@ -5,6 +5,10 @@ from typing import Any, Callable, Awaitable
 import asyncpg
 from yonk_code_robomonkey.retrieval.hybrid_search import hybrid_search as _hybrid_search
 from yonk_code_robomonkey.retrieval.fts_search import fts_search_documents
+from yonk_code_robomonkey.retrieval.ask_codebase import (
+    ask_codebase as _ask_codebase,
+    format_answer_for_display
+)
 from yonk_code_robomonkey.retrieval.graph_traversal import (
     get_symbol_by_fqn,
     get_symbol_by_id,
@@ -25,7 +29,11 @@ from yonk_code_robomonkey.reports.feature_index_builder import build_feature_ind
 from yonk_code_robomonkey.db_introspect.report_generator import generate_db_architecture_report
 from yonk_code_robomonkey.migration.assessor import assess_migration
 from yonk_code_robomonkey.config import Settings
-from yonk_code_robomonkey.db.schema_manager import resolve_repo_to_schema, schema_context
+from yonk_code_robomonkey.db.schema_manager import (
+    resolve_repo_to_schema,
+    resolve_repo_with_suggestions,
+    schema_context
+)
 
 TOOL_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {}
 
@@ -93,12 +101,11 @@ async def hybrid_search(
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            resolved_repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+            result = await resolve_repo_with_suggestions(conn, repo)
+            if "error" in result:
+                return result
+            resolved_repo_id = result["repo_id"]
+            schema_name = result["schema"]
         finally:
             await conn.close()
 
@@ -173,12 +180,11 @@ async def symbol_lookup(
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+            result = await resolve_repo_with_suggestions(conn, repo)
+            if "error" in result:
+                return result
+            repo_id = result["repo_id"]
+            schema_name = result["schema"]
         finally:
             await conn.close()
 
@@ -237,12 +243,11 @@ async def symbol_context(
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+            result = await resolve_repo_with_suggestions(conn, repo)
+            if "error" in result:
+                return result
+            repo_id = result["repo_id"]
+            schema_name = result["schema"]
         finally:
             await conn.close()
 
@@ -317,12 +322,11 @@ async def callers(
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+            result = await resolve_repo_with_suggestions(conn, repo)
+            if "error" in result:
+                return result
+            repo_id = result["repo_id"]
+            schema_name = result["schema"]
         finally:
             await conn.close()
 
@@ -389,12 +393,11 @@ async def callees(
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+            result = await resolve_repo_with_suggestions(conn, repo)
+            if "error" in result:
+                return result
+            repo_id = result["repo_id"]
+            schema_name = result["schema"]
         finally:
             await conn.close()
 
@@ -465,12 +468,11 @@ async def doc_search(
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
         try:
-            resolved_repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+            result = await resolve_repo_with_suggestions(conn, repo)
+            if "error" in result:
+                return result
+            resolved_repo_id = result["repo_id"]
+            schema_name = result["schema"]
         finally:
             await conn.close()
 
@@ -534,13 +536,11 @@ async def file_summary(
     conn = await asyncpg.connect(dsn=settings.database_url)
     try:
         # Resolve repo to schema
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         async with schema_context(conn, schema_name):
             # Check if summary exists and file hasn't changed
@@ -964,13 +964,11 @@ async def index_status(
     conn = await asyncpg.connect(dsn=settings.database_url)
     try:
         # Resolve repo name to schema and get repo_id
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo_name_or_id)
-        except ValueError as e:
-            return {
-                "error": f"Repository not found: {repo_name_or_id}",
-                "why": str(e)
-            }
+        result = await resolve_repo_with_suggestions(conn, repo_name_or_id)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         # Get repo info from the resolved schema
         async with schema_context(conn, schema_name):
@@ -1069,13 +1067,11 @@ async def comprehensive_review(
 
     try:
         # Resolve repo name to schema and get repo_id
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": f"Repository not found: {repo}",
-                "why": str(e)
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         # Generate report
         result = await generate_comprehensive_review(
@@ -1084,7 +1080,8 @@ async def comprehensive_review(
             regenerate=regenerate,
             max_modules=max_modules,
             max_files_per_module=max_files_per_module,
-            include_sections=include_sections
+            include_sections=include_sections,
+            schema_name=schema_name
         )
 
         return {
@@ -1133,13 +1130,11 @@ async def feature_context(
 
     try:
         # Resolve repo name to schema and get repo_id
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": f"Repository not found: {repo}",
-                "why": str(e)
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         if not repo_id:
             return {
@@ -1198,13 +1193,11 @@ async def list_features(
 
     try:
         # Resolve repo name to schema and get repo_id
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": f"Repository not found: {repo}",
-                "why": str(e)
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         # Get features
         async with schema_context(conn, schema_name):
@@ -1360,13 +1353,11 @@ async def db_feature_context(
 
     try:
         # Resolve repo name to schema and get repo_id
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": f"Repository not found: {repo}",
-                "why": str(e)
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         if not repo_id:
             return {
@@ -1526,13 +1517,11 @@ async def migration_assess(
 
     try:
         # Resolve repo to schema
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         # Perform assessment (pass schema_name for isolation)
         result = await assess_migration(
@@ -1591,13 +1580,11 @@ async def migration_inventory(
 
     try:
         # Resolve repo to schema
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         async with schema_context(conn, schema_name):
             # Get latest assessment
@@ -1688,13 +1675,11 @@ async def migration_risks(
 
     try:
         # Resolve repo to schema
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         async with schema_context(conn, schema_name):
             # Get latest assessment
@@ -1782,13 +1767,11 @@ async def migration_plan_outline(
 
     try:
         # Resolve repo to schema
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         async with schema_context(conn, schema_name):
             # Get latest assessment
@@ -2564,13 +2547,11 @@ async def universal_search(
 
     try:
         # Resolve repo to schema
-        try:
-            repo_id, schema_name = await resolve_repo_to_schema(conn, repo)
-        except ValueError as e:
-            return {
-                "error": str(e),
-                "why": "Repository not found in any schema"
-            }
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
 
         # Run three search strategies in parallel
         import asyncio
@@ -3047,3 +3028,141 @@ async def categorize_file(
         "schema_name": schema_name,
         "why": ". ".join(why_parts)
     }
+
+
+@tool("ask_codebase")
+async def ask_codebase_tool(
+    question: str,
+    repo: str,
+    top_docs: int = 3,
+    top_code: int = 5,
+    top_symbols: int = 5,
+    format_as_markdown: bool = True
+) -> dict[str, Any]:
+    """Ask a natural language question about the codebase and get comprehensive answers.
+
+    This tool orchestrates multiple search strategies to provide a complete answer:
+    - Documentation search (for conceptual understanding)
+    - Code search (for implementation details)
+    - Symbol search (for specific functions/classes)
+    - Synthesized summary (overall answer)
+
+    **USE THIS TOOL** when the user asks "how does X work?", "where is Y implemented?",
+    "show me Z", etc. This is better than hybrid_search for exploratory questions.
+
+    Args:
+        question: Natural language question (e.g., "how does authentication work?")
+        repo: Repository name to search
+        top_docs: Number of documentation results (default 3)
+        top_code: Number of code file results (default 5)
+        top_symbols: Number of symbol results (default 5)
+        format_as_markdown: Return formatted markdown (default True)
+
+    Returns:
+        Comprehensive answer with documentation, code, symbols, and summary
+
+    Example:
+        ask_codebase(
+            question="wrestling tiers generator archetypes new game",
+            repo="wrestling-game"
+        )
+
+        Returns structured results with:
+        - Top 3 relevant docs with summaries
+        - Top 5 code files with snippets
+        - Top 5 symbols (functions/classes)
+        - Overall summary and suggested next steps
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo to schema
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
+
+        # Call the ask_codebase function with embedding configuration
+        answer = await _ask_codebase(
+            question=question,
+            repo_name=repo,
+            database_url=settings.database_url,
+            schema_name=schema_name,
+            embeddings_provider=settings.embeddings_provider,
+            embeddings_model=settings.embeddings_model,
+            embeddings_base_url=settings.embeddings_base_url,
+            embeddings_api_key=getattr(settings, 'embeddings_api_key', ''),
+            top_docs=top_docs,
+            top_code=top_code,
+            top_symbols=top_symbols,
+            use_llm_summary=False,  # For now, basic summary
+            use_vector_search=True  # Enable semantic search!
+        )
+
+        # Format response
+        if format_as_markdown:
+            formatted_text = format_answer_for_display(answer)
+
+            # Also return structured data
+            return {
+                "question": answer.question,
+                "repo": repo,
+                "schema": schema_name,
+                "formatted_answer": formatted_text,
+                "documentation": [
+                    {
+                        "file": doc.file_path,
+                        "title": doc.title,
+                        "summary": doc.summary,
+                        "relevance": doc.relevance_score
+                    }
+                    for doc in answer.documentation
+                ],
+                "code_files": [
+                    {
+                        "file": code.file_path,
+                        "snippet": code.snippet,
+                        "lines": f"{code.line_range[0]}-{code.line_range[1]}",
+                        "language": code.language,
+                        "context": code.context,
+                        "relevance": code.relevance_score
+                    }
+                    for code in answer.code_files
+                ],
+                "symbols": [
+                    {
+                        "name": sym.name,
+                        "kind": sym.kind,
+                        "file": sym.file_path,
+                        "line": sym.line,
+                        "signature": sym.signature,
+                        "description": sym.description,
+                        "relevance": sym.relevance_score
+                    }
+                    for sym in answer.symbols
+                ],
+                "summary": answer.summary,
+                "key_files": answer.key_files,
+                "suggested_actions": answer.suggested_actions,
+                "total_results": answer.total_results_found,
+                "search_strategies": answer.search_strategies_used,
+                "why": f"Searched {answer.repo_name} using {len(answer.search_strategies_used)} strategies. Found {answer.total_results_found} total results: {len(answer.documentation)} docs, {len(answer.code_files)} code files, {len(answer.symbols)} symbols. Key files: {', '.join(answer.key_files[:3])}"
+            }
+        else:
+            # Return raw structured data
+            return {
+                "question": answer.question,
+                "repo": repo,
+                "documentation": [doc.__dict__ for doc in answer.documentation],
+                "code_files": [code.__dict__ for code in answer.code_files],
+                "symbols": [sym.__dict__ for sym in answer.symbols],
+                "summary": answer.summary,
+                "key_files": answer.key_files,
+                "suggested_actions": answer.suggested_actions,
+                "total_results": answer.total_results_found
+            }
+
+    finally:
+        await conn.close()

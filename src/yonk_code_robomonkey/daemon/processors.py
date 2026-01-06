@@ -122,7 +122,8 @@ class ReindexFileProcessor(JobProcessor):
             abs_path=abs_path,
             op=op,
             database_url=self.config.database.control_dsn,
-            repo_root=repo_root
+            repo_root=repo_root,
+            schema_name=schema_name
         )
 
         logger.info(f"REINDEX_FILE complete: {file_path}")
@@ -447,7 +448,8 @@ class RegenerateSummaryProcessor(JobProcessor):
             database_url=self.config.database.control_dsn,
             regenerate=True,  # Force regeneration
             max_modules=25,
-            max_files_per_module=20
+            max_files_per_module=20,
+            schema_name=schema_name
         )
 
         logger.info(
