@@ -302,3 +302,62 @@ CREATE TABLE IF NOT EXISTS migration_object_snapshot (
 );
 
 CREATE INDEX IF NOT EXISTS idx_migration_snapshot_assessment ON migration_object_snapshot(assessment_id);
+
+-- Document Validity Scoring Tables
+CREATE TABLE IF NOT EXISTS doc_validity_score (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL REFERENCES document(id) ON DELETE CASCADE,
+  repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
+
+  -- Overall score (0-100, higher = more valid)
+  score INT NOT NULL CHECK (score >= 0 AND score <= 100),
+
+  -- Component scores (0-1.0 normalized)
+  reference_score REAL NOT NULL DEFAULT 0.0,
+  embedding_score REAL NOT NULL DEFAULT 0.0,
+  freshness_score REAL NOT NULL DEFAULT 0.0,
+  llm_score REAL,  -- NULL if LLM validation not run
+
+  -- Metadata
+  references_checked INT NOT NULL DEFAULT 0,
+  references_valid INT NOT NULL DEFAULT 0,
+  related_code_chunks INT NOT NULL DEFAULT 0,
+
+  -- Caching
+  content_hash TEXT NOT NULL,
+  validated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE(document_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_validity_score_repo ON doc_validity_score(repo_id);
+CREATE INDEX IF NOT EXISTS idx_doc_validity_score_score ON doc_validity_score(repo_id, score);
+CREATE INDEX IF NOT EXISTS idx_doc_validity_score_document ON doc_validity_score(document_id);
+
+-- Individual validity issues found in documents
+CREATE TABLE IF NOT EXISTS doc_validity_issue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  score_id UUID NOT NULL REFERENCES doc_validity_score(id) ON DELETE CASCADE,
+
+  -- Issue categorization
+  issue_type TEXT NOT NULL,  -- 'MISSING_SYMBOL', 'MISSING_FILE', 'INVALID_IMPORT', 'STALE_API', 'SEMANTIC_DRIFT', 'LLM_FLAG'
+  severity TEXT NOT NULL,     -- 'info', 'warning', 'error'
+
+  -- Issue details
+  reference_text TEXT NOT NULL,
+  reference_line INT,
+  expected_type TEXT,  -- 'function', 'class', 'file', 'module', 'import'
+
+  -- What was found (or not found)
+  found_match TEXT,
+  found_similarity REAL,
+
+  -- Suggestion
+  suggestion TEXT,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_validity_issue_score ON doc_validity_issue(score_id);
+CREATE INDEX IF NOT EXISTS idx_doc_validity_issue_type ON doc_validity_issue(issue_type);
+CREATE INDEX IF NOT EXISTS idx_doc_validity_issue_severity ON doc_validity_issue(severity);

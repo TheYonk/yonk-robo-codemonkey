@@ -161,6 +161,13 @@ class CodeGraphDaemon:
             summary_task = asyncio.create_task(summary_worker(self.config))
             logger.info(f"Summary worker started (check interval: {self.config.summaries.check_interval_minutes} min)")
 
+        # Start doc validity worker if enabled
+        doc_validity_task = None
+        if self.config.doc_validity.enabled:
+            from yonk_code_robomonkey.daemon.doc_validity_worker import doc_validity_worker
+            doc_validity_task = asyncio.create_task(doc_validity_worker(self.config))
+            logger.info(f"Doc validity worker started (check interval: {self.config.doc_validity.check_interval_minutes} min)")
+
         logger.info("Daemon running - waiting for jobs")
 
         # Wait for shutdown signal
@@ -177,6 +184,8 @@ class CodeGraphDaemon:
             watcher_task.cancel()
         if summary_task:
             summary_task.cancel()
+        if doc_validity_task:
+            doc_validity_task.cancel()
         health_monitor.stop()
         health_task.cancel()
 
@@ -186,6 +195,8 @@ class CodeGraphDaemon:
             tasks.append(watcher_task)
         if summary_task:
             tasks.append(summary_task)
+        if doc_validity_task:
+            tasks.append(doc_validity_task)
 
         await asyncio.gather(*tasks, return_exceptions=True)
 

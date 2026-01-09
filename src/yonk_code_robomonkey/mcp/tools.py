@@ -442,7 +442,8 @@ async def doc_search(
     query: str,
     repo: str | None = None,
     repo_id: str | None = None,
-    top_k: int = 10
+    top_k: int = 10,
+    min_validity_score: int | None = None
 ) -> dict[str, Any]:
     """Search documentation and markdown files using hybrid search (vector + FTS).
 
@@ -451,9 +452,11 @@ async def doc_search(
         repo: Optional repository name or UUID to filter by
         repo_id: Optional repository name or UUID (alias for repo, takes precedence if both provided)
         top_k: Number of results to return (default 10)
+        min_validity_score: Minimum doc validity score (0-100). Docs below this are filtered out.
+                           Default None means no filtering. Set to 50 to skip stale docs.
 
     Returns:
-        Dictionary with document search results and ranking info
+        Dictionary with document search results and ranking info, including validity scores
     """
     settings = Settings()
 
@@ -464,6 +467,7 @@ async def doc_search(
     # Resolve repo to schema if provided
     resolved_repo_id = None
     schema_name = None
+    conn = None
     if repo:
         import asyncpg
         conn = await asyncpg.connect(dsn=settings.database_url)
@@ -473,8 +477,10 @@ async def doc_search(
                 return result
             resolved_repo_id = result["repo_id"]
             schema_name = result["schema"]
-        finally:
-            await conn.close()
+        except Exception:
+            if conn:
+                await conn.close()
+            raise
 
     # Use hybrid search (vector + FTS)
     from yonk_code_robomonkey.retrieval.doc_hybrid_search import doc_hybrid_search
@@ -490,28 +496,70 @@ async def doc_search(
         schema_name=schema_name,
         vector_top_k=30,
         fts_top_k=30,
-        final_top_k=top_k
+        final_top_k=top_k * 2 if min_validity_score else top_k  # Fetch more if filtering
     )
+
+    # Get validity scores for results if filtering or for display
+    validity_scores = {}
+    filtered_count = 0
+    if conn and schema_name:
+        try:
+            async with schema_context(conn, schema_name):
+                for r in results:
+                    row = await conn.fetchrow(
+                        "SELECT score FROM doc_validity_score WHERE document_id = $1",
+                        r.document_id
+                    )
+                    if row:
+                        validity_scores[str(r.document_id)] = row['score']
+        finally:
+            await conn.close()
+    elif conn:
+        await conn.close()
+
+    # Filter and format results
+    formatted_results = []
+    for r in results:
+        doc_id = str(r.document_id)
+        validity = validity_scores.get(doc_id)
+
+        # Filter by validity score if threshold set
+        if min_validity_score is not None and validity is not None:
+            if validity < min_validity_score:
+                filtered_count += 1
+                continue
+
+        # Stop once we have enough results
+        if len(formatted_results) >= top_k:
+            break
+
+        validity_status = None
+        if validity is not None:
+            validity_status = "valid" if validity >= 70 else ("warning" if validity >= 50 else "stale")
+
+        formatted_results.append({
+            "document_id": doc_id,
+            "title": r.title,
+            "content": r.content[:500] + "..." if len(r.content) > 500 else r.content,
+            "path": r.path,
+            "score": r.score,
+            "vec_rank": r.vec_rank,
+            "vec_score": r.vec_score,
+            "fts_rank": r.fts_rank,
+            "fts_score": r.fts_score,
+            "validity_score": validity,
+            "validity_status": validity_status,
+            "why": f"Hybrid match (vec_score={r.vec_score or 0:.4f}, fts_score={r.fts_score or 0:.4f}, combined={r.score:.4f})" +
+                   (f" [validity: {validity}/100 - {validity_status}]" if validity is not None else " [validity: not scored]")
+        })
 
     return {
         "schema_name": schema_name,
-        "results": [
-            {
-                "document_id": str(r.document_id),
-                "title": r.title,
-                "content": r.content[:500] + "..." if len(r.content) > 500 else r.content,
-                "path": r.path,
-                "score": r.score,
-                "vec_rank": r.vec_rank,
-                "vec_score": r.vec_score,
-                "fts_rank": r.fts_rank,
-                "fts_score": r.fts_score,
-                "why": f"Hybrid match (vec_score={r.vec_score or 0:.4f}, fts_score={r.fts_score or 0:.4f}, combined={r.score:.4f})"
-            }
-            for r in results
-        ],
+        "results": formatted_results,
         "query": query,
-        "total_results": len(results)
+        "total_results": len(formatted_results),
+        "filtered_by_validity": filtered_count if min_validity_score else 0,
+        "min_validity_threshold": min_validity_score
     }
 
 
@@ -2522,7 +2570,8 @@ async def universal_search(
     query: str,
     repo: str,
     top_k: int = 10,
-    deep_mode: bool = True
+    deep_mode: bool = True,
+    min_validity_score: int | None = None
 ) -> dict[str, Any]:
     """Comprehensive multi-strategy search with LLM-powered summarization.
 
@@ -2538,6 +2587,8 @@ async def universal_search(
         repo: Repository name
         top_k: Number of final results to return (default 10)
         deep_mode: Whether to use LLM summarization (default True)
+        min_validity_score: Minimum doc validity score (0-100). Docs below this are filtered out.
+                           Default None means no filtering. Set to 50 to skip stale docs.
 
     Returns:
         Combined search results with LLM summary and top files
@@ -2623,19 +2674,50 @@ async def universal_search(
                     "fts_score": r.fts_score
                 })
 
-        # Process doc results
+        # Process doc results with optional validity filtering
+        docs_filtered_count = 0
+        validity_scores = {}
+
+        # Get validity scores for doc results if filtering is enabled
+        if min_validity_score is not None and doc_results:
+            doc_ids = [str(r.entity_id) for r in doc_results if r.entity_id]
+            if doc_ids:
+                await conn.execute(f'SET search_path TO "{schema_name}", public')
+                rows = await conn.fetch("""
+                    SELECT document_id::text, score,
+                           CASE WHEN score >= 70 THEN 'valid'
+                                WHEN score >= 50 THEN 'warning'
+                                ELSE 'stale' END as status
+                    FROM doc_validity_score
+                    WHERE document_id::text = ANY($1)
+                """, doc_ids)
+                validity_scores = {row['document_id']: row['score'] for row in rows}
+
         for r in doc_results:
             # Doc results have different structure (FTSResult dataclass)
             doc_id = r.entity_id
+            doc_id_str = str(doc_id) if doc_id else None
+
+            # Filter by validity if threshold set
+            if min_validity_score is not None and doc_id_str:
+                validity = validity_scores.get(doc_id_str)
+                if validity is not None and validity < min_validity_score:
+                    docs_filtered_count += 1
+                    continue
+
             if doc_id not in seen_chunks:
                 seen_chunks.add(doc_id)
-                all_results.append({
+                result_item = {
                     "source": "documentation",
                     "file_path": r.path or "document",
                     "content": (r.content or "")[:1000],
                     "score": r.rank,
                     "doc_type": r.doc_type or "unknown"
-                })
+                }
+                # Add validity info if available
+                if doc_id_str and doc_id_str in validity_scores:
+                    result_item["validity_score"] = validity_scores[doc_id_str]
+                all_results.append(result_item)
 
         # Process semantic results (top scorers only)
         for r in semantic_results[:5]:  # Just top 5 from semantic
@@ -2745,6 +2827,8 @@ Include:
             "top_results": top_results,
             "top_files": top_files,
             "llm_summary": llm_summary,
+            "docs_filtered_by_validity": docs_filtered_count if min_validity_score else 0,
+            "min_validity_threshold": min_validity_score,
             "why": f"Combined {len(all_results)} results from 3 search strategies, re-ranked and summarized"
         }
 
@@ -3037,7 +3121,8 @@ async def ask_codebase_tool(
     top_docs: int = 3,
     top_code: int = 5,
     top_symbols: int = 5,
-    format_as_markdown: bool = True
+    format_as_markdown: bool = True,
+    min_validity_score: int | None = None
 ) -> dict[str, Any]:
     """Ask a natural language question about the codebase and get comprehensive answers.
 
@@ -3057,6 +3142,8 @@ async def ask_codebase_tool(
         top_code: Number of code file results (default 5)
         top_symbols: Number of symbol results (default 5)
         format_as_markdown: Return formatted markdown (default True)
+        min_validity_score: Minimum doc validity score (0-100). Docs below this are filtered out.
+                           Default None means no filtering. Set to 50 to skip stale docs.
 
     Returns:
         Comprehensive answer with documentation, code, symbols, and summary
@@ -3085,6 +3172,8 @@ async def ask_codebase_tool(
         schema_name = result["schema"]
 
         # Call the ask_codebase function with embedding configuration
+        # Request more docs if we're filtering by validity
+        docs_to_request = top_docs * 2 if min_validity_score is not None else top_docs
         answer = await _ask_codebase(
             question=question,
             repo_name=repo,
@@ -3094,12 +3183,46 @@ async def ask_codebase_tool(
             embeddings_model=settings.embeddings_model,
             embeddings_base_url=settings.embeddings_base_url,
             embeddings_api_key=getattr(settings, 'embeddings_api_key', ''),
-            top_docs=top_docs,
+            top_docs=docs_to_request,
             top_code=top_code,
             top_symbols=top_symbols,
             use_llm_summary=False,  # For now, basic summary
             use_vector_search=True  # Enable semantic search!
         )
+
+        # Filter documentation by validity if threshold is set
+        docs_filtered_count = 0
+        validity_scores = {}
+        filtered_docs = list(answer.documentation)
+
+        if min_validity_score is not None and answer.documentation:
+            # Get document IDs from results
+            doc_ids = [doc.document_id for doc in answer.documentation if doc.document_id]
+
+            if doc_ids:
+                await conn.execute(f'SET search_path TO "{schema_name}", public')
+                rows = await conn.fetch("""
+                    SELECT document_id::text, score,
+                           CASE WHEN score >= 70 THEN 'valid'
+                                WHEN score >= 50 THEN 'warning'
+                                ELSE 'stale' END as status
+                    FROM doc_validity_score
+                    WHERE document_id::text = ANY($1)
+                """, doc_ids)
+                validity_scores = {row['document_id']: row['score'] for row in rows}
+
+            # Filter out docs below threshold
+            filtered_docs = []
+            for doc in answer.documentation:
+                if doc.document_id:
+                    validity = validity_scores.get(doc.document_id)
+                    if validity is not None and validity < min_validity_score:
+                        docs_filtered_count += 1
+                        continue
+                filtered_docs.append(doc)
+
+            # Trim to requested count
+            filtered_docs = filtered_docs[:top_docs]
 
         # Format response
         if format_as_markdown:
@@ -3116,10 +3239,13 @@ async def ask_codebase_tool(
                         "file": doc.file_path,
                         "title": doc.title,
                         "summary": doc.summary,
-                        "relevance": doc.relevance_score
+                        "relevance": doc.relevance_score,
+                        "validity_score": validity_scores.get(doc.document_id) if doc.document_id else None
                     }
-                    for doc in answer.documentation
+                    for doc in filtered_docs
                 ],
+                "docs_filtered_by_validity": docs_filtered_count if min_validity_score else 0,
+                "min_validity_threshold": min_validity_score,
                 "code_files": [
                     {
                         "file": code.file_path,
@@ -3148,20 +3274,347 @@ async def ask_codebase_tool(
                 "suggested_actions": answer.suggested_actions,
                 "total_results": answer.total_results_found,
                 "search_strategies": answer.search_strategies_used,
-                "why": f"Searched {answer.repo_name} using {len(answer.search_strategies_used)} strategies. Found {answer.total_results_found} total results: {len(answer.documentation)} docs, {len(answer.code_files)} code files, {len(answer.symbols)} symbols. Key files: {', '.join(answer.key_files[:3])}"
+                "why": f"Searched {answer.repo_name} using {len(answer.search_strategies_used)} strategies. Found {answer.total_results_found} total results: {len(filtered_docs)} docs, {len(answer.code_files)} code files, {len(answer.symbols)} symbols.{f' Filtered {docs_filtered_count} stale docs.' if docs_filtered_count else ''} Key files: {', '.join(answer.key_files[:3])}"
             }
         else:
             # Return raw structured data
             return {
                 "question": answer.question,
                 "repo": repo,
-                "documentation": [doc.__dict__ for doc in answer.documentation],
+                "documentation": [
+                    {
+                        **doc.__dict__,
+                        "validity_score": validity_scores.get(doc.document_id) if doc.document_id else None
+                    }
+                    for doc in filtered_docs
+                ],
                 "code_files": [code.__dict__ for code in answer.code_files],
                 "symbols": [sym.__dict__ for sym in answer.symbols],
                 "summary": answer.summary,
                 "key_files": answer.key_files,
                 "suggested_actions": answer.suggested_actions,
-                "total_results": answer.total_results_found
+                "total_results": answer.total_results_found,
+                "docs_filtered_by_validity": docs_filtered_count if min_validity_score else 0,
+                "min_validity_threshold": min_validity_score
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("doc_validity_score")
+async def doc_validity_score(
+    document_id: str | None = None,
+    document_path: str | None = None,
+    repo: str | None = None,
+    force_revalidate: bool = False
+) -> dict[str, Any]:
+    """Get or compute validity score for a document.
+
+    Validates documentation against the codebase to detect stale references,
+    outdated API mentions, and semantic drift.
+
+    Args:
+        document_id: Document UUID (use this OR document_path)
+        document_path: Document path relative to repo (use this OR document_id)
+        repo: Repository name or UUID
+        force_revalidate: Force re-validation even if cached
+
+    Returns:
+        {
+            "document_id": "...",
+            "path": "docs/api.md",
+            "score": 62,
+            "status": "warning",  // "valid", "warning", "stale"
+            "component_scores": {"reference": 0.7, "embedding": 0.65, "freshness": 0.4},
+            "issues": [{type, severity, reference, suggestion}...],
+            "references_checked": 18,
+            "references_valid": 12,
+            "validated_at": "2025-01-08T..."
+        }
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo to schema
+        repo = get_repo_or_default(repo)
+        if not repo:
+            return {"error": "Repository name required. Provide repo parameter or set DEFAULT_REPO."}
+
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
+
+        async with schema_context(conn, schema_name):
+            from yonk_code_robomonkey.doc_validity import queries
+            from yonk_code_robomonkey.doc_validity.validator import validate_document
+            from yonk_code_robomonkey.doc_validity.scorer import (
+                calculate_validity_score,
+                store_validity_score,
+            )
+
+            # Find document by ID or path
+            doc = None
+            if document_id:
+                doc = await queries.get_document_by_id(conn, document_id)
+            elif document_path:
+                doc = await queries.get_document_by_path(conn, repo_id, document_path)
+            else:
+                return {"error": "Must provide either document_id or document_path"}
+
+            if not doc:
+                return {"error": "Document not found"}
+
+            doc_id = str(doc['id'])
+
+            # Check for cached score if not forcing revalidation
+            if not force_revalidate:
+                cached = await queries.get_validity_score(conn, doc_id)
+                if cached:
+                    issues = await queries.get_issues_for_document(conn, doc_id)
+                    return {
+                        "document_id": doc_id,
+                        "path": doc.get('path'),
+                        "title": doc.get('title'),
+                        "score": cached.score,
+                        "status": "valid" if cached.score >= 70 else ("warning" if cached.score >= 50 else "stale"),
+                        "component_scores": {
+                            "reference": round(cached.reference_score, 2),
+                            "embedding": round(cached.embedding_score, 2),
+                            "freshness": round(cached.freshness_score, 2),
+                            "llm": cached.llm_score
+                        },
+                        "references_checked": cached.references_checked,
+                        "references_valid": cached.references_valid,
+                        "related_code_chunks": cached.related_code_chunks,
+                        "issues": [
+                            {
+                                "type": i.issue_type,
+                                "severity": i.severity,
+                                "reference": i.reference_text,
+                                "line": i.reference_line,
+                                "expected_type": i.expected_type,
+                                "found_match": i.found_match,
+                                "similarity": i.found_similarity,
+                                "suggestion": i.suggestion
+                            }
+                            for i in issues
+                        ],
+                        "validated_at": cached.validated_at.isoformat() if cached.validated_at else None,
+                        "cached": True
+                    }
+
+            # Determine document type
+            doc_path = doc.get('path', '')
+            doc_type = 'markdown'
+            if doc_path.lower().endswith('.rst'):
+                doc_type = 'rst'
+            elif doc_path.lower().endswith('.adoc'):
+                doc_type = 'asciidoc'
+
+            # Validate document
+            validation_result = await validate_document(
+                document_id=doc_id,
+                repo_id=repo_id,
+                conn=conn,
+                doc_type=doc_type,
+                content=doc.get('content'),
+                max_references=100
+            )
+
+            # Calculate score
+            score = await calculate_validity_score(
+                document_id=doc_id,
+                repo_id=repo_id,
+                conn=conn,
+                validation_result=validation_result,
+                doc_updated=doc.get('updated_at')
+            )
+
+            # Store the score
+            await store_validity_score(conn, score, repo_id)
+
+            return {
+                "document_id": doc_id,
+                "path": doc.get('path'),
+                "title": doc.get('title'),
+                "score": score.score,
+                "status": score.status,
+                "component_scores": {
+                    "reference": round(score.reference_score, 2),
+                    "embedding": round(score.embedding_score, 2),
+                    "freshness": round(score.freshness_score, 2),
+                    "llm": score.llm_score
+                },
+                "references_checked": score.references_checked,
+                "references_valid": score.references_valid,
+                "related_code_chunks": score.related_code_chunks,
+                "issues": [
+                    {
+                        "type": issue.issue_type,
+                        "severity": issue.severity,
+                        "reference": issue.reference_text,
+                        "line": issue.reference_line,
+                        "expected_type": issue.expected_type,
+                        "found_match": issue.found_match,
+                        "similarity": issue.found_similarity,
+                        "suggestion": issue.suggestion
+                    }
+                    for issue in score.issues
+                ],
+                "validated_at": score.validated_at.isoformat() if score.validated_at else None,
+                "cached": False
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("list_stale_docs")
+async def list_stale_docs(
+    repo: str | None = None,
+    threshold: int = 50,
+    include_issues: bool = True,
+    limit: int = 20
+) -> dict[str, Any]:
+    """List documents with validity scores below threshold.
+
+    Args:
+        repo: Repository name or UUID
+        threshold: Score threshold (default 50, docs below are "stale")
+        include_issues: Include issue details (default True)
+        limit: Maximum documents to return (default 20)
+
+    Returns:
+        {
+            "stale_docs": [{document_id, path, title, score, issues_count, top_issues}...],
+            "total_stale": 5,
+            "total_docs": 25,
+            "avg_score": 72.3
+        }
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo to schema
+        repo = get_repo_or_default(repo)
+        if not repo:
+            return {"error": "Repository name required. Provide repo parameter or set DEFAULT_REPO."}
+
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
+
+        async with schema_context(conn, schema_name):
+            from yonk_code_robomonkey.doc_validity import queries
+
+            # Get stale documents
+            stale_docs = await queries.get_stale_documents(
+                conn, repo_id, threshold=threshold, limit=limit
+            )
+
+            # Get overall stats
+            stats = await queries.get_validity_stats(conn, repo_id)
+
+            # Format results
+            results = []
+            for doc in stale_docs:
+                doc_result = {
+                    "document_id": str(doc['document_id']),
+                    "path": doc['path'],
+                    "title": doc['title'],
+                    "score": doc['score'],
+                    "issues_count": doc['issues_count'],
+                    "error_count": doc['error_count'],
+                    "warning_count": doc['warning_count'],
+                    "validated_at": doc['validated_at'].isoformat() if doc['validated_at'] else None
+                }
+
+                if include_issues:
+                    # Get top issues for this document
+                    issues = await queries.get_issues_for_document(conn, str(doc['document_id']))
+                    doc_result["top_issues"] = [
+                        {
+                            "type": i.issue_type,
+                            "severity": i.severity,
+                            "reference": i.reference_text,
+                            "suggestion": i.suggestion
+                        }
+                        for i in issues[:5]  # Top 5 issues
+                    ]
+
+                results.append(doc_result)
+
+            return {
+                "repo": repo,
+                "threshold": threshold,
+                "stale_docs": results,
+                "total_stale": len(results),
+                "total_docs": stats.get("total_docs", 0),
+                "avg_score": stats.get("avg_score", 0),
+                "why": f"Found {len(results)} documents with validity score below {threshold}. Average repo score is {stats.get('avg_score', 0)}."
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("doc_validity_stats")
+async def doc_validity_stats(
+    repo: str | None = None
+) -> dict[str, Any]:
+    """Get document validity statistics for a repository.
+
+    Args:
+        repo: Repository name or UUID
+
+    Returns:
+        {
+            "total_docs": 25,
+            "validated_docs": 20,
+            "needs_validation": 5,
+            "avg_score": 72.3,
+            "score_distribution": {"valid (70-100)": 15, "warning (50-69)": 3, "stale (0-49)": 2},
+            "avg_component_scores": {"reference": 0.75, "embedding": 0.68, "freshness": 0.70},
+            "common_issues": [{"type": "MISSING_SYMBOL", "count": 12}...]
+        }
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Resolve repo to schema
+        repo = get_repo_or_default(repo)
+        if not repo:
+            return {"error": "Repository name required. Provide repo parameter or set DEFAULT_REPO."}
+
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
+
+        async with schema_context(conn, schema_name):
+            from yonk_code_robomonkey.doc_validity import queries
+
+            stats = await queries.get_validity_stats(conn, repo_id)
+
+            return {
+                "repo": repo,
+                "total_docs": stats["total_docs"],
+                "validated_docs": stats["validated_docs"],
+                "needs_validation": stats["needs_validation"],
+                "avg_score": stats["avg_score"],
+                "score_distribution": stats["score_distribution"],
+                "avg_component_scores": stats["avg_component_scores"],
+                "common_issues": stats["common_issues"],
+                "why": f"Repository '{repo}' has {stats['total_docs']} docs total. {stats['validated_docs']} validated with avg score {stats['avg_score']}. Distribution: {stats['score_distribution']['valid (70-100)']} valid, {stats['score_distribution']['warning (50-69)']} warning, {stats['score_distribution']['stale (0-49)']} stale."
             }
 
     finally:

@@ -269,7 +269,7 @@ async def _call_llm(
                         "stream": False,
                         "options": {
                             "temperature": 0.3,
-                            "num_predict": 200
+                            "num_predict": 2000
                         }
                     }
                 )
@@ -284,7 +284,7 @@ async def _call_llm(
                     json={
                         "model": model,
                         "prompt": prompt,
-                        "max_tokens": 200,
+                        "max_tokens": 2000,
                         "temperature": 0.3
                     }
                 )

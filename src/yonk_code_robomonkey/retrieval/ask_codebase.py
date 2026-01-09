@@ -19,6 +19,7 @@ class DocumentResult:
     summary: str
     relevance_score: float
     line_range: Optional[tuple[int, int]] = None
+    document_id: Optional[str] = None  # UUID for validity lookups
 
 
 @dataclass
@@ -240,7 +241,8 @@ async def _search_documentation(
                 file_path=row['path'] or "(embedded doc)",
                 title=row['title'] or "Untitled",
                 summary=summary,
-                relevance_score=float(row['similarity'])
+                relevance_score=float(row['similarity']),
+                document_id=str(row['id'])
             )
 
     # FTS search (always run for broader coverage)
@@ -284,7 +286,8 @@ async def _search_documentation(
                 file_path=row['path'] or "(embedded doc)",
                 title=row['title'] or "Untitled",
                 summary=summary,
-                relevance_score=fts_score
+                relevance_score=fts_score,
+                document_id=str(doc_id)
             )
 
     # Sort by relevance and return top_k

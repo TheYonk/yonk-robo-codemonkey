@@ -151,12 +151,47 @@ class SummariesConfig(BaseModel):
         return v
 
 
+class DocValidityConfig(BaseModel):
+    """Document validity scoring configuration."""
+    enabled: bool = Field(True, description="Enable document validity scoring")
+    check_interval_minutes: int = Field(120, ge=10, le=1440, description="Check interval (10-1440 minutes)")
+
+    # Score weights (should sum to 1.0)
+    reference_weight: float = Field(0.45, ge=0, le=1, description="Weight for reference validity")
+    embedding_weight: float = Field(0.30, ge=0, le=1, description="Weight for embedding similarity")
+    freshness_weight: float = Field(0.25, ge=0, le=1, description="Weight for freshness")
+
+    # Thresholds
+    stale_threshold: int = Field(50, ge=0, le=100, description="Score below which doc is considered stale")
+    warning_threshold: int = Field(70, ge=0, le=100, description="Score below which to show warning")
+
+    # LLM validation (optional)
+    use_llm_validation: bool = Field(False, description="Use LLM for deep validation (expensive)")
+    llm_provider: Literal["ollama", "vllm"] = Field("ollama", description="LLM provider for validation")
+    llm_model: str = Field("qwen3-coder:30b", description="Model name for LLM validation")
+    llm_base_url: str = Field("http://localhost:11434", description="LLM endpoint")
+    llm_weight: float = Field(0.30, ge=0, le=1, description="Weight for LLM score when enabled")
+
+    # Performance
+    batch_size: int = Field(20, ge=1, le=100, description="Documents per validation batch")
+    max_references_per_doc: int = Field(100, ge=10, le=500, description="Max references to extract per doc")
+
+    @field_validator("check_interval_minutes")
+    @classmethod
+    def validate_check_interval(cls, v: int) -> int:
+        """Validate check interval is within reasonable bounds."""
+        if v < 10 or v > 1440:
+            raise ValueError("check_interval_minutes must be between 10 and 1440 (24 hours)")
+        return v
+
+
 class DaemonConfig(BaseModel):
     """Complete daemon configuration."""
     daemon_id: str = Field(default_factory=lambda: f"robomonkey-{os.getpid()}", description="Unique daemon ID")
     database: DatabaseConfig
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
     summaries: SummariesConfig = Field(default_factory=SummariesConfig)
+    doc_validity: DocValidityConfig = Field(default_factory=DocValidityConfig)
     workers: WorkersConfig = Field(default_factory=WorkersConfig)
     watching: WatchingConfig = Field(default_factory=WatchingConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
