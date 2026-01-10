@@ -1,11 +1,14 @@
 """Summary generator using local LLMs.
 
-Generates file, symbol, and module summaries using Ollama or vLLM.
+Generates file, symbol, and module summaries using the unified LLM client.
+
+Uses the "small" LLM model (phi3.5) for quick summaries by default.
 """
 from __future__ import annotations
-import httpx
 import asyncpg
 from dataclasses import dataclass
+
+from yonk_code_robomonkey.llm import call_llm
 
 
 @dataclass
@@ -19,19 +22,15 @@ class SummaryResult:
 async def generate_file_summary(
     file_id: str,
     database_url: str,
-    llm_provider: str = "ollama",
-    llm_model: str = "llama3.2:3b",
-    llm_base_url: str = "http://localhost:11434",
     schema_name: str | None = None
 ) -> SummaryResult:
     """Generate a summary for a file.
 
+    Uses the "small" LLM model (phi3.5) for quick summaries.
+
     Args:
         file_id: File UUID
         database_url: Database connection string
-        llm_provider: LLM provider ('ollama' or 'vllm')
-        llm_model: Model name
-        llm_base_url: Base URL for LLM endpoint
         schema_name: Schema name to use (if None, uses default)
 
     Returns:
@@ -74,12 +73,8 @@ Content:
 
 Summary:"""
 
-        summary = await _call_llm(
-            prompt=prompt,
-            provider=llm_provider,
-            model=llm_model,
-            base_url=llm_base_url
-        )
+        # Use "small" model (phi3.5) for quick summaries
+        summary = await call_llm(prompt, task_type="small")
 
         if summary:
             return SummaryResult(summary=summary.strip(), success=True)
@@ -93,19 +88,15 @@ Summary:"""
 async def generate_symbol_summary(
     symbol_id: str,
     database_url: str,
-    llm_provider: str = "ollama",
-    llm_model: str = "llama3.2:3b",
-    llm_base_url: str = "http://localhost:11434",
     schema_name: str | None = None
 ) -> SummaryResult:
     """Generate a summary for a symbol.
 
+    Uses the "small" LLM model (phi3.5) for quick summaries.
+
     Args:
         symbol_id: Symbol UUID
         database_url: Database connection string
-        llm_provider: LLM provider ('ollama' or 'vllm')
-        llm_model: Model name
-        llm_base_url: Base URL for LLM endpoint
         schema_name: Schema name to use (if None, uses default)
 
     Returns:
@@ -154,12 +145,8 @@ Code:
 
 Summary:"""
 
-        summary = await _call_llm(
-            prompt=prompt,
-            provider=llm_provider,
-            model=llm_model,
-            base_url=llm_base_url
-        )
+        # Use "small" model (phi3.5) for quick summaries
+        summary = await call_llm(prompt, task_type="small")
 
         if summary:
             return SummaryResult(summary=summary.strip(), success=True)
@@ -174,20 +161,16 @@ async def generate_module_summary(
     repo_id: str,
     module_path: str,
     database_url: str,
-    llm_provider: str = "ollama",
-    llm_model: str = "llama3.2:3b",
-    llm_base_url: str = "http://localhost:11434",
     schema_name: str | None = None
 ) -> SummaryResult:
     """Generate a summary for a module/directory.
+
+    Uses the "small" LLM model (phi3.5) for quick summaries.
 
     Args:
         repo_id: Repository UUID
         module_path: Module path (e.g. "src/api")
         database_url: Database connection string
-        llm_provider: LLM provider ('ollama' or 'vllm')
-        llm_model: Model name
-        llm_base_url: Base URL for LLM endpoint
         schema_name: Schema name to use (if None, uses default)
 
     Returns:
@@ -224,12 +207,8 @@ Files in module:
 
 Summary:"""
 
-        summary = await _call_llm(
-            prompt=prompt,
-            provider=llm_provider,
-            model=llm_model,
-            base_url=llm_base_url
-        )
+        # Use "small" model (phi3.5) for quick summaries
+        summary = await call_llm(prompt, task_type="small")
 
         if summary:
             return SummaryResult(summary=summary.strip(), success=True)
@@ -240,64 +219,3 @@ Summary:"""
         await conn.close()
 
 
-async def _call_llm(
-    prompt: str,
-    provider: str,
-    model: str,
-    base_url: str
-) -> str | None:
-    """Call LLM to generate text.
-
-    Args:
-        prompt: Prompt to send to LLM
-        provider: LLM provider ('ollama' or 'vllm')
-        model: Model name
-        base_url: Base URL for LLM endpoint
-
-    Returns:
-        Generated text or None on error
-    """
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            if provider == "ollama":
-                # Ollama generate API
-                response = await client.post(
-                    f"{base_url.rstrip('/')}/api/generate",
-                    json={
-                        "model": model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.3,
-                            "num_predict": 2000
-                        }
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data.get("response", "")
-
-            elif provider == "vllm":
-                # vLLM OpenAI-compatible completions API
-                response = await client.post(
-                    f"{base_url.rstrip('/')}/v1/completions",
-                    json={
-                        "model": model,
-                        "prompt": prompt,
-                        "max_tokens": 2000,
-                        "temperature": 0.3
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                choices = data.get("choices", [])
-                if choices:
-                    return choices[0].get("text", "")
-                return None
-
-            else:
-                return None
-
-    except Exception as e:
-        print(f"LLM call failed: {e}")
-        return None

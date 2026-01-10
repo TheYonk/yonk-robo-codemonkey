@@ -31,20 +31,16 @@ class BatchResult:
 async def generate_file_summaries_batch(
     file_ids: List[str],
     database_url: str,
-    llm_provider: str,
-    llm_model: str,
-    llm_base_url: str,
     batch_size: int = 10,
     schema_name: str | None = None
 ) -> BatchResult:
     """Generate file summaries in batches.
 
+    Uses the unified LLM client with "small" model (phi3.5) for quick summaries.
+
     Args:
         file_ids: List of file UUIDs to summarize
         database_url: Database connection string
-        llm_provider: LLM provider ('ollama' or 'vllm')
-        llm_model: Model name
-        llm_base_url: LLM endpoint URL
         batch_size: Number of files to process per batch
         schema_name: Schema to use (if None, uses default)
 
@@ -66,13 +62,10 @@ async def generate_file_summaries_batch(
 
             for file_id in batch:
                 try:
-                    # Generate summary
+                    # Generate summary using unified LLM client
                     summary_result = await generate_file_summary(
                         file_id=file_id,
                         database_url=database_url,
-                        llm_provider=llm_provider,
-                        llm_model=llm_model,
-                        llm_base_url=llm_base_url,
                         schema_name=schema_name
                     )
 
@@ -116,20 +109,16 @@ async def generate_file_summaries_batch(
 async def generate_symbol_summaries_batch(
     symbol_ids: List[str],
     database_url: str,
-    llm_provider: str,
-    llm_model: str,
-    llm_base_url: str,
     batch_size: int = 10,
     schema_name: str | None = None
 ) -> BatchResult:
     """Generate symbol summaries in batches.
 
+    Uses the unified LLM client with "small" model (phi3.5) for quick summaries.
+
     Args:
         symbol_ids: List of symbol UUIDs to summarize
         database_url: Database connection string
-        llm_provider: LLM provider ('ollama' or 'vllm')
-        llm_model: Model name
-        llm_base_url: LLM endpoint URL
         batch_size: Number of symbols to process per batch
         schema_name: Schema to use (if None, uses default)
 
@@ -151,13 +140,10 @@ async def generate_symbol_summaries_batch(
 
             for symbol_id in batch:
                 try:
-                    # Generate summary
+                    # Generate summary using unified LLM client
                     summary_result = await generate_symbol_summary(
                         symbol_id=symbol_id,
                         database_url=database_url,
-                        llm_provider=llm_provider,
-                        llm_model=llm_model,
-                        llm_base_url=llm_base_url,
                         schema_name=schema_name
                     )
 
@@ -202,21 +188,17 @@ async def generate_module_summaries_batch(
     modules: List[Dict[str, Any]],
     repo_id: str,
     database_url: str,
-    llm_provider: str,
-    llm_model: str,
-    llm_base_url: str,
     batch_size: int = 5,
     schema_name: str | None = None
 ) -> BatchResult:
     """Generate module summaries in batches.
 
+    Uses the unified LLM client with "small" model (phi3.5) for quick summaries.
+
     Args:
         modules: List of dicts with 'module_path' keys
         repo_id: Repository UUID
         database_url: Database connection string
-        llm_provider: LLM provider ('ollama' or 'vllm')
-        llm_model: Model name
-        llm_base_url: LLM endpoint URL
         batch_size: Number of modules to process per batch
         schema_name: Schema to use (if None, uses default)
 
@@ -240,14 +222,11 @@ async def generate_module_summaries_batch(
                 module_path = module['module_path']
 
                 try:
-                    # Generate summary
+                    # Generate summary using unified LLM client
                     summary_result = await generate_module_summary(
                         repo_id=repo_id,
                         module_path=module_path,
                         database_url=database_url,
-                        llm_provider=llm_provider,
-                        llm_model=llm_model,
-                        llm_base_url=llm_base_url,
                         schema_name=schema_name
                     )
 

@@ -1,6 +1,7 @@
 """Document scanner for finding documentation files.
 
 Discovers README.md, docs/**/*.md, and other documentation files.
+Also discovers SQL schema files for separate handling.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -11,7 +12,9 @@ def scan_docs(repo_root: Path) -> Iterator[tuple[Path, str]]:
     """Scan repository for documentation files.
 
     Yields:
-        Tuple of (file_path, doc_type) where doc_type is 'md', 'rst', 'adoc', or 'sql'
+        Tuple of (file_path, doc_type) where doc_type is:
+        - 'markdown', 'restructuredtext', 'asciidoc' for documentation
+        - 'sql_schema' for SQL files (handled separately from docs)
     """
     repo_root = repo_root.resolve()
 
@@ -76,7 +79,7 @@ def scan_docs(repo_root: Path) -> Iterator[tuple[Path, str]]:
             elif suffix == ".adoc":
                 doc_type = "asciidoc"
             elif suffix in (".sql", ".psql", ".ddl"):
-                doc_type = "sql"
+                doc_type = "sql_schema"  # Handled separately from documentation
             else:
                 continue
 

@@ -5,15 +5,12 @@ Allows direct tagging of files by name, with optional LLM-powered tag suggestion
 """
 from __future__ import annotations
 import asyncpg
-import httpx
 import json
 import logging
-from pathlib import Path
 from typing import TypedDict
-from uuid import uuid4
 
 from .semantic_tagger import get_or_create_tag
-from ..config import settings
+from ..llm import call_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -70,26 +67,19 @@ async def suggest_tag_for_file(
     file_path: str,
     file_content: str | None,
     existing_tags: list[str],
-    llm_model: str | None = None,
-    llm_base_url: str | None = None
 ) -> TagSuggestion:
     """Suggest a tag for a file using LLM analysis.
+
+    Uses the unified LLM client with "small" model for quick tag suggestions.
 
     Args:
         file_path: Relative path to the file
         file_content: File content (optional, will be truncated to 2000 chars)
         existing_tags: List of existing tag names to consider
-        llm_model: LLM model to use
-        llm_base_url: LLM base URL
 
     Returns:
         Tag suggestion with confidence and reason
     """
-    if llm_model is None:
-        llm_model = getattr(settings, 'llm_model', 'qwen2.5-coder:7b')
-    if llm_base_url is None:
-        llm_base_url = settings.embeddings_base_url
-
     # Truncate content for LLM
     content_preview = (file_content[:2000] if file_content else "") or "No content available"
 
@@ -121,46 +111,25 @@ Only return the JSON object, no other text."""
 
     logger.info(f"Requesting LLM tag suggestion for {file_path}")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{llm_base_url}/api/generate",
-            json={
-                "model": llm_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 200
-                }
-            }
-        )
+    # Use unified LLM client with "small" model for quick classification
+    llm_output = await call_llm(prompt, task_type="small", timeout=30.0)
 
-        response.raise_for_status()
-        result = response.json()
-        llm_output = result.get("response", "")
+    if not llm_output:
+        logger.warning("No LLM response received")
+        return _guess_tag_from_filename(file_path, existing_tags)
 
     # Parse JSON response
-    try:
-        # Extract JSON from response
-        start_idx = llm_output.find('{')
-        end_idx = llm_output.rfind('}') + 1
+    suggestion = parse_json_response(llm_output)
 
-        if start_idx == -1 or end_idx == 0:
-            # Fallback: guess from filename
-            return _guess_tag_from_filename(file_path, existing_tags)
-
-        json_str = llm_output[start_idx:end_idx]
-        suggestion = json.loads(json_str)
-
+    if suggestion and isinstance(suggestion, dict) and "tag" in suggestion:
         return {
             "tag": str(suggestion.get("tag", "Uncategorized")).strip(),
             "confidence": float(suggestion.get("confidence", 0.5)),
             "reason": str(suggestion.get("reason", "LLM suggestion")).strip()
         }
 
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"Failed to parse LLM response: {e}")
-        return _guess_tag_from_filename(file_path, existing_tags)
+    logger.warning("Failed to parse LLM response, falling back to filename guess")
+    return _guess_tag_from_filename(file_path, existing_tags)
 
 
 def _guess_tag_from_filename(file_path: str, existing_tags: list[str]) -> TagSuggestion:
@@ -303,10 +272,10 @@ async def categorize_file(
     schema_name: str,
     tag_name: str | None = None,
     auto_suggest: bool = True,
-    llm_model: str | None = None,
-    llm_base_url: str | None = None
 ) -> dict:
     """Categorize a file - suggest tag if needed, then apply it.
+
+    Uses the unified LLM client with "small" model for tag suggestions.
 
     Args:
         file_path: Relative path to file from repo root
@@ -315,8 +284,6 @@ async def categorize_file(
         schema_name: Schema name
         tag_name: Tag to apply (if None and auto_suggest=True, will suggest one)
         auto_suggest: If True and tag_name is None, use LLM to suggest tag
-        llm_model: LLM model for suggestions
-        llm_base_url: LLM base URL
 
     Returns:
         {
@@ -365,13 +332,11 @@ async def categorize_file(
         finally:
             await conn.close()
 
-        # Suggest tag using LLM
+        # Suggest tag using unified LLM client
         suggestion = await suggest_tag_for_file(
             file_path=file_path,
             file_content=file_content,
             existing_tags=existing_tag_names,
-            llm_model=llm_model,
-            llm_base_url=llm_base_url
         )
 
         tag_to_apply = suggestion["tag"]

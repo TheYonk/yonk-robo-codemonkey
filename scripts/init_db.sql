@@ -317,11 +317,14 @@ CREATE TABLE IF NOT EXISTS doc_validity_score (
   embedding_score REAL NOT NULL DEFAULT 0.0,
   freshness_score REAL NOT NULL DEFAULT 0.0,
   llm_score REAL,  -- NULL if LLM validation not run
+  semantic_score REAL,  -- NULL if semantic validation not run
 
   -- Metadata
   references_checked INT NOT NULL DEFAULT 0,
   references_valid INT NOT NULL DEFAULT 0,
   related_code_chunks INT NOT NULL DEFAULT 0,
+  claims_checked INT NOT NULL DEFAULT 0,
+  claims_verified INT NOT NULL DEFAULT 0,
 
   -- Caching
   content_hash TEXT NOT NULL,
@@ -361,3 +364,263 @@ CREATE TABLE IF NOT EXISTS doc_validity_issue (
 CREATE INDEX IF NOT EXISTS idx_doc_validity_issue_score ON doc_validity_issue(score_id);
 CREATE INDEX IF NOT EXISTS idx_doc_validity_issue_type ON doc_validity_issue(issue_type);
 CREATE INDEX IF NOT EXISTS idx_doc_validity_issue_severity ON doc_validity_issue(severity);
+
+-- =============================================================================
+-- Semantic Document Validation Tables
+-- =============================================================================
+
+-- Behavioral claims extracted from documentation
+CREATE TABLE IF NOT EXISTS behavioral_claim (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL REFERENCES document(id) ON DELETE CASCADE,
+  repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
+
+  -- Claim content
+  claim_text TEXT NOT NULL,           -- Original text from doc
+  claim_line INT,                     -- Line number in document
+  claim_context TEXT,                 -- Surrounding paragraph for context
+
+  -- Extracted structure (from LLM)
+  topic TEXT NOT NULL,                -- e.g., "XP boost", "rate limiting"
+  subject TEXT,                       -- e.g., "players", "requests", "tokens"
+  condition TEXT,                     -- e.g., "good promo", "per minute", "on failure"
+  expected_value TEXT,                -- e.g., "25%", "100 requests", "24 hours"
+  value_type TEXT,                    -- 'percentage', 'number', 'duration', 'boolean', 'behavior', 'ordering'
+
+  -- Extraction metadata
+  extraction_confidence REAL NOT NULL DEFAULT 0.0,
+  extracted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Status
+  status TEXT NOT NULL DEFAULT 'pending',  -- 'pending', 'verified', 'drift', 'unclear'
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_behavioral_claim_document ON behavioral_claim(document_id);
+CREATE INDEX IF NOT EXISTS idx_behavioral_claim_repo ON behavioral_claim(repo_id);
+CREATE INDEX IF NOT EXISTS idx_behavioral_claim_status ON behavioral_claim(status);
+CREATE INDEX IF NOT EXISTS idx_behavioral_claim_topic ON behavioral_claim(topic);
+
+-- Verification results for behavioral claims
+CREATE TABLE IF NOT EXISTS claim_verification (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  claim_id UUID NOT NULL REFERENCES behavioral_claim(id) ON DELETE CASCADE,
+
+  -- Verification result
+  verdict TEXT NOT NULL,              -- 'match', 'mismatch', 'unclear', 'no_code_found'
+  confidence REAL NOT NULL DEFAULT 0.0,
+
+  -- What was found in code
+  actual_value TEXT,                  -- e.g., "15%", "50 requests"
+  actual_behavior TEXT,               -- Description of what code actually does
+
+  -- Evidence from codebase
+  evidence_chunks JSONB,              -- [{chunk_id, file_path, start_line, end_line, relevance}]
+  key_code_snippet TEXT,              -- Most relevant code excerpt
+
+  -- LLM reasoning
+  reasoning TEXT,                     -- Step-by-step explanation of verdict
+
+  -- Suggested fix
+  suggested_fix TEXT,                 -- "Update doc to say 15%" or "Update code to match doc"
+  fix_type TEXT,                      -- 'update_doc', 'update_code', 'clarify_doc', 'needs_review'
+  suggested_diff TEXT,                -- Unified diff format patch for auto-fix
+
+  verified_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_claim_verification_claim ON claim_verification(claim_id);
+CREATE INDEX IF NOT EXISTS idx_claim_verification_verdict ON claim_verification(verdict);
+
+-- Documentation drift issues for review workflow
+CREATE TABLE IF NOT EXISTS doc_drift_issue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  verification_id UUID NOT NULL REFERENCES claim_verification(id) ON DELETE CASCADE,
+  score_id UUID REFERENCES doc_validity_score(id) ON DELETE SET NULL,
+
+  -- Issue classification
+  severity TEXT NOT NULL,             -- 'low', 'medium', 'high', 'critical'
+  category TEXT NOT NULL DEFAULT 'behavioral',  -- 'behavioral', 'numerical', 'api_change', 'ordering'
+
+  -- Review workflow
+  status TEXT NOT NULL DEFAULT 'open', -- 'open', 'accepted', 'rejected', 'deferred', 'fixed'
+  reviewed_by TEXT,                    -- User/system who reviewed
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT,
+
+  -- Auto-fix capability
+  can_auto_fix BOOLEAN NOT NULL DEFAULT false,
+  auto_fix_type TEXT,                  -- 'doc_edit', 'code_edit'
+  auto_fix_applied BOOLEAN NOT NULL DEFAULT false,
+  auto_fix_applied_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_drift_issue_verification ON doc_drift_issue(verification_id);
+CREATE INDEX IF NOT EXISTS idx_doc_drift_issue_score ON doc_drift_issue(score_id);
+CREATE INDEX IF NOT EXISTS idx_doc_drift_issue_status ON doc_drift_issue(status);
+CREATE INDEX IF NOT EXISTS idx_doc_drift_issue_severity ON doc_drift_issue(severity);
+
+-- =============================================================================
+-- SQL Schema Intelligence Tables
+-- =============================================================================
+
+-- Parsed CREATE TABLE definitions with columns, constraints, indexes
+CREATE TABLE IF NOT EXISTS sql_table_metadata (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
+  document_id UUID REFERENCES document(id) ON DELETE SET NULL,
+  file_id UUID REFERENCES file(id) ON DELETE SET NULL,
+
+  -- Table identification
+  schema_name TEXT,                  -- 'public', 'auth', etc. (NULL = default schema)
+  table_name TEXT NOT NULL,
+  qualified_name TEXT NOT NULL,      -- schema.table_name or just table_name
+
+  -- Source location
+  source_file_path TEXT NOT NULL,
+  source_start_line INT,
+  source_end_line INT,
+
+  -- Raw definition
+  create_statement TEXT NOT NULL,
+
+  -- Parsed metadata (JSONB for flexibility)
+  columns JSONB NOT NULL,            -- [{name, data_type, nullable, default, is_pk, is_fk, fk_references}]
+  constraints JSONB,                 -- [{name, type, definition, columns}]
+  indexes JSONB,                     -- [{name, unique, columns, using}]
+
+  -- LLM-generated content
+  description TEXT,                  -- LLM summary of table purpose
+  column_descriptions JSONB,         -- {column_name: description}
+
+  -- Search support
+  fts tsvector,
+  content_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE(repo_id, qualified_name)
+);
+
+-- Parsed CREATE FUNCTION, CREATE PROCEDURE, CREATE TRIGGER definitions
+CREATE TABLE IF NOT EXISTS sql_routine_metadata (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
+  document_id UUID REFERENCES document(id) ON DELETE SET NULL,
+  file_id UUID REFERENCES file(id) ON DELETE SET NULL,
+
+  -- Routine identification
+  schema_name TEXT,                  -- 'public', etc.
+  routine_name TEXT NOT NULL,
+  qualified_name TEXT NOT NULL,      -- schema.routine_name
+  routine_type TEXT NOT NULL,        -- 'FUNCTION', 'PROCEDURE', 'TRIGGER'
+
+  -- Source location
+  source_file_path TEXT NOT NULL,
+  source_start_line INT,
+  source_end_line INT,
+
+  -- Raw definition
+  create_statement TEXT NOT NULL,
+
+  -- Parsed metadata (JSONB)
+  parameters JSONB,                  -- [{name, data_type, mode, default}] mode: IN/OUT/INOUT
+  return_type TEXT,                  -- For functions
+  language TEXT,                     -- 'plpgsql', 'sql', 'python', etc.
+  volatility TEXT,                   -- 'VOLATILE', 'STABLE', 'IMMUTABLE'
+
+  -- For triggers
+  trigger_table TEXT,                -- Table the trigger is on
+  trigger_events JSONB,              -- ['INSERT', 'UPDATE', 'DELETE']
+  trigger_timing TEXT,               -- 'BEFORE', 'AFTER', 'INSTEAD OF'
+
+  -- LLM-generated content
+  description TEXT,                  -- LLM summary of routine purpose
+
+  -- Search support
+  fts tsvector,
+  content_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE(repo_id, qualified_name, routine_type)
+);
+
+-- Tracks where columns are referenced in application code
+CREATE TABLE IF NOT EXISTS sql_column_usage (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  table_metadata_id UUID NOT NULL REFERENCES sql_table_metadata(id) ON DELETE CASCADE,
+  column_name TEXT NOT NULL,
+
+  -- Where it's used
+  chunk_id UUID REFERENCES chunk(id) ON DELETE CASCADE,
+  symbol_id UUID REFERENCES symbol(id) ON DELETE SET NULL,
+  file_id UUID NOT NULL REFERENCES file(id) ON DELETE CASCADE,
+
+  -- Location
+  file_path TEXT NOT NULL,
+  line_number INT,
+  usage_context TEXT,                -- Code snippet showing usage
+
+  -- Classification
+  usage_type TEXT NOT NULL,          -- 'SELECT', 'INSERT', 'UPDATE', 'WHERE', 'JOIN', 'ORM_FIELD'
+  confidence REAL NOT NULL DEFAULT 1.0,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE(table_metadata_id, column_name, chunk_id, line_number)
+);
+
+-- SQL Schema Intelligence Indexes
+CREATE INDEX IF NOT EXISTS idx_sql_table_repo ON sql_table_metadata(repo_id);
+CREATE INDEX IF NOT EXISTS idx_sql_table_name ON sql_table_metadata(repo_id, table_name);
+CREATE INDEX IF NOT EXISTS idx_sql_table_fts ON sql_table_metadata USING GIN (fts);
+
+CREATE INDEX IF NOT EXISTS idx_sql_routine_repo ON sql_routine_metadata(repo_id);
+CREATE INDEX IF NOT EXISTS idx_sql_routine_name ON sql_routine_metadata(repo_id, routine_name);
+CREATE INDEX IF NOT EXISTS idx_sql_routine_type ON sql_routine_metadata(repo_id, routine_type);
+CREATE INDEX IF NOT EXISTS idx_sql_routine_fts ON sql_routine_metadata USING GIN (fts);
+
+CREATE INDEX IF NOT EXISTS idx_column_usage_table ON sql_column_usage(table_metadata_id);
+CREATE INDEX IF NOT EXISTS idx_column_usage_column ON sql_column_usage(table_metadata_id, column_name);
+CREATE INDEX IF NOT EXISTS idx_column_usage_file ON sql_column_usage(file_id);
+
+-- FTS trigger for sql_table_metadata
+CREATE OR REPLACE FUNCTION update_sql_table_fts() RETURNS TRIGGER AS $$
+BEGIN
+  NEW.fts := to_tsvector('english',
+    coalesce(NEW.table_name, '') || ' ' ||
+    coalesce(NEW.schema_name, '') || ' ' ||
+    coalesce(NEW.description, '')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sql_table_fts ON sql_table_metadata;
+CREATE TRIGGER trg_sql_table_fts
+  BEFORE INSERT OR UPDATE ON sql_table_metadata
+  FOR EACH ROW EXECUTE FUNCTION update_sql_table_fts();
+
+-- FTS trigger for sql_routine_metadata
+CREATE OR REPLACE FUNCTION update_sql_routine_fts() RETURNS TRIGGER AS $$
+BEGIN
+  NEW.fts := to_tsvector('english',
+    coalesce(NEW.routine_name, '') || ' ' ||
+    coalesce(NEW.schema_name, '') || ' ' ||
+    coalesce(NEW.routine_type, '') || ' ' ||
+    coalesce(NEW.description, '')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sql_routine_fts ON sql_routine_metadata;
+CREATE TRIGGER trg_sql_routine_fts
+  BEFORE INSERT OR UPDATE ON sql_routine_metadata
+  FOR EACH ROW EXECUTE FUNCTION update_sql_routine_fts();

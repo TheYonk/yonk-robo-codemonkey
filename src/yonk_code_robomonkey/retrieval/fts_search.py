@@ -8,6 +8,29 @@ from dataclasses import dataclass
 from yonk_code_robomonkey.db.schema_manager import schema_context
 
 
+def sanitize_fts_query(query: str) -> str:
+    """Sanitize a query string for PostgreSQL full-text search.
+
+    Removes or escapes characters that break websearch_to_tsquery/to_tsquery.
+
+    Args:
+        query: Raw query string
+
+    Returns:
+        Sanitized query safe for FTS
+    """
+    import re
+
+    # Characters that break FTS: | & ! ( ) : * < > $ @ # % ^ = + [ ] { } \ " '
+    # Keep alphanumeric, spaces, hyphens, underscores, and dots
+    sanitized = re.sub(r'[|&!():*<>$@#%^=+\[\]{}\\"\',;]', ' ', query)
+
+    # Collapse multiple spaces
+    sanitized = re.sub(r'\s+', ' ', sanitized)
+
+    return sanitized.strip()
+
+
 def build_or_tsquery(query: str) -> str:
     """Build a tsquery string with OR logic from plain text.
 
@@ -17,8 +40,11 @@ def build_or_tsquery(query: str) -> str:
     Returns:
         tsquery string with OR operators (e.g., "word1 | word2 | word3")
     """
+    # Sanitize first to remove FTS-breaking characters
+    sanitized = sanitize_fts_query(query)
+
     # Split on whitespace and filter out empty strings
-    words = [w.strip() for w in query.split() if w.strip()]
+    words = [w.strip() for w in sanitized.split() if w.strip()]
     if not words:
         return ""
     # Join with OR operator

@@ -5,12 +5,10 @@ Analyzes repository content and suggests relevant tags for categorization.
 """
 from __future__ import annotations
 import asyncpg
-import json
 import logging
-import httpx
 from typing import TypedDict
 
-from ..config import settings
+from ..llm import call_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +26,10 @@ async def suggest_tags(
     schema_name: str,
     max_tags: int = 10,
     sample_size: int = 50,
-    llm_model: str | None = None,
-    llm_base_url: str | None = None,
 ) -> list[TagSuggestion]:
     """Suggest tags for a repository using LLM analysis.
+
+    Uses the unified LLM client with "small" model for quick tag suggestions.
 
     Args:
         repo_name: Repository name
@@ -39,17 +37,10 @@ async def suggest_tags(
         schema_name: Schema name for the repository
         max_tags: Maximum number of tags to suggest (default 10)
         sample_size: Number of chunks/docs to sample (default 50)
-        llm_model: LLM model to use (defaults to settings.llm_model)
-        llm_base_url: LLM base URL (defaults to settings.embeddings_base_url for Ollama)
 
     Returns:
         List of suggested tags with descriptions and estimated match counts
     """
-    if llm_model is None:
-        llm_model = getattr(settings, 'llm_model', 'qwen2.5-coder:7b')
-    if llm_base_url is None:
-        llm_base_url = settings.embeddings_base_url  # Use same as embeddings (Ollama)
-
     logger.info(f"Suggesting tags for {repo_name} (sample_size={sample_size}, max_tags={max_tags})")
 
     # Step 1: Sample repository content
@@ -134,61 +125,44 @@ Return your response as a JSON array with this structure:
 
 Only return the JSON array, no other text."""
 
-        # Step 4: Call LLM
-        logger.info(f"Calling LLM ({llm_model}) for tag suggestions")
+        # Step 4: Call LLM using unified client with "small" model
+        logger.info("Calling LLM for tag suggestions")
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{llm_base_url}/api/generate",
-                json={
-                    "model": llm_model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": 1000
-                    }
-                }
-            )
+        llm_output = await call_llm(prompt, task_type="small", timeout=120.0)
 
-            response.raise_for_status()
-            result = response.json()
-            llm_output = result.get("response", "")
+        if not llm_output:
+            logger.warning("No LLM response received")
+            return []
 
         logger.info(f"LLM response received ({len(llm_output)} chars)")
 
         # Step 5: Parse JSON response
-        try:
-            # Try to extract JSON from response
-            # Sometimes LLM adds extra text, so find JSON array
-            start_idx = llm_output.find('[')
-            end_idx = llm_output.rfind(']') + 1
+        suggestions = parse_json_response(llm_output)
 
-            if start_idx == -1 or end_idx == 0:
-                raise ValueError("No JSON array found in LLM response")
-
-            json_str = llm_output[start_idx:end_idx]
-            suggestions = json.loads(json_str)
-
-            # Validate and normalize
-            validated_suggestions: list[TagSuggestion] = []
-            for item in suggestions[:max_tags]:
-                if isinstance(item, dict) and "tag" in item:
-                    validated_suggestions.append({
-                        "tag": str(item.get("tag", "")).strip(),
-                        "description": str(item.get("description", "")).strip(),
-                        "estimated_matches": int(item.get("estimated_matches", 0))
-                    })
-
-            logger.info(f"Parsed {len(validated_suggestions)} tag suggestions")
-            return validated_suggestions
-
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Failed to parse LLM response: {e}")
-            logger.debug(f"Raw LLM output: {llm_output}")
-
-            # Fallback: return empty list
+        if not suggestions:
+            logger.warning("Failed to parse LLM response")
             return []
+
+        # Handle both list and dict responses
+        if isinstance(suggestions, dict):
+            # Might be wrapped in a key
+            suggestions = suggestions.get("tags", suggestions.get("suggestions", [suggestions]))
+
+        if not isinstance(suggestions, list):
+            suggestions = [suggestions]
+
+        # Validate and normalize
+        validated_suggestions: list[TagSuggestion] = []
+        for item in suggestions[:max_tags]:
+            if isinstance(item, dict) and "tag" in item:
+                validated_suggestions.append({
+                    "tag": str(item.get("tag", "")).strip(),
+                    "description": str(item.get("description", "")).strip(),
+                    "estimated_matches": int(item.get("estimated_matches", 0))
+                })
+
+        logger.info(f"Parsed {len(validated_suggestions)} tag suggestions")
+        return validated_suggestions
 
     finally:
         await conn.close()
@@ -202,14 +176,14 @@ async def suggest_and_apply_tags(
     sample_size: int = 50,
     threshold: float = 0.7,
     max_results_per_tag: int = 100,
-    llm_model: str | None = None,
-    llm_base_url: str | None = None,
     embeddings_provider: str | None = None,
     embeddings_model: str | None = None,
     embeddings_base_url: str | None = None,
     embeddings_api_key: str = "",
 ) -> dict:
     """Suggest tags and automatically apply them.
+
+    Uses the unified LLM client with "small" model for tag suggestions.
 
     Args:
         repo_name: Repository name
@@ -219,8 +193,6 @@ async def suggest_and_apply_tags(
         sample_size: Number of chunks/docs to sample for suggestion
         threshold: Similarity threshold for tagging (0.0-1.0)
         max_results_per_tag: Max entities to tag per tag
-        llm_model: LLM model for suggestions
-        llm_base_url: LLM base URL
         embeddings_provider: Embeddings provider for tagging
         embeddings_model: Embeddings model for tagging
         embeddings_base_url: Embeddings base URL
@@ -233,15 +205,13 @@ async def suggest_and_apply_tags(
 
     logger.info(f"Suggesting and applying tags for {repo_name}")
 
-    # Step 1: Get tag suggestions
+    # Step 1: Get tag suggestions using unified LLM client
     suggestions = await suggest_tags(
         repo_name=repo_name,
         database_url=database_url,
         schema_name=schema_name,
         max_tags=max_tags,
         sample_size=sample_size,
-        llm_model=llm_model,
-        llm_base_url=llm_base_url
     )
 
     if not suggestions:

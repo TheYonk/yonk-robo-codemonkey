@@ -1,14 +1,18 @@
 """Document ingester for storing documentation in the database.
 
 Parses and stores documentation files as searchable documents.
+SQL schema files are handled separately via the sql_schema module.
 """
 from __future__ import annotations
 from pathlib import Path
 import hashlib
 import asyncpg
+import logging
 
 from .doc_scanner import scan_docs
 from .doc_parser import parse_document
+
+logger = logging.getLogger(__name__)
 
 
 async def ingest_documents(
@@ -19,6 +23,9 @@ async def ingest_documents(
 ) -> dict[str, int]:
     """Ingest documentation files into the database.
 
+    SQL schema files (doc_type='sql_schema') are routed to the sql_schema
+    extractor for specialized handling instead of being treated as documentation.
+
     Args:
         repo_id: Repository UUID
         repo_root: Repository root path
@@ -26,18 +33,34 @@ async def ingest_documents(
         schema_name: Optional schema name for schema isolation
 
     Returns:
-        Dictionary with counts of ingested documents
+        Dictionary with counts of ingested documents and SQL schema metadata
     """
     conn = await asyncpg.connect(dsn=database_url)
-    stats = {"documents": 0, "updated": 0, "skipped": 0}
+    stats = {
+        "documents": 0,
+        "updated": 0,
+        "skipped": 0,
+        "sql_tables": 0,
+        "sql_routines": 0
+    }
 
     try:
         # Set search path if schema provided
         if schema_name:
             await conn.execute(f'SET search_path TO "{schema_name}", public')
+
         for file_path, doc_type in scan_docs(repo_root):
             try:
-                # Parse document
+                # Handle SQL files separately via sql_schema module
+                if doc_type == "sql_schema":
+                    result = await _ingest_sql_schema(
+                        conn, repo_id, file_path, repo_root
+                    )
+                    stats["sql_tables"] += result.get("tables", 0)
+                    stats["sql_routines"] += result.get("routines", 0)
+                    continue
+
+                # Parse regular documentation
                 title, content = parse_document(file_path, doc_type)
 
                 # Calculate relative path
@@ -159,6 +182,83 @@ async def store_summary_as_document(
 
     finally:
         await conn.close()
+
+
+async def _ingest_sql_schema(
+    conn: asyncpg.Connection,
+    repo_id: str,
+    file_path: Path,
+    repo_root: Path
+) -> dict[str, int]:
+    """Ingest SQL schema file using the sql_schema extractor.
+
+    Also stores the SQL file as a document with type='SQL_SCHEMA' for
+    basic searchability, but the structured metadata is in sql_table_metadata
+    and sql_routine_metadata tables.
+
+    Args:
+        conn: Database connection
+        repo_id: Repository UUID
+        file_path: Path to the SQL file
+        repo_root: Repository root path
+
+    Returns:
+        Dict with counts: {"tables": N, "routines": M}
+    """
+    from yonk_code_robomonkey.sql_schema.extractor import extract_and_store_sql_metadata
+
+    rel_path = str(file_path.relative_to(repo_root))
+
+    # Store the raw SQL file as a document for basic searchability
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        title = file_path.stem  # Use filename as title
+
+        # Check if document exists
+        existing = await conn.fetchrow(
+            """
+            SELECT id FROM document
+            WHERE repo_id = $1 AND path = $2 AND type = 'SQL_SCHEMA'
+            """,
+            repo_id, rel_path
+        )
+
+        if existing:
+            # Update existing
+            await conn.execute(
+                """
+                UPDATE document
+                SET title = $1, content = $2, updated_at = now()
+                WHERE id = $3
+                """,
+                title, content, existing["id"]
+            )
+            document_id = str(existing["id"])
+        else:
+            # Insert new
+            document_id = await conn.fetchval(
+                """
+                INSERT INTO document (repo_id, path, type, title, content, source)
+                VALUES ($1, $2, 'SQL_SCHEMA', $3, $4, 'HUMAN')
+                RETURNING id
+                """,
+                repo_id, rel_path, title, content
+            )
+            document_id = str(document_id)
+    except Exception as e:
+        logger.warning(f"Failed to store SQL document {rel_path}: {e}")
+        document_id = None
+
+    # Extract structured metadata
+    result = await extract_and_store_sql_metadata(
+        conn=conn,
+        repo_id=repo_id,
+        file_path=file_path,
+        source_file_path=rel_path,
+        document_id=document_id
+    )
+
+    return result
 
 
 # Alias for processor compatibility

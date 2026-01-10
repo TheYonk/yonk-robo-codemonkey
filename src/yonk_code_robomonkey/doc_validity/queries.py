@@ -40,6 +40,61 @@ class DocValidityIssueRecord:
     created_at: datetime
 
 
+@dataclass
+class BehavioralClaimRecord:
+    """Database record for an extracted behavioral claim."""
+    id: str
+    document_id: str
+    repo_id: str
+    claim_text: str
+    claim_line: int | None
+    claim_context: str | None
+    topic: str
+    subject: str | None
+    condition: str | None
+    expected_value: str | None
+    value_type: str | None
+    extraction_confidence: float
+    status: str
+    created_at: datetime
+
+
+@dataclass
+class ClaimVerificationRecord:
+    """Database record for a claim verification result."""
+    id: str
+    claim_id: str
+    verdict: str
+    confidence: float
+    actual_value: str | None
+    actual_behavior: str | None
+    evidence_chunks: list | None
+    key_code_snippet: str | None
+    reasoning: str | None
+    suggested_fix: str | None
+    fix_type: str | None
+    suggested_diff: str | None
+    verified_at: datetime
+
+
+@dataclass
+class DocDriftIssueRecord:
+    """Database record for a doc drift issue."""
+    id: str
+    verification_id: str
+    score_id: str | None
+    severity: str
+    category: str
+    status: str
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    review_notes: str | None
+    can_auto_fix: bool
+    auto_fix_type: str | None
+    auto_fix_applied: bool
+    created_at: datetime
+
+
 async def get_documents_needing_validation(
     conn: asyncpg.Connection,
     repo_id: str,
@@ -526,4 +581,509 @@ async def get_related_code_files(
         LIMIT 20
         """,
         repo_id, pattern
+    )
+
+
+# =============================================================================
+# Semantic Validation Queries
+# =============================================================================
+
+async def insert_behavioral_claim(
+    conn: asyncpg.Connection,
+    document_id: str,
+    repo_id: str,
+    claim_text: str,
+    topic: str,
+    claim_line: int | None = None,
+    claim_context: str | None = None,
+    subject: str | None = None,
+    condition: str | None = None,
+    expected_value: str | None = None,
+    value_type: str | None = None,
+    extraction_confidence: float = 0.0
+) -> str:
+    """Insert a behavioral claim extracted from a document.
+
+    Returns:
+        The claim record ID
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO behavioral_claim (
+            document_id, repo_id, claim_text, claim_line, claim_context,
+            topic, subject, condition, expected_value, value_type,
+            extraction_confidence, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+        RETURNING id
+        """,
+        document_id, repo_id, claim_text, claim_line, claim_context,
+        topic, subject, condition, expected_value, value_type,
+        extraction_confidence
+    )
+    return str(row['id'])
+
+
+async def get_claims_for_document(
+    conn: asyncpg.Connection,
+    document_id: str
+) -> list[BehavioralClaimRecord]:
+    """Get all behavioral claims for a document."""
+    rows = await conn.fetch(
+        """
+        SELECT
+            id, document_id, repo_id, claim_text, claim_line, claim_context,
+            topic, subject, condition, expected_value, value_type,
+            extraction_confidence, status, created_at
+        FROM behavioral_claim
+        WHERE document_id = $1
+        ORDER BY claim_line NULLS LAST, created_at
+        """,
+        document_id
+    )
+    return [BehavioralClaimRecord(**dict(row)) for row in rows]
+
+
+async def get_pending_claims(
+    conn: asyncpg.Connection,
+    repo_id: str,
+    limit: int = 50
+) -> list[BehavioralClaimRecord]:
+    """Get claims that need verification."""
+    rows = await conn.fetch(
+        """
+        SELECT
+            id, document_id, repo_id, claim_text, claim_line, claim_context,
+            topic, subject, condition, expected_value, value_type,
+            extraction_confidence, status, created_at
+        FROM behavioral_claim
+        WHERE repo_id = $1 AND status = 'pending'
+        ORDER BY extraction_confidence DESC, created_at
+        LIMIT $2
+        """,
+        repo_id, limit
+    )
+    return [BehavioralClaimRecord(**dict(row)) for row in rows]
+
+
+async def update_claim_status(
+    conn: asyncpg.Connection,
+    claim_id: str,
+    status: str
+) -> None:
+    """Update the status of a behavioral claim."""
+    await conn.execute(
+        """
+        UPDATE behavioral_claim
+        SET status = $2, updated_at = now()
+        WHERE id = $1
+        """,
+        claim_id, status
+    )
+
+
+async def delete_claims_for_document(
+    conn: asyncpg.Connection,
+    document_id: str
+) -> int:
+    """Delete all claims for a document (before re-extraction).
+
+    Returns:
+        Number of claims deleted
+    """
+    result = await conn.execute(
+        "DELETE FROM behavioral_claim WHERE document_id = $1",
+        document_id
+    )
+    return int(result.split()[-1]) if result else 0
+
+
+async def insert_claim_verification(
+    conn: asyncpg.Connection,
+    claim_id: str,
+    verdict: str,
+    confidence: float,
+    actual_value: str | None = None,
+    actual_behavior: str | None = None,
+    evidence_chunks: list | None = None,
+    key_code_snippet: str | None = None,
+    reasoning: str | None = None,
+    suggested_fix: str | None = None,
+    fix_type: str | None = None,
+    suggested_diff: str | None = None
+) -> str:
+    """Insert a verification result for a claim.
+
+    Returns:
+        The verification record ID
+    """
+    import json
+    from uuid import UUID
+
+    def serialize_evidence(obj):
+        """Custom serializer for evidence chunks."""
+        if isinstance(obj, UUID):
+            return str(obj)
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+    evidence_json = json.dumps(evidence_chunks, default=serialize_evidence) if evidence_chunks else None
+
+    row = await conn.fetchrow(
+        """
+        INSERT INTO claim_verification (
+            claim_id, verdict, confidence,
+            actual_value, actual_behavior, evidence_chunks,
+            key_code_snippet, reasoning, suggested_fix, fix_type, suggested_diff
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+        RETURNING id
+        """,
+        claim_id, verdict, confidence,
+        actual_value, actual_behavior, evidence_json,
+        key_code_snippet, reasoning, suggested_fix, fix_type, suggested_diff
+    )
+    return str(row['id'])
+
+
+async def get_verification_for_claim(
+    conn: asyncpg.Connection,
+    claim_id: str
+) -> ClaimVerificationRecord | None:
+    """Get the most recent verification for a claim."""
+    row = await conn.fetchrow(
+        """
+        SELECT
+            id, claim_id, verdict, confidence,
+            actual_value, actual_behavior, evidence_chunks,
+            key_code_snippet, reasoning, suggested_fix, fix_type, suggested_diff,
+            verified_at
+        FROM claim_verification
+        WHERE claim_id = $1
+        ORDER BY verified_at DESC
+        LIMIT 1
+        """,
+        claim_id
+    )
+    if row:
+        return ClaimVerificationRecord(**dict(row))
+    return None
+
+
+async def insert_doc_drift_issue(
+    conn: asyncpg.Connection,
+    verification_id: str,
+    severity: str,
+    category: str = "behavioral",
+    score_id: str | None = None,
+    can_auto_fix: bool = False,
+    auto_fix_type: str | None = None
+) -> str:
+    """Insert a doc drift issue for review.
+
+    Returns:
+        The issue record ID
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO doc_drift_issue (
+            verification_id, score_id, severity, category,
+            status, can_auto_fix, auto_fix_type
+        ) VALUES ($1, $2, $3, $4, 'open', $5, $6)
+        RETURNING id
+        """,
+        verification_id, score_id, severity, category,
+        can_auto_fix, auto_fix_type
+    )
+    return str(row['id'])
+
+
+async def get_drift_issues(
+    conn: asyncpg.Connection,
+    repo_id: str,
+    status: str | None = None,
+    severity: str | None = None,
+    limit: int = 20
+) -> list[dict[str, Any]]:
+    """Get doc drift issues with full context.
+
+    Args:
+        conn: Database connection
+        repo_id: Repository UUID
+        status: Optional filter by status ('open', 'accepted', 'rejected', 'deferred', 'fixed')
+        severity: Optional filter by severity ('low', 'medium', 'high', 'critical')
+        limit: Maximum issues to return
+
+    Returns:
+        List of drift issues with claim and document context
+    """
+    query = """
+        SELECT
+            ddi.id as issue_id,
+            ddi.severity,
+            ddi.category,
+            ddi.status,
+            ddi.can_auto_fix,
+            ddi.auto_fix_type,
+            ddi.reviewed_by,
+            ddi.reviewed_at,
+            ddi.review_notes,
+            ddi.created_at as issue_created_at,
+            cv.id as verification_id,
+            cv.verdict,
+            cv.confidence,
+            cv.actual_value,
+            cv.actual_behavior,
+            cv.key_code_snippet,
+            cv.reasoning,
+            cv.suggested_fix,
+            cv.fix_type,
+            cv.suggested_diff,
+            bc.id as claim_id,
+            bc.claim_text,
+            bc.claim_line,
+            bc.topic,
+            bc.subject,
+            bc.condition,
+            bc.expected_value,
+            bc.value_type,
+            d.id as document_id,
+            d.path as document_path,
+            d.title as document_title
+        FROM doc_drift_issue ddi
+        JOIN claim_verification cv ON cv.id = ddi.verification_id
+        JOIN behavioral_claim bc ON bc.id = cv.claim_id
+        JOIN document d ON d.id = bc.document_id
+        WHERE bc.repo_id = $1
+    """
+    params = [repo_id]
+
+    if status and status != 'all':
+        params.append(status)
+        query += f" AND ddi.status = ${len(params)}"
+
+    if severity:
+        params.append(severity)
+        query += f" AND ddi.severity = ${len(params)}"
+
+    query += """
+        ORDER BY
+            CASE ddi.severity
+                WHEN 'critical' THEN 0
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                WHEN 'low' THEN 3
+            END,
+            ddi.created_at DESC
+    """
+
+    params.append(limit)
+    query += f" LIMIT ${len(params)}"
+
+    return await conn.fetch(query, *params)
+
+
+async def get_drift_issue_by_id(
+    conn: asyncpg.Connection,
+    issue_id: str
+) -> dict[str, Any] | None:
+    """Get a single drift issue with full context."""
+    row = await conn.fetchrow(
+        """
+        SELECT
+            ddi.id as issue_id,
+            ddi.severity,
+            ddi.category,
+            ddi.status,
+            ddi.can_auto_fix,
+            ddi.auto_fix_type,
+            ddi.auto_fix_applied,
+            ddi.auto_fix_applied_at,
+            ddi.reviewed_by,
+            ddi.reviewed_at,
+            ddi.review_notes,
+            ddi.created_at as issue_created_at,
+            cv.id as verification_id,
+            cv.verdict,
+            cv.confidence,
+            cv.actual_value,
+            cv.actual_behavior,
+            cv.evidence_chunks,
+            cv.key_code_snippet,
+            cv.reasoning,
+            cv.suggested_fix,
+            cv.fix_type,
+            cv.suggested_diff,
+            cv.verified_at,
+            bc.id as claim_id,
+            bc.claim_text,
+            bc.claim_line,
+            bc.claim_context,
+            bc.topic,
+            bc.subject,
+            bc.condition,
+            bc.expected_value,
+            bc.value_type,
+            bc.extraction_confidence,
+            d.id as document_id,
+            d.path as document_path,
+            d.title as document_title,
+            d.content as document_content
+        FROM doc_drift_issue ddi
+        JOIN claim_verification cv ON cv.id = ddi.verification_id
+        JOIN behavioral_claim bc ON bc.id = cv.claim_id
+        JOIN document d ON d.id = bc.document_id
+        WHERE ddi.id = $1
+        """,
+        issue_id
+    )
+    return dict(row) if row else None
+
+
+async def update_drift_issue_status(
+    conn: asyncpg.Connection,
+    issue_id: str,
+    status: str,
+    reviewed_by: str | None = None,
+    review_notes: str | None = None
+) -> None:
+    """Update the status of a drift issue."""
+    await conn.execute(
+        """
+        UPDATE doc_drift_issue
+        SET status = $2, reviewed_by = $3, review_notes = $4,
+            reviewed_at = now(), updated_at = now()
+        WHERE id = $1
+        """,
+        issue_id, status, reviewed_by, review_notes
+    )
+
+
+async def mark_drift_issue_fixed(
+    conn: asyncpg.Connection,
+    issue_id: str
+) -> None:
+    """Mark a drift issue as fixed (auto-fix applied)."""
+    await conn.execute(
+        """
+        UPDATE doc_drift_issue
+        SET status = 'fixed', auto_fix_applied = true,
+            auto_fix_applied_at = now(), updated_at = now()
+        WHERE id = $1
+        """,
+        issue_id
+    )
+
+
+async def get_drift_stats(
+    conn: asyncpg.Connection,
+    repo_id: str
+) -> dict[str, Any]:
+    """Get doc drift statistics for a repository."""
+    row = await conn.fetchrow(
+        """
+        SELECT
+            COUNT(*) as total_issues,
+            COUNT(*) FILTER (WHERE ddi.status = 'open') as open_count,
+            COUNT(*) FILTER (WHERE ddi.status = 'accepted') as accepted_count,
+            COUNT(*) FILTER (WHERE ddi.status = 'rejected') as rejected_count,
+            COUNT(*) FILTER (WHERE ddi.status = 'deferred') as deferred_count,
+            COUNT(*) FILTER (WHERE ddi.status = 'fixed') as fixed_count,
+            COUNT(*) FILTER (WHERE ddi.severity = 'critical') as critical_count,
+            COUNT(*) FILTER (WHERE ddi.severity = 'high') as high_count,
+            COUNT(*) FILTER (WHERE ddi.severity = 'medium') as medium_count,
+            COUNT(*) FILTER (WHERE ddi.severity = 'low') as low_count
+        FROM doc_drift_issue ddi
+        JOIN claim_verification cv ON cv.id = ddi.verification_id
+        JOIN behavioral_claim bc ON bc.id = cv.claim_id
+        WHERE bc.repo_id = $1
+        """,
+        repo_id
+    )
+
+    return {
+        "total_issues": row["total_issues"],
+        "by_status": {
+            "open": row["open_count"],
+            "accepted": row["accepted_count"],
+            "rejected": row["rejected_count"],
+            "deferred": row["deferred_count"],
+            "fixed": row["fixed_count"]
+        },
+        "by_severity": {
+            "critical": row["critical_count"],
+            "high": row["high_count"],
+            "medium": row["medium_count"],
+            "low": row["low_count"]
+        }
+    }
+
+
+async def get_documents_for_semantic_validation(
+    conn: asyncpg.Connection,
+    repo_id: str,
+    min_structural_score: int = 60,
+    limit: int = 10
+) -> list[dict[str, Any]]:
+    """Get documents that need semantic validation.
+
+    Only returns docs with decent structural scores (to avoid wasting LLM on broken docs)
+    and that haven't been semantically validated recently.
+
+    Args:
+        conn: Database connection
+        repo_id: Repository UUID
+        min_structural_score: Minimum structural validity score
+        limit: Maximum documents to return
+
+    Returns:
+        List of document records needing semantic validation
+    """
+    return await conn.fetch(
+        """
+        SELECT
+            d.id,
+            d.path,
+            d.title,
+            d.content,
+            d.updated_at,
+            dvs.score as structural_score,
+            dvs.semantic_score,
+            (SELECT COUNT(*) FROM behavioral_claim bc WHERE bc.document_id = d.id) as existing_claims
+        FROM document d
+        LEFT JOIN doc_validity_score dvs ON dvs.document_id = d.id
+        WHERE d.repo_id = $1
+          AND d.type = 'DOC_FILE'
+          AND (dvs.score IS NULL OR dvs.score >= $2)
+          AND (
+            dvs.semantic_score IS NULL  -- Never semantically validated
+            OR d.updated_at > dvs.validated_at  -- Doc changed since last validation
+          )
+          -- Skip non-documentation files that might be misclassified
+          AND d.path NOT LIKE '%.sql'
+          AND d.path NOT LIKE '%.json'
+          AND d.path NOT LIKE '%/data/%'
+          AND d.path NOT LIKE '%CHANGELOG%'
+        ORDER BY
+            CASE WHEN dvs.semantic_score IS NULL THEN 0 ELSE 1 END,
+            dvs.score DESC NULLS LAST
+        LIMIT $3
+        """,
+        repo_id, min_structural_score, limit
+    )
+
+
+async def update_validity_score_semantic(
+    conn: asyncpg.Connection,
+    document_id: str,
+    semantic_score: float,
+    claims_checked: int,
+    claims_verified: int
+) -> None:
+    """Update only the semantic validation fields of a validity score."""
+    await conn.execute(
+        """
+        UPDATE doc_validity_score
+        SET semantic_score = $2, claims_checked = $3, claims_verified = $4,
+            validated_at = now()
+        WHERE document_id = $1
+        """,
+        document_id, semantic_score, claims_checked, claims_verified
     )

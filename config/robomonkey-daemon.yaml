@@ -1,7 +1,30 @@
 # RoboMonkey Daemon Configuration
 # This file configures the background daemon for automatic indexing and embedding
 
+# =============================================================================
+# LLM Configuration (Dual Model Setup)
+# =============================================================================
+# Two models: "deep" for complex tasks, "small" for simple tasks
+llm:
+  # Deep model: Complex code analysis, feature context, comprehensive reviews
+  deep:
+    provider: "ollama"
+    model: "qwen3-coder:30b"
+    base_url: "http://localhost:11434"
+    temperature: 0.3
+    max_tokens: 4000
+
+  # Small model: Quick summaries, classifications, simple questions
+  small:
+    provider: "ollama"
+    model: "phi3.5:3.8b"
+    base_url: "http://localhost:11434"
+    temperature: 0.3
+    max_tokens: 1000
+
+# =============================================================================
 # Database Configuration
+# =============================================================================
 database:
   # Control schema DSN (REQUIRED)
   control_dsn: "postgresql://postgres:postgres@localhost:5433/robomonkey"
@@ -64,6 +87,42 @@ summaries:
 
   # Batch size for summary generation (1-100)
   batch_size: 10
+
+# Document Validity Scoring
+doc_validity:
+  # Enable/disable document validity scoring
+  enabled: true
+
+  # How often to check for documents needing validation (minutes: 10-1440)
+  # Default: 120 (every 2 hours)
+  check_interval_minutes: 60
+
+  # Score weights (should sum to 1.0)
+  reference_weight: 0.55    # Weight for code reference validity
+  embedding_weight: 0.30    # Weight for semantic similarity
+  freshness_weight: 0.15    # Weight for freshness (age since last validated)
+
+  # Thresholds
+  stale_threshold: 50       # Score below which doc is considered stale
+  warning_threshold: 70     # Score below which to show warning
+
+  # LLM validation (optional, expensive)
+  use_llm_validation: false
+  llm_provider: "ollama"
+  llm_model: "mdq100/Qwen3-Coder-30B-A3B-Instruct:30b"
+  llm_base_url: "http://localhost:11434"
+
+  # Performance
+  batch_size: 20
+  max_references_per_doc: 100
+
+  # Semantic validation (behavioral claim verification)
+  semantic_validation_enabled: true
+  semantic_check_interval_minutes: 60   # Every hour
+  max_claims_per_doc: 30
+  claim_min_confidence: 0.7
+  semantic_batch_size: 15
+  semantic_min_structural_score: 60    # Only validate docs with decent structural scores
 
 # Job Workers Configuration
 workers:

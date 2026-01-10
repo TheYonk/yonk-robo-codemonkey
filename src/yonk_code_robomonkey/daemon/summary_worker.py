@@ -112,15 +112,12 @@ async def summary_worker(config: DaemonConfig) -> None:
                             logger.info(f"  No summaries needed for {repo_name}")
                             continue
 
-                        # Generate summaries in batches
+                        # Generate summaries in batches (uses unified LLM client with "small" model)
                         if files_to_summarize:
                             file_ids = [f['file_id'] for f in files_to_summarize]
                             file_result = await generate_file_summaries_batch(
                                 file_ids=file_ids,
                                 database_url=config.database.control_dsn,
-                                llm_provider=config.summaries.provider,
-                                llm_model=config.summaries.model,
-                                llm_base_url=config.summaries.base_url,
                                 batch_size=config.summaries.batch_size,
                                 schema_name=schema_name
                             )
@@ -136,9 +133,6 @@ async def summary_worker(config: DaemonConfig) -> None:
                             symbol_result = await generate_symbol_summaries_batch(
                                 symbol_ids=symbol_ids,
                                 database_url=config.database.control_dsn,
-                                llm_provider=config.summaries.provider,
-                                llm_model=config.summaries.model,
-                                llm_base_url=config.summaries.base_url,
                                 batch_size=config.summaries.batch_size,
                                 schema_name=schema_name
                             )
@@ -154,9 +148,6 @@ async def summary_worker(config: DaemonConfig) -> None:
                                 modules=modules_to_summarize,
                                 repo_id=repo_id,
                                 database_url=config.database.control_dsn,
-                                llm_provider=config.summaries.provider,
-                                llm_model=config.summaries.model,
-                                llm_base_url=config.summaries.base_url,
                                 batch_size=min(config.summaries.batch_size, 5),  # Smaller batches for modules
                                 schema_name=schema_name
                             )
@@ -250,15 +241,12 @@ async def run_summary_generation_once(config: DaemonConfig, repo_name: str | Non
                     "errors": 0
                 }
 
-                # Generate summaries
+                # Generate summaries (uses unified LLM client with "small" model)
                 if files_to_summarize:
                     file_ids = [f['file_id'] for f in files_to_summarize]
                     file_result = await generate_file_summaries_batch(
                         file_ids=file_ids,
                         database_url=config.database.control_dsn,
-                        llm_provider=config.summaries.provider,
-                        llm_model=config.summaries.model,
-                        llm_base_url=config.summaries.base_url,
                         batch_size=config.summaries.batch_size,
                         schema_name=schema_name
                     )
@@ -270,9 +258,6 @@ async def run_summary_generation_once(config: DaemonConfig, repo_name: str | Non
                     symbol_result = await generate_symbol_summaries_batch(
                         symbol_ids=symbol_ids,
                         database_url=config.database.control_dsn,
-                        llm_provider=config.summaries.provider,
-                        llm_model=config.summaries.model,
-                        llm_base_url=config.summaries.base_url,
                         batch_size=config.summaries.batch_size,
                         schema_name=schema_name
                     )
@@ -284,9 +269,6 @@ async def run_summary_generation_once(config: DaemonConfig, repo_name: str | Non
                         modules=modules_to_summarize,
                         repo_id=repo_id,
                         database_url=config.database.control_dsn,
-                        llm_provider=config.summaries.provider,
-                        llm_model=config.summaries.model,
-                        llm_base_url=config.summaries.base_url,
                         batch_size=5,
                         schema_name=schema_name
                     )

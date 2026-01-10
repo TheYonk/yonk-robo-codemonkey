@@ -168,6 +168,13 @@ class CodeGraphDaemon:
             doc_validity_task = asyncio.create_task(doc_validity_worker(self.config))
             logger.info(f"Doc validity worker started (check interval: {self.config.doc_validity.check_interval_minutes} min)")
 
+        # Start semantic validity worker if enabled
+        semantic_validity_task = None
+        if self.config.doc_validity.semantic_validation_enabled:
+            from yonk_code_robomonkey.daemon.semantic_validity_worker import semantic_validity_worker
+            semantic_validity_task = asyncio.create_task(semantic_validity_worker(self.config))
+            logger.info(f"Semantic validity worker started (check interval: {self.config.doc_validity.semantic_check_interval_minutes} min)")
+
         logger.info("Daemon running - waiting for jobs")
 
         # Wait for shutdown signal
@@ -186,6 +193,8 @@ class CodeGraphDaemon:
             summary_task.cancel()
         if doc_validity_task:
             doc_validity_task.cancel()
+        if semantic_validity_task:
+            semantic_validity_task.cancel()
         health_monitor.stop()
         health_task.cancel()
 
@@ -197,6 +206,8 @@ class CodeGraphDaemon:
             tasks.append(summary_task)
         if doc_validity_task:
             tasks.append(doc_validity_task)
+        if semantic_validity_task:
+            tasks.append(semantic_validity_task)
 
         await asyncio.gather(*tasks, return_exceptions=True)
 

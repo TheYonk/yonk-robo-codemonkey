@@ -26,6 +26,11 @@ class ValidityScore:
     freshness_score: float
     llm_score: float | None = None
 
+    # Semantic validation scores
+    semantic_score: float | None = None  # 0.0-1.0, None if not validated
+    claims_checked: int = 0
+    claims_verified: int = 0
+
     # Metadata
     references_checked: int = 0
     references_valid: int = 0
@@ -35,11 +40,19 @@ class ValidityScore:
     validated_at: datetime | None = None
 
 
-# Default weights for score components
+# Default weights for score components (structural only)
 DEFAULT_WEIGHTS = {
-    'reference': 0.45,
+    'reference': 0.55,
     'embedding': 0.30,
-    'freshness': 0.25,
+    'freshness': 0.15,
+}
+
+# Weights when semantic validation is enabled
+WEIGHTS_WITH_SEMANTIC = {
+    'reference': 0.35,
+    'embedding': 0.25,
+    'freshness': 0.15,
+    'semantic': 0.25,
 }
 
 # Thresholds for status
@@ -111,6 +124,29 @@ def calculate_freshness_score(
         return 0.1  # Very stale
 
 
+def calculate_semantic_score(
+    claims_checked: int,
+    claims_verified: int
+) -> float:
+    """Calculate semantic validation score.
+
+    Based on what percentage of behavioral claims were verified as correct.
+
+    Args:
+        claims_checked: Total claims extracted and verified
+        claims_verified: Number of claims that matched code
+
+    Returns:
+        Score from 0.0 to 1.0
+    """
+    if claims_checked == 0:
+        # No claims found - conceptual doc with no verifiable claims
+        # Return 1.0 since there's nothing wrong, just nothing to verify
+        return 1.0
+
+    return claims_verified / claims_checked
+
+
 async def calculate_embedding_score(
     document_id: str,
     repo_id: str,
@@ -177,6 +213,7 @@ def calculate_combined_score(
     embedding_score: float,
     freshness_score: float,
     llm_score: float | None = None,
+    semantic_score: float | None = None,
     weights: dict[str, float] | None = None
 ) -> int:
     """Calculate final combined score.
@@ -186,18 +223,23 @@ def calculate_combined_score(
         embedding_score: Embedding similarity score (0-1)
         freshness_score: Freshness score (0-1)
         llm_score: Optional LLM validation score (0-1)
+        semantic_score: Optional semantic validation score (0-1)
         weights: Optional custom weights
 
     Returns:
         Combined score from 0 to 100
     """
+    # Choose weights based on whether semantic validation is available
     if weights is None:
-        weights = DEFAULT_WEIGHTS.copy()
+        if semantic_score is not None:
+            weights = WEIGHTS_WITH_SEMANTIC.copy()
+        else:
+            weights = DEFAULT_WEIGHTS.copy()
 
     # Adjust weights if LLM score is provided
     if llm_score is not None:
         # Reduce other weights to make room for LLM weight
-        llm_weight = 0.30
+        llm_weight = 0.20
         scale_factor = (1.0 - llm_weight) / sum(weights.values())
         weights = {k: v * scale_factor for k, v in weights.items()}
         weights['llm'] = llm_weight
@@ -211,6 +253,9 @@ def calculate_combined_score(
 
     if llm_score is not None:
         score += weights.get('llm', 0) * llm_score
+
+    if semantic_score is not None:
+        score += weights.get('semantic', 0) * semantic_score
 
     # Convert to 0-100 scale
     final_score = int(round(score * 100))
@@ -240,7 +285,10 @@ async def calculate_validity_score(
     conn: asyncpg.Connection,
     validation_result: ValidationResult,
     doc_updated: datetime | None = None,
-    weights: dict[str, float] | None = None
+    weights: dict[str, float] | None = None,
+    semantic_score: float | None = None,
+    claims_checked: int = 0,
+    claims_verified: int = 0
 ) -> ValidityScore:
     """Calculate complete validity score for a document.
 
@@ -251,6 +299,9 @@ async def calculate_validity_score(
         validation_result: Result from validate_document()
         doc_updated: Document update time (if known)
         weights: Optional custom score weights
+        semantic_score: Pre-calculated semantic score (if semantic validation was run)
+        claims_checked: Number of behavioral claims checked
+        claims_verified: Number of claims that matched code
 
     Returns:
         Complete ValidityScore
@@ -276,9 +327,14 @@ async def calculate_validity_score(
 
     fresh_score = calculate_freshness_score(doc_updated, code_updated)
 
-    # Calculate combined score
+    # Calculate combined score (with semantic score if available)
     final_score = calculate_combined_score(
-        ref_score, emb_score, fresh_score, None, weights
+        reference_score=ref_score,
+        embedding_score=emb_score,
+        freshness_score=fresh_score,
+        llm_score=None,
+        semantic_score=semantic_score,
+        weights=weights
     )
 
     return ValidityScore(
@@ -289,6 +345,9 @@ async def calculate_validity_score(
         embedding_score=emb_score,
         freshness_score=fresh_score,
         llm_score=None,
+        semantic_score=semantic_score,
+        claims_checked=claims_checked,
+        claims_verified=claims_verified,
         references_checked=validation_result.references_checked,
         references_valid=validation_result.references_valid,
         related_code_chunks=chunk_count,

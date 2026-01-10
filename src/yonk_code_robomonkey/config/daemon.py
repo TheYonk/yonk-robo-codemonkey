@@ -36,6 +36,57 @@ class VLLMConfig(BaseModel):
     api_key: str = Field("local-key", description="API key for vLLM")
 
 
+class LLMModelConfig(BaseModel):
+    """Configuration for a single LLM model."""
+    provider: Literal["ollama", "vllm"] = Field("ollama", description="LLM provider")
+    model: str = Field(..., description="Model name")
+    base_url: str = Field("http://localhost:11434", description="API endpoint")
+    api_key: str | None = Field(None, description="API key (for vLLM)")
+    temperature: float = Field(0.3, ge=0, le=2, description="Temperature for generation")
+    max_tokens: int = Field(2000, ge=100, le=32000, description="Max tokens to generate")
+
+
+class LLMConfig(BaseModel):
+    """Dual LLM configuration for deep vs small tasks.
+
+    - deep: Heavy/complex tasks (code analysis, feature context, comprehensive reviews)
+    - small: Light/simple tasks (summaries, classifications, quick answers)
+    """
+    deep: LLMModelConfig = Field(
+        default_factory=lambda: LLMModelConfig(
+            provider="ollama",
+            model="qwen3-coder:30b",
+            base_url="http://localhost:11434",
+            temperature=0.3,
+            max_tokens=4000
+        ),
+        description="Model for deep/complex tasks"
+    )
+    small: LLMModelConfig = Field(
+        default_factory=lambda: LLMModelConfig(
+            provider="ollama",
+            model="phi3.5:3.8b",
+            base_url="http://localhost:11434",
+            temperature=0.3,
+            max_tokens=1000
+        ),
+        description="Model for small/simple tasks"
+    )
+
+    def get_model(self, task_type: str = "small") -> LLMModelConfig:
+        """Get the appropriate model config for a task type.
+
+        Args:
+            task_type: 'deep' for complex tasks, 'small' for simple tasks
+
+        Returns:
+            LLMModelConfig for the requested task type
+        """
+        if task_type == "deep":
+            return self.deep
+        return self.small
+
+
 class EmbeddingsConfig(BaseModel):
     """Embeddings configuration."""
     enabled: bool = Field(True, description="Enable embeddings generation")
@@ -176,6 +227,15 @@ class DocValidityConfig(BaseModel):
     batch_size: int = Field(20, ge=1, le=100, description="Documents per validation batch")
     max_references_per_doc: int = Field(100, ge=10, le=500, description="Max references to extract per doc")
 
+    # Semantic validation (behavioral claim verification)
+    semantic_validation_enabled: bool = Field(False, description="Enable semantic validation (LLM-based)")
+    semantic_check_interval_minutes: int = Field(360, ge=60, le=2880, description="Semantic check interval (60-2880 minutes)")
+    max_claims_per_doc: int = Field(30, ge=5, le=100, description="Max behavioral claims to extract per doc")
+    claim_min_confidence: float = Field(0.7, ge=0.5, le=1.0, description="Min confidence for claim extraction")
+    semantic_batch_size: int = Field(5, ge=1, le=20, description="Documents per semantic validation batch")
+    semantic_min_structural_score: int = Field(60, ge=0, le=100, description="Min structural score to run semantic validation")
+    semantic_weight: float = Field(0.25, ge=0, le=1, description="Weight for semantic score when enabled")
+
     @field_validator("check_interval_minutes")
     @classmethod
     def validate_check_interval(cls, v: int) -> int:
@@ -189,6 +249,7 @@ class DaemonConfig(BaseModel):
     """Complete daemon configuration."""
     daemon_id: str = Field(default_factory=lambda: f"robomonkey-{os.getpid()}", description="Unique daemon ID")
     database: DatabaseConfig
+    llm: LLMConfig = Field(default_factory=LLMConfig, description="Dual LLM configuration (deep + small)")
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
     summaries: SummariesConfig = Field(default_factory=SummariesConfig)
     doc_validity: DocValidityConfig = Field(default_factory=DocValidityConfig)

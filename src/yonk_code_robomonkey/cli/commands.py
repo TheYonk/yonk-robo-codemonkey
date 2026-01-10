@@ -1017,12 +1017,10 @@ async def summaries_generate_cmd(
                 if files_to_summarize:
                     print(f"Generating summaries for {len(files_to_summarize)} files...")
                     file_ids = [f['file_id'] for f in files_to_summarize]
+                    # Uses unified LLM client with "small" model (phi3.5)
                     file_result = await generate_file_summaries_batch(
                         file_ids=file_ids,
                         database_url=database_url,
-                        llm_provider="ollama",
-                        llm_model=settings.llm_model,
-                        llm_base_url=settings.llm_base_url,
                         batch_size=10,
                         schema_name=schema_name
                     )
@@ -1041,12 +1039,10 @@ async def summaries_generate_cmd(
                 if symbols_to_summarize:
                     print(f"Generating summaries for {len(symbols_to_summarize)} symbols...")
                     symbol_ids = [s['symbol_id'] for s in symbols_to_summarize]
+                    # Uses unified LLM client with "small" model (phi3.5)
                     symbol_result = await generate_symbol_summaries_batch(
                         symbol_ids=symbol_ids,
                         database_url=database_url,
-                        llm_provider="ollama",
-                        llm_model=settings.llm_model,
-                        llm_base_url=settings.llm_base_url,
                         batch_size=10,
                         schema_name=schema_name
                     )
@@ -1064,13 +1060,11 @@ async def summaries_generate_cmd(
 
                 if modules_to_summarize:
                     print(f"Generating summaries for {len(modules_to_summarize)} modules...")
+                    # Uses unified LLM client with "small" model (phi3.5)
                     module_result = await generate_module_summaries_batch(
                         modules=modules_to_summarize,
                         repo_id=repo_id,
                         database_url=database_url,
-                        llm_provider="ollama",
-                        llm_model=settings.llm_model,
-                        llm_base_url=settings.llm_base_url,
                         batch_size=5,
                         schema_name=schema_name
                     )

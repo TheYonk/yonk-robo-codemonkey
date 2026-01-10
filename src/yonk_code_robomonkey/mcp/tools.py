@@ -619,13 +619,11 @@ async def file_summary(
             # Generate if requested or if needs regeneration
             if generate or needs_regeneration:
                 # Note: _generate_file_summary creates its own connection, schema_name should be passed
+                # Uses unified LLM client with "small" model
                 result = await _generate_file_summary(
                     file_id=file_id,
                     database_url=settings.database_url,
-                    schema_name=schema_name,
-                    llm_provider=settings.embeddings_provider,
-                    llm_model=settings.llm_model,
-                    llm_base_url=settings.llm_base_url
+                    schema_name=schema_name
                 )
 
                 if result.success:
@@ -721,12 +719,10 @@ async def symbol_summary(
 
         # Generate if requested
         if generate:
+            # Uses unified LLM client with "small" model
             result = await _generate_symbol_summary(
                 symbol_id=symbol_id,
-                database_url=settings.database_url,
-                llm_provider=settings.embeddings_provider,
-                llm_model=settings.llm_model,
-                llm_base_url=settings.llm_base_url
+                database_url=settings.database_url
             )
 
             if result.success:
@@ -817,10 +813,7 @@ async def module_summary(
             result = await _generate_module_summary(
                 repo_id=repo_id,
                 module_path=module_path,
-                database_url=settings.database_url,
-                llm_provider=settings.embeddings_provider,
-                llm_model=settings.llm_model,
-                llm_base_url=settings.llm_base_url
+                database_url=settings.database_url
             )
 
             if result.success:
@@ -2777,6 +2770,8 @@ async def universal_search(
         llm_summary = None
         if deep_mode and top_results:
             try:
+                from ..llm import call_llm
+
                 # Prepare context for LLM
                 context_text = f"Query: {query}\n\nTop {len(top_results)} relevant code snippets:\n\n"
                 for i, r in enumerate(top_results[:10], 1):  # Limit to 10 for LLM
@@ -2784,15 +2779,7 @@ async def universal_search(
                     context_text += f"File: {r.get('file_path', 'unknown')}\n"
                     context_text += f"Content: {r.get('content', '')[:500]}\n"
 
-                # Call LLM to summarize (using Ollama or vLLM)
-                import aiohttp
-                import json
-
-                if settings.embeddings_provider == "ollama":
-                    llm_url = f"{settings.embeddings_base_url}/api/generate"
-                    llm_model = "llama3.2:latest"  # Use a chat model
-
-                    prompt = f"""{context_text}
+                prompt = f"""{context_text}
 
 Based on these search results, provide a concise summary answering the query: "{query}"
 
@@ -2801,19 +2788,11 @@ Include:
 2. Key files involved
 3. Main implementation patterns found"""
 
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            llm_url,
-                            json={
-                                "model": llm_model,
-                                "prompt": prompt,
-                                "stream": False,
-                                "options": {"temperature": 0.3}
-                            }
-                        ) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
-                                llm_summary = data.get("response", "").strip()
+                # Use unified LLM client with "deep" model for complex analysis
+                llm_summary = await call_llm(prompt, task_type="deep", timeout=60.0)
+                if llm_summary:
+                    llm_summary = llm_summary.strip()
+
             except Exception as e:
                 # LLM summarization is optional - don't fail if it doesn't work
                 llm_summary = f"Summary unavailable: {str(e)}"
@@ -2995,8 +2974,6 @@ async def suggest_tags_mcp(
             sample_size=sample_size,
             threshold=threshold,
             max_results_per_tag=max_results_per_tag,
-            llm_model=getattr(settings, 'llm_model', None),
-            llm_base_url=settings.embeddings_base_url,
             embeddings_provider=settings.embeddings_provider,
             embeddings_model=settings.embeddings_model,
             embeddings_base_url=settings.embeddings_base_url
@@ -3016,8 +2993,6 @@ async def suggest_tags_mcp(
             schema_name=schema_name,
             max_tags=max_tags,
             sample_size=sample_size,
-            llm_model=getattr(settings, 'llm_model', None),
-            llm_base_url=settings.embeddings_base_url
         )
 
         return {
@@ -3085,7 +3060,7 @@ async def categorize_file(
     finally:
         await conn.close()
 
-    # Categorize the file
+    # Categorize the file using unified LLM client
     result = await categorize_file_impl(
         file_path=file_path,
         repo_name=repo,
@@ -3093,8 +3068,6 @@ async def categorize_file(
         schema_name=schema_name,
         tag_name=tag,
         auto_suggest=auto_suggest,
-        llm_model=getattr(settings, 'llm_model', None),
-        llm_base_url=settings.embeddings_base_url
     )
 
     why_parts = []
@@ -3615,6 +3588,815 @@ async def doc_validity_stats(
                 "avg_component_scores": stats["avg_component_scores"],
                 "common_issues": stats["common_issues"],
                 "why": f"Repository '{repo}' has {stats['total_docs']} docs total. {stats['validated_docs']} validated with avg score {stats['avg_score']}. Distribution: {stats['score_distribution']['valid (70-100)']} valid, {stats['score_distribution']['warning (50-69)']} warning, {stats['score_distribution']['stale (0-49)']} stale."
+            }
+
+    finally:
+        await conn.close()
+
+
+# =============================================================================
+# Semantic Document Validation Tools
+# =============================================================================
+
+@tool("list_doc_drift")
+async def list_doc_drift(
+    repo: str | None = None,
+    status: str = "open",
+    severity: str | None = None,
+    limit: int = 20
+) -> dict[str, Any]:
+    """List documentation drift issues (behavioral mismatches between docs and code).
+
+    Args:
+        repo: Repository name or UUID (uses DEFAULT_REPO from .env if not provided)
+        status: Filter by status: 'open', 'all', 'accepted', 'rejected', 'deferred', 'fixed'
+        severity: Optional filter by severity: 'low', 'medium', 'high', 'critical'
+        limit: Maximum issues to return (default 20)
+
+    Returns:
+        Dictionary with drift issues and statistics
+    """
+    settings = Settings()
+    repo = get_repo_or_default(repo)
+
+    if not repo:
+        return {"error": "No repository specified and no DEFAULT_REPO configured"}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
+
+        async with schema_context(conn, schema_name):
+            from yonk_code_robomonkey.doc_validity import queries
+
+            # Get drift issues
+            issues = await queries.get_drift_issues(
+                conn=conn,
+                repo_id=repo_id,
+                status=status if status != "all" else None,
+                severity=severity,
+                limit=limit
+            )
+
+            # Get stats
+            stats = await queries.get_drift_stats(conn, repo_id)
+
+            return {
+                "repo": repo,
+                "drift_issues": [
+                    {
+                        "issue_id": str(i["issue_id"]),
+                        "document_path": i["document_path"],
+                        "document_title": i["document_title"],
+                        "claim_text": i["claim_text"],
+                        "claim_line": i["claim_line"],
+                        "topic": i["topic"],
+                        "expected_value": i["expected_value"],
+                        "actual_value": i["actual_value"],
+                        "severity": i["severity"],
+                        "status": i["status"],
+                        "verdict": i["verdict"],
+                        "confidence": float(i["confidence"]),
+                        "suggested_fix": i["suggested_fix"],
+                        "can_auto_fix": i["can_auto_fix"],
+                        "created_at": i["issue_created_at"].isoformat() if i["issue_created_at"] else None
+                    }
+                    for i in issues
+                ],
+                "total_count": len(issues),
+                "stats": stats,
+                "why": f"Found {len(issues)} drift issues for '{repo}'. Stats: {stats['by_status']['open']} open, {stats['by_severity']['high']} high severity, {stats['by_severity']['critical']} critical."
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("get_drift_details")
+async def get_drift_details(
+    issue_id: str
+) -> dict[str, Any]:
+    """Get full details of a drift issue including code evidence.
+
+    Args:
+        issue_id: Drift issue UUID
+
+    Returns:
+        Complete drift issue details with claim, verification, and evidence
+    """
+    settings = Settings()
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        # Try to find the issue across all schemas
+        schemas = await conn.fetch(
+            "SELECT schema_name FROM repo_registry WHERE status = 'ACTIVE'"
+        )
+
+        for schema_row in schemas:
+            schema_name = schema_row["schema_name"]
+            async with schema_context(conn, schema_name):
+                from yonk_code_robomonkey.doc_validity import queries
+
+                issue = await queries.get_drift_issue_by_id(conn, issue_id)
+                if issue:
+                    return {
+                        "issue_id": str(issue["issue_id"]),
+                        "severity": issue["severity"],
+                        "category": issue["category"],
+                        "status": issue["status"],
+                        "can_auto_fix": issue["can_auto_fix"],
+                        "auto_fix_type": issue["auto_fix_type"],
+                        "auto_fix_applied": issue["auto_fix_applied"],
+                        "reviewed_by": issue["reviewed_by"],
+                        "reviewed_at": issue["reviewed_at"].isoformat() if issue["reviewed_at"] else None,
+                        "review_notes": issue["review_notes"],
+                        "created_at": issue["issue_created_at"].isoformat() if issue["issue_created_at"] else None,
+                        "verification": {
+                            "verdict": issue["verdict"],
+                            "confidence": float(issue["confidence"]),
+                            "actual_value": issue["actual_value"],
+                            "actual_behavior": issue["actual_behavior"],
+                            "reasoning": issue["reasoning"],
+                            "suggested_fix": issue["suggested_fix"],
+                            "fix_type": issue["fix_type"],
+                            "suggested_diff": issue["suggested_diff"],
+                            "evidence_chunks": issue["evidence_chunks"],
+                            "key_code_snippet": issue["key_code_snippet"],
+                            "verified_at": issue["verified_at"].isoformat() if issue["verified_at"] else None
+                        },
+                        "claim": {
+                            "claim_text": issue["claim_text"],
+                            "claim_line": issue["claim_line"],
+                            "claim_context": issue["claim_context"],
+                            "topic": issue["topic"],
+                            "subject": issue["subject"],
+                            "condition": issue["condition"],
+                            "expected_value": issue["expected_value"],
+                            "value_type": issue["value_type"],
+                            "extraction_confidence": float(issue["extraction_confidence"])
+                        },
+                        "document": {
+                            "document_id": str(issue["document_id"]),
+                            "path": issue["document_path"],
+                            "title": issue["document_title"]
+                        },
+                        "why": f"Drift issue for claim '{issue['claim_text'][:50]}...' - verdict: {issue['verdict']}, severity: {issue['severity']}"
+                    }
+
+        return {"error": f"Drift issue {issue_id} not found"}
+
+    finally:
+        await conn.close()
+
+
+@tool("review_drift_issue")
+async def review_drift_issue(
+    issue_id: str,
+    action: str,
+    notes: str | None = None,
+    reviewed_by: str | None = None
+) -> dict[str, Any]:
+    """Review a doc drift issue and update its status.
+
+    Args:
+        issue_id: Drift issue UUID
+        action: Action to take: 'accept', 'reject', 'defer'
+        notes: Optional review notes
+        reviewed_by: Optional reviewer identifier
+
+    Returns:
+        Updated issue status
+    """
+    settings = Settings()
+
+    # Validate action
+    valid_actions = {"accept": "accepted", "reject": "rejected", "defer": "deferred"}
+    if action not in valid_actions:
+        return {"error": f"Invalid action '{action}'. Must be one of: accept, reject, defer"}
+
+    new_status = valid_actions[action]
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        # Find the issue across all schemas
+        schemas = await conn.fetch(
+            "SELECT schema_name FROM repo_registry WHERE status = 'ACTIVE'"
+        )
+
+        for schema_row in schemas:
+            schema_name = schema_row["schema_name"]
+            async with schema_context(conn, schema_name):
+                from yonk_code_robomonkey.doc_validity import queries
+
+                issue = await queries.get_drift_issue_by_id(conn, issue_id)
+                if issue:
+                    await queries.update_drift_issue_status(
+                        conn=conn,
+                        issue_id=issue_id,
+                        status=new_status,
+                        reviewed_by=reviewed_by,
+                        review_notes=notes
+                    )
+
+                    return {
+                        "issue_id": issue_id,
+                        "old_status": issue["status"],
+                        "new_status": new_status,
+                        "action": action,
+                        "reviewed_by": reviewed_by,
+                        "notes": notes,
+                        "why": f"Drift issue status updated from '{issue['status']}' to '{new_status}'"
+                    }
+
+        return {"error": f"Drift issue {issue_id} not found"}
+
+    finally:
+        await conn.close()
+
+
+@tool("verify_doc_claims")
+async def verify_doc_claims(
+    document_path: str,
+    repo: str | None = None,
+    max_claims: int = 20
+) -> dict[str, Any]:
+    """Extract and verify behavioral claims from a document (expensive LLM operation).
+
+    This tool extracts behavioral claims from documentation (e.g., "25% XP boost for good promos")
+    and verifies them against the actual codebase to detect DOC_DRIFT issues.
+
+    Args:
+        document_path: Path to the document within the repo
+        repo: Repository name or UUID (uses DEFAULT_REPO from .env if not provided)
+        max_claims: Maximum claims to extract and verify (default 20)
+
+    Returns:
+        Extraction and verification results with drift issues found
+    """
+    settings = Settings()
+    repo = get_repo_or_default(repo)
+
+    if not repo:
+        return {"error": "No repository specified and no DEFAULT_REPO configured"}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo)
+        if "error" in result:
+            return result
+
+        repo_id = result["repo_id"]
+        schema_name = result["schema"]
+
+        async with schema_context(conn, schema_name):
+            from yonk_code_robomonkey.doc_validity import queries
+            from yonk_code_robomonkey.doc_validity.claim_extractor import extract_and_store_claims
+            from yonk_code_robomonkey.doc_validity.claim_verifier import verify_and_store_claim
+            from yonk_code_robomonkey.doc_validity.claim_extractor import BehavioralClaim
+
+            # Get document
+            doc = await queries.get_document_by_path(conn, repo_id, document_path)
+            if not doc:
+                return {"error": f"Document not found: {document_path}"}
+
+            document_id = str(doc["id"])
+            content = doc["content"]
+
+            # Extract claims
+            extraction_result = await extract_and_store_claims(
+                conn=conn,
+                document_id=document_id,
+                content=content,
+                repo_id=repo_id,
+                max_claims=max_claims
+            )
+
+            if not extraction_result.success:
+                return {
+                    "error": f"Claim extraction failed: {extraction_result.error}",
+                    "document_path": document_path
+                }
+
+            # Verify each claim
+            verification_results = []
+            drift_count = 0
+            match_count = 0
+
+            for claim in extraction_result.claims:
+                # Get claim ID from database (just inserted)
+                claims = await queries.get_claims_for_document(conn, document_id)
+                claim_record = next(
+                    (c for c in claims if c.claim_text == claim.claim_text),
+                    None
+                )
+
+                if not claim_record:
+                    continue
+
+                # Convert to BehavioralClaim for verification
+                bc = BehavioralClaim(
+                    claim_text=claim.claim_text,
+                    topic=claim.topic,
+                    claim_line=claim.claim_line,
+                    subject=claim.subject,
+                    condition=claim.condition,
+                    expected_value=claim.expected_value,
+                    value_type=claim.value_type,
+                    confidence=claim.confidence
+                )
+
+                # Verify
+                result = await verify_and_store_claim(
+                    conn=conn,
+                    claim=bc,
+                    claim_id=claim_record.id,
+                    repo_id=repo_id,
+                    database_url=settings.database_url,
+                    embeddings_provider=settings.embeddings_provider,
+                    embeddings_model=settings.embeddings_model,
+                    embeddings_base_url=settings.embeddings_base_url,
+                    embeddings_api_key=settings.vllm_api_key,
+                    schema_name=schema_name
+                )
+
+                verification_results.append({
+                    "claim_text": claim.claim_text,
+                    "topic": claim.topic,
+                    "expected_value": claim.expected_value,
+                    "verdict": result.verdict,
+                    "confidence": result.confidence,
+                    "actual_value": result.actual_value,
+                    "reasoning": result.reasoning,
+                    "suggested_fix": result.suggested_fix
+                })
+
+                if result.verdict == "match":
+                    match_count += 1
+                elif result.verdict == "mismatch":
+                    drift_count += 1
+
+            return {
+                "document_path": document_path,
+                "claims_extracted": len(extraction_result.claims),
+                "claims_verified": len(verification_results),
+                "matches": match_count,
+                "mismatches": drift_count,
+                "verification_results": verification_results,
+                "why": f"Extracted {len(extraction_result.claims)} claims from '{document_path}'. {match_count} verified as matching, {drift_count} doc drift issues found."
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("apply_drift_fix")
+async def apply_drift_fix(
+    issue_id: str,
+    preview_only: bool = True
+) -> dict[str, Any]:
+    """Apply suggested fix to documentation file.
+
+    Args:
+        issue_id: Drift issue UUID
+        preview_only: If True (default), show diff without applying. If False, write to file.
+
+    Returns:
+        Preview or confirmation of the fix applied
+    """
+    settings = Settings()
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        # Find the issue across all schemas
+        schemas = await conn.fetch(
+            "SELECT schema_name, root_path FROM repo_registry WHERE status = 'ACTIVE'"
+        )
+
+        for schema_row in schemas:
+            schema_name = schema_row["schema_name"]
+            root_path = schema_row["root_path"]
+
+            async with schema_context(conn, schema_name):
+                from yonk_code_robomonkey.doc_validity import queries
+
+                issue = await queries.get_drift_issue_by_id(conn, issue_id)
+                if issue:
+                    if not issue["can_auto_fix"]:
+                        return {
+                            "error": "This issue cannot be auto-fixed",
+                            "issue_id": issue_id,
+                            "reason": "No suggested diff available or fix type is not 'update_doc'"
+                        }
+
+                    suggested_diff = issue["suggested_diff"]
+                    if not suggested_diff:
+                        return {
+                            "error": "No suggested diff available for this issue",
+                            "issue_id": issue_id
+                        }
+
+                    document_path = issue["document_path"]
+                    import os
+                    full_path = os.path.join(root_path, document_path)
+
+                    if preview_only:
+                        return {
+                            "issue_id": issue_id,
+                            "document_path": document_path,
+                            "full_path": full_path,
+                            "preview_only": True,
+                            "diff": suggested_diff,
+                            "claim_text": issue["claim_text"],
+                            "expected_value": issue["expected_value"],
+                            "actual_value": issue["actual_value"],
+                            "applied": False,
+                            "why": f"Preview of fix for drift issue. Set preview_only=False to apply."
+                        }
+
+                    # Apply the fix
+                    try:
+                        with open(full_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+
+                        # Parse the diff to extract old and new text
+                        old_line = None
+                        new_line = None
+                        for line in suggested_diff.split('\n'):
+                            if line.startswith('- ') and not line.startswith('---'):
+                                old_line = line[2:]
+                            elif line.startswith('+ ') and not line.startswith('+++'):
+                                new_line = line[2:]
+
+                        if old_line and new_line and old_line in content:
+                            new_content = content.replace(old_line, new_line, 1)
+
+                            with open(full_path, 'w', encoding='utf-8') as f:
+                                f.write(new_content)
+
+                            # Mark issue as fixed
+                            await queries.mark_drift_issue_fixed(conn, issue_id)
+
+                            return {
+                                "issue_id": issue_id,
+                                "document_path": document_path,
+                                "full_path": full_path,
+                                "preview_only": False,
+                                "diff": suggested_diff,
+                                "applied": True,
+                                "why": f"Fix applied successfully to {document_path}"
+                            }
+                        else:
+                            return {
+                                "error": "Could not apply fix - old text not found in document",
+                                "issue_id": issue_id,
+                                "old_line": old_line,
+                                "why": "The document may have been modified since the issue was created"
+                            }
+
+                    except Exception as e:
+                        return {
+                            "error": f"Failed to apply fix: {str(e)}",
+                            "issue_id": issue_id,
+                            "document_path": document_path
+                        }
+
+        return {"error": f"Drift issue {issue_id} not found"}
+
+    finally:
+        await conn.close()
+
+
+# =============================================================================
+# SQL Schema Intelligence Tools
+# =============================================================================
+
+@tool("list_sql_tables")
+async def list_sql_tables(
+    repo: str | None = None,
+    schema_filter: str | None = None,
+    search_query: str | None = None,
+    limit: int = 50
+) -> dict[str, Any]:
+    """List all SQL tables defined in repository schema files.
+
+    Args:
+        repo: Repository name or UUID
+        schema_filter: Filter by database schema name
+        search_query: FTS search query for table names
+        limit: Maximum results (default 50)
+
+    Returns:
+        List of tables with metadata
+    """
+    from yonk_code_robomonkey.sql_schema import queries as sql_queries
+
+    settings = Settings()
+    repo_name = get_repo_or_default(repo)
+    if not repo_name:
+        return {"error": "No repository specified. Provide 'repo' parameter."}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo_name)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema = result["schema"]
+
+        async with schema_context(conn, schema):
+            tables = await sql_queries.list_tables(
+                conn, repo_id,
+                schema_filter=schema_filter,
+                search_query=search_query,
+                limit=limit
+            )
+
+            stats = await sql_queries.get_sql_schema_stats(conn, repo_id)
+
+            return {
+                "repo": repo_name,
+                "total_tables": stats.get("table_count", 0),
+                "total_routines": sum(stats.get("routine_counts", {}).values()),
+                "tables": [
+                    {
+                        "id": str(t["id"]),
+                        "table_name": t["table_name"],
+                        "schema_name": t.get("schema_name"),
+                        "qualified_name": t["qualified_name"],
+                        "source_file": t.get("source_file_path"),
+                        "column_count": len(t.get("columns", [])),
+                        "description": t.get("description"),
+                        "has_description": t.get("description") is not None
+                    }
+                    for t in tables
+                ],
+                "why": f"Found {len(tables)} tables in SQL schema files"
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("sql_table_context")
+async def sql_table_context(
+    table_name: str,
+    repo: str | None = None,
+    include_usage: bool = True,
+    generate_summary: bool = False
+) -> dict[str, Any]:
+    """Get complete context for a database table including columns, constraints, and usage.
+
+    Args:
+        table_name: Table name to analyze (can be qualified: schema.table)
+        repo: Repository name or UUID
+        include_usage: Include column usage mapping (default True)
+        generate_summary: Generate LLM summary if missing (default False)
+
+    Returns:
+        Complete table context with metadata, columns, constraints, and usage
+    """
+    from yonk_code_robomonkey.sql_schema import queries as sql_queries
+    from yonk_code_robomonkey.sql_schema.summarizer import generate_table_summary
+    from yonk_code_robomonkey.sql_schema.column_mapper import map_column_usage_for_table
+
+    settings = Settings()
+    repo_name = get_repo_or_default(repo)
+    if not repo_name:
+        return {"error": "No repository specified. Provide 'repo' parameter."}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo_name)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema = result["schema"]
+
+        async with schema_context(conn, schema):
+            # Find the table
+            table = await sql_queries.get_table_metadata(
+                conn, repo_id,
+                table_name=table_name,
+                qualified_name=table_name
+            )
+
+            if not table:
+                # Try FTS search
+                tables = await sql_queries.list_tables(
+                    conn, repo_id, search_query=table_name, limit=5
+                )
+                if tables:
+                    return {
+                        "error": f"Table '{table_name}' not found",
+                        "suggestions": [t["qualified_name"] for t in tables],
+                        "why": "Table not found. Did you mean one of these?"
+                    }
+                return {"error": f"Table '{table_name}' not found in repository"}
+
+            table_id = str(table["id"])
+
+            # Generate summary if requested and missing
+            if generate_summary and not table.get("description"):
+                await generate_table_summary(
+                    conn=conn,
+                    table_metadata_id=table_id,
+                    repo_id=repo_id
+                )
+                # Refresh table data
+                table = await sql_queries.get_table_metadata(conn, repo_id, table_id=table_id)
+
+            # Get column usage if requested
+            usage_data = None
+            if include_usage:
+                usage_stats = await sql_queries.get_column_usage_stats(conn, table_id)
+                if usage_stats.get("columns"):
+                    usage_data = usage_stats
+                else:
+                    # Map usage on demand
+                    await map_column_usage_for_table(conn, table_id, repo_id)
+                    usage_data = await sql_queries.get_column_usage_stats(conn, table_id)
+
+            return {
+                "table_name": table["table_name"],
+                "qualified_name": table["qualified_name"],
+                "schema_name": table.get("schema_name"),
+                "source_file": table.get("source_file_path"),
+                "source_lines": f"{table.get('source_start_line')}-{table.get('source_end_line')}",
+                "description": table.get("description"),
+                "columns": table.get("columns", []),
+                "column_descriptions": table.get("column_descriptions"),
+                "constraints": table.get("constraints", []),
+                "indexes": table.get("indexes", []),
+                "usage": usage_data,
+                "create_statement": table.get("create_statement"),
+                "why": f"Complete context for table {table['qualified_name']}"
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("sql_column_usage")
+async def sql_column_usage(
+    table_name: str,
+    column_name: str,
+    repo: str | None = None,
+    limit: int = 50
+) -> dict[str, Any]:
+    """Find all code that references a specific database column.
+
+    Useful for impact analysis before schema changes.
+
+    Args:
+        table_name: Table name
+        column_name: Column name
+        repo: Repository name or UUID
+        limit: Maximum results (default 50)
+
+    Returns:
+        List of code locations that reference the column
+    """
+    from yonk_code_robomonkey.sql_schema import queries as sql_queries
+    from yonk_code_robomonkey.sql_schema.column_mapper import map_column_usage_for_table
+
+    settings = Settings()
+    repo_name = get_repo_or_default(repo)
+    if not repo_name:
+        return {"error": "No repository specified. Provide 'repo' parameter."}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo_name)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema = result["schema"]
+
+        async with schema_context(conn, schema):
+            # Find the table
+            table = await sql_queries.get_table_metadata(
+                conn, repo_id,
+                table_name=table_name,
+                qualified_name=table_name
+            )
+
+            if not table:
+                return {"error": f"Table '{table_name}' not found"}
+
+            table_id = str(table["id"])
+
+            # Check if we have usage data
+            usages = await sql_queries.get_column_usage(
+                conn, table_id, column_name=column_name, limit=limit
+            )
+
+            if not usages:
+                # Try mapping usage
+                await map_column_usage_for_table(conn, table_id, repo_id)
+                usages = await sql_queries.get_column_usage(
+                    conn, table_id, column_name=column_name, limit=limit
+                )
+
+            return {
+                "table_name": table_name,
+                "column_name": column_name,
+                "total_usages": len(usages),
+                "usages": [
+                    {
+                        "file_path": u["file_path"],
+                        "line_number": u.get("line_number"),
+                        "usage_type": u.get("usage_type"),
+                        "context": u.get("usage_context"),
+                        "confidence": u.get("confidence", 0)
+                    }
+                    for u in usages
+                ],
+                "why": f"Found {len(usages)} references to {table_name}.{column_name} in codebase"
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("sql_schema_search")
+async def sql_schema_search(
+    query: str,
+    repo: str | None = None,
+    include_routines: bool = True,
+    limit: int = 20
+) -> dict[str, Any]:
+    """Search for database tables, columns, or routines by name or description.
+
+    Args:
+        query: Search query (table name, column name, or description)
+        repo: Repository name or UUID
+        include_routines: Include functions/procedures/triggers (default True)
+        limit: Maximum results (default 20)
+
+    Returns:
+        Matching tables and routines with metadata
+    """
+    from yonk_code_robomonkey.sql_schema import queries as sql_queries
+
+    settings = Settings()
+    repo_name = get_repo_or_default(repo)
+    if not repo_name:
+        return {"error": "No repository specified. Provide 'repo' parameter."}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo_name)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema = result["schema"]
+
+        async with schema_context(conn, schema):
+            # Search tables
+            tables = await sql_queries.list_tables(
+                conn, repo_id, search_query=query, limit=limit
+            )
+
+            # Search routines
+            routines = []
+            if include_routines:
+                routines = await sql_queries.list_routines(
+                    conn, repo_id, search_query=query, limit=limit
+                )
+
+            return {
+                "query": query,
+                "tables": [
+                    {
+                        "id": str(t["id"]),
+                        "table_name": t["table_name"],
+                        "qualified_name": t["qualified_name"],
+                        "description": t.get("description"),
+                        "column_count": len(t.get("columns", [])),
+                        "source_file": t.get("source_file_path")
+                    }
+                    for t in tables
+                ],
+                "routines": [
+                    {
+                        "id": str(r["id"]),
+                        "routine_name": r["routine_name"],
+                        "qualified_name": r["qualified_name"],
+                        "routine_type": r["routine_type"],
+                        "description": r.get("description"),
+                        "language": r.get("language"),
+                        "source_file": r.get("source_file_path")
+                    }
+                    for r in routines
+                ],
+                "total_results": len(tables) + len(routines),
+                "why": f"Found {len(tables)} tables and {len(routines)} routines matching '{query}'"
             }
 
     finally:
