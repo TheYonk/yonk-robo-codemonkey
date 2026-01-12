@@ -133,7 +133,7 @@ async def call_llm(
                 return response.json().get("response", "")
 
             elif provider == "vllm":
-                api_key = config.get("api_key", "local-key")
+                api_key = config.get("api_key") or os.getenv("VLLM_API_KEY", "local-key")
                 response = await client.post(
                     f"{base_url.rstrip('/')}/v1/completions",
                     headers={"Authorization": f"Bearer {api_key}"},
@@ -148,6 +148,28 @@ async def call_llm(
                 choices = response.json().get("choices", [])
                 if choices:
                     return choices[0].get("text", "")
+
+            elif provider == "openai":
+                # OpenAI-compatible chat completions API
+                # Also works with Azure OpenAI, Together.ai, Groq, etc.
+                api_key = config.get("api_key") or os.getenv("OPENAI_API_KEY", "")
+                if not api_key:
+                    logger.error("OpenAI API key not configured (set api_key in config or OPENAI_API_KEY env var)")
+                    return None
+                response = await client.post(
+                    f"{base_url.rstrip('/')}/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": max_tokens,
+                        "temperature": temperature
+                    }
+                )
+                response.raise_for_status()
+                choices = response.json().get("choices", [])
+                if choices:
+                    return choices[0].get("message", {}).get("content", "")
 
     except Exception as e:
         logger.warning(f"LLM call failed ({provider}/{model}): {e}")

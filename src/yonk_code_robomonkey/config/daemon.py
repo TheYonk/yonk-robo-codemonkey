@@ -38,10 +38,10 @@ class VLLMConfig(BaseModel):
 
 class LLMModelConfig(BaseModel):
     """Configuration for a single LLM model."""
-    provider: Literal["ollama", "vllm"] = Field("ollama", description="LLM provider")
+    provider: Literal["ollama", "vllm", "openai"] = Field("ollama", description="LLM provider: ollama, vllm, or openai")
     model: str = Field(..., description="Model name")
     base_url: str = Field("http://localhost:11434", description="API endpoint")
-    api_key: str | None = Field(None, description="API key (for vLLM)")
+    api_key: str | None = Field(None, description="API key (required for openai, optional for vllm)")
     temperature: float = Field(0.3, ge=0, le=2, description="Temperature for generation")
     max_tokens: int = Field(2000, ge=100, le=32000, description="Max tokens to generate")
 

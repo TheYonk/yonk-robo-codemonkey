@@ -206,6 +206,52 @@ Key environment variables:
 
 **Important:** Default embedding dimension in DDL is 1536. If using a different model, update init_db.sql vector dimensions consistently.
 
+## LLM Configuration (Daemon)
+
+The daemon uses a dual-model setup configured in `config/robomonkey-daemon.yaml`:
+- **deep**: Complex tasks (code analysis, feature context, comprehensive reviews)
+- **small**: Simple tasks (summaries, classifications, quick Q&A)
+
+### Supported Providers
+
+| Provider | Endpoint | Auth | Use Case |
+|----------|----------|------|----------|
+| `ollama` | `/api/generate` | None | Local Ollama server (default) |
+| `openai` | `/v1/chat/completions` | Bearer token | OpenAI, Azure, Together.ai, Groq, etc. |
+| `vllm` | `/v1/completions` | Bearer token | Local vLLM server |
+
+### Using Cloud LLMs (OpenAI, etc.)
+
+1. **Set your API key** as an environment variable:
+   ```bash
+   export OPENAI_API_KEY="sk-..."
+   ```
+
+2. **Update the daemon config** (`config/robomonkey-daemon.yaml`):
+   ```yaml
+   llm:
+     deep:
+       provider: "openai"
+       model: "gpt-4o"
+       base_url: "https://api.openai.com"
+       temperature: 0.3
+       max_tokens: 4000
+     small:
+       provider: "openai"
+       model: "gpt-4o-mini"
+       base_url: "https://api.openai.com"
+       temperature: 0.3
+       max_tokens: 1000
+   ```
+
+The `openai` provider works with any OpenAI-compatible API by changing `base_url`:
+- **OpenAI**: `https://api.openai.com`
+- **Together.ai**: `https://api.together.xyz`
+- **Groq**: `https://api.groq.com/openai`
+- **Azure OpenAI**: `https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT`
+
+See `config/robomonkey-daemon.yaml` for more examples.
+
 ## Testing
 
 Tests are in `tests/` directory:

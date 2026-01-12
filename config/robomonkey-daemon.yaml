@@ -5,12 +5,74 @@
 # LLM Configuration (Dual Model Setup)
 # =============================================================================
 # Two models: "deep" for complex tasks, "small" for simple tasks
+#
+# Supported providers:
+#   - "ollama"  : Local Ollama server (default, no API key needed)
+#   - "openai"  : OpenAI API or any OpenAI-compatible endpoint
+#   - "vllm"    : vLLM server with /v1/completions endpoint
+#
+# API Key Configuration:
+#   For cloud providers, you can either:
+#   1. Set api_key directly in this config file
+#   2. Use environment variables (recommended for security):
+#      - OPENAI_API_KEY for "openai" provider
+#      - VLLM_API_KEY for "vllm" provider
+#
+# -----------------------------------------------------------------------------
+# CLOUD PROVIDER EXAMPLES (uncomment and modify as needed)
+# -----------------------------------------------------------------------------
+#
+# OpenAI:
+#   deep:
+#     provider: "openai"
+#     model: "gpt-4o"
+#     base_url: "https://api.openai.com"
+#     # api_key: "sk-..."  # Or set OPENAI_API_KEY env var
+#     temperature: 0.3
+#     max_tokens: 4000
+#   small:
+#     provider: "openai"
+#     model: "gpt-4o-mini"
+#     base_url: "https://api.openai.com"
+#     temperature: 0.3
+#     max_tokens: 1000
+#
+# Azure OpenAI:
+#   deep:
+#     provider: "openai"
+#     model: "gpt-4o"  # Your deployment name
+#     base_url: "https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT"
+#     api_key: "your-azure-key"
+#     temperature: 0.3
+#     max_tokens: 4000
+#
+# Together.ai:
+#   deep:
+#     provider: "openai"
+#     model: "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+#     base_url: "https://api.together.xyz"
+#     # api_key: "..."  # Or set OPENAI_API_KEY env var
+#     temperature: 0.3
+#     max_tokens: 4000
+#
+# Groq:
+#   deep:
+#     provider: "openai"
+#     model: "llama-3.3-70b-versatile"
+#     base_url: "https://api.groq.com/openai"
+#     # api_key: "gsk_..."  # Or set OPENAI_API_KEY env var
+#     temperature: 0.3
+#     max_tokens: 4000
+#
+# -----------------------------------------------------------------------------
+
 llm:
   # Deep model: Complex code analysis, feature context, comprehensive reviews
   deep:
     provider: "ollama"
     model: "qwen3-coder:30b"
     base_url: "http://localhost:11434"
+    # api_key: ""  # Not needed for ollama; for openai/vllm set here or use env var
     temperature: 0.3
     max_tokens: 4000
 
@@ -19,6 +81,7 @@ llm:
     provider: "ollama"
     model: "phi3.5:3.8b"
     base_url: "http://localhost:11434"
+    # api_key: ""  # Not needed for ollama; for openai/vllm set here or use env var
     temperature: 0.3
     max_tokens: 1000
 
