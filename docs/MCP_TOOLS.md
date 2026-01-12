@@ -7,6 +7,7 @@ This document provides comprehensive information about all MCP tools available i
 | Tool | Primary Use Case | When to Use |
 |------|-----------------|-------------|
 | `hybrid_search` | Code search | Finding code, understanding implementations |
+| `ask_codebase` | Q&A about code | "How does X work?", exploratory questions |
 | `symbol_lookup` | Find specific function/class | When you know the exact symbol name |
 | `symbol_context` | Understand symbol usage | Analyzing how a function is called/used |
 | `callers` / `callees` | Call graph traversal | Understanding dependencies |
@@ -277,6 +278,84 @@ Results are merged and re-ranked using weighted scoring: **55% vector, 35% FTS, 
 **Returns:**
 - Documentation chunks matching the query
 - File paths, content, relevance scores
+
+---
+
+### `ask_codebase`
+
+**NATURAL LANGUAGE CODEBASE Q&A** - RoboMonkey's conversational search tool that answers questions about the codebase using multiple search strategies orchestrated together. Unlike individual search tools, `ask_codebase` automatically combines documentation search, code search, and symbol search to provide comprehensive answers.
+
+**Algorithm:**
+1. **Documentation search** - FTS on document table for conceptual understanding
+2. **Code search** - FTS on chunks, deduplicated by file, with snippets
+3. **Symbol search** - FTS on symbol names and signatures
+4. **Aggregation** - Weighted file scoring (docs 3x, code 2x, symbols 1.5x)
+5. **Formatting** - Markdown output with emoji sections
+
+**When to use:**
+- "How does X work?"
+- "Where is Y implemented?"
+- "Show me Z"
+- Exploratory questions spanning code + docs + symbols
+- You want a synthesized answer rather than raw search results
+
+**Don't use when:**
+- You know the exact symbol name → use `symbol_lookup`
+- Need raw chunks for LLM context → use `hybrid_search`
+- Need call graph traversal → use `symbol_context`, `callers`, `callees`
+- Want comprehensive architecture → use `comprehensive_review`
+
+**Parameters:**
+- `question` (required): Natural language question about the codebase
+- `repo` (required): Repository name (use `list_repos` to see available)
+- `top_docs` (optional): Number of documentation results (default: 3)
+- `top_code` (optional): Number of code file results (default: 5)
+- `top_symbols` (optional): Number of symbol results (default: 5)
+- `format_as_markdown` (optional): Return formatted markdown (default: true)
+
+**Returns:**
+- Top documentation results with titles, summaries, file paths
+- Top code files with snippets, line ranges, language, context
+- Top symbols with kind, signature, description, file location
+- Key files ranked by aggregated relevance
+- Suggested next steps for deeper exploration
+
+**Example:**
+```json
+{
+  "question": "how does authentication work?",
+  "repo": "my-backend",
+  "top_docs": 3,
+  "top_code": 5,
+  "top_symbols": 5
+}
+```
+
+**Example Output (Markdown):**
+```markdown
+# Question: authentication
+Repository: my-backend
+Total results: 13
+
+## 📚 Documentation
+### 1. Authentication Guide
+**File**: `docs/auth.md`
+**Relevance**: 2.20
+JWT-based authentication using...
+
+## 💻 Code Files
+### 1. src/auth/handler.go
+**Lines**: 45-120
+**Language**: go
+**Relevance**: 1.00
+func (h *AuthHandler) Login(...)
+
+## 🔧 Key Symbols
+### 1. ValidateToken
+**Type**: function
+**Location**: `src/auth/jwt.go:23`
+**Signature**: `ValidateToken(token string) (*Claims, error)`
+```
 
 ---
 

@@ -44,3 +44,12 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs and runtime files
+*.log
+*.pid
+
+# Session notes (temporary working docs)
+*_COMPLETE.md
+*_FIX.md
+SESSION_*.md

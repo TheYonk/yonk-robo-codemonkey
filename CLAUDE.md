@@ -170,6 +170,19 @@ All tools return JSON with explainability fields (`why`, `vec_rank`, `fts_rank`,
 
 Per-file transactional updates ensure clean incremental reindexing.
 
+### Call Graph Language Support
+
+The call graph (CALLS edges) extraction status by language:
+
+| Language | Status | Notes |
+|----------|--------|-------|
+| Python | ✅ Full | Function calls, method calls |
+| JavaScript | ✅ Full | Function calls, method calls, template files |
+| TypeScript | ✅ Full | Uses JavaScript extractor |
+| Go | ✅ Full | Function calls, method calls |
+| Java | ✅ Full | Method calls, constructor calls (new Foo()) |
+| C | ✅ Full | Function calls, #include imports |
+
 ### Key Design Principles
 
 - **No ORM:** Direct asyncpg for performance (see db/models.py)

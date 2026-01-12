@@ -134,6 +134,33 @@ docker logs robomonkey-postgres  # View database logs
 
 ---
 
+## 🏗️ Design Documents
+
+Design documents for major features live in `docs/design/`:
+
+| Document | Purpose |
+|----------|---------|
+| [DESIGN_SEMANTIC_TAGGING.md](design/DESIGN_SEMANTIC_TAGGING.md) | Semantic tagging system design |
+| [DESIGN_SLIDING_WINDOW_CHUNKS.md](design/DESIGN_SLIDING_WINDOW_CHUNKS.md) | Chunking algorithm design |
+| [CLOUD_LLM_SUPPORT.md](design/CLOUD_LLM_SUPPORT.md) | OpenAI/cloud LLM provider integration |
+| [auto-summary-generation.md](design/auto-summary-generation.md) | Automatic summary generation design |
+| [web-ui-admin-panel.md](design/web-ui-admin-panel.md) | Web UI admin panel design |
+| [repo-not-found-recovery.md](design/repo-not-found-recovery.md) | Repository recovery handling |
+| [fts_query_logic_fix.md](design/fts_query_logic_fix.md) | Full-text search query logic fix |
+
+---
+
+## 📦 Archive
+
+Historical completion notes and validation reports are archived in `docs/archive/`:
+
+- [BUGFIX_INCREMENTAL_INDEXING.md](archive/BUGFIX_INCREMENTAL_INDEXING.md) - Incremental indexing bug fix (2026-01-01)
+- [SCHEMA_ISOLATION_COMPLETE.md](archive/SCHEMA_ISOLATION_COMPLETE.md) - Schema isolation implementation (2025-12-30)
+- [SCHEMA_ISOLATION_VALIDATION.md](archive/SCHEMA_ISOLATION_VALIDATION.md) - Schema isolation testing (2025-12-30)
+- [MIGRATION_SUMMARY.md](archive/MIGRATION_SUMMARY.md) - CodeGraph to RoboMonkey migration (2025-12-31)
+
+---
+
 ## ❓ FAQ - Which Guide Do I Need?
 
 ### "I've never done this before and need hand-holding"
@@ -170,7 +197,9 @@ docker logs robomonkey-postgres  # View database logs
 | INSTALL.md | ✅ Complete | 2025-12-31 | 100% |
 | USER_GUIDE.md | ✅ Complete | 2025-12-31 | 100% |
 | RUNBOOK.md | ✅ Complete | 2025-12-30 | 95% |
-| ../CLAUDE.md | ✅ Complete | 2025-12-30 | 100% |
+| MCP_TOOLS.md | ✅ Complete | 2025-12-31 | 100% |
+| CONFIG.md | ✅ Complete | 2025-12-31 | 100% |
+| ../CLAUDE.md | ✅ Complete | 2026-01-12 | 100% |
 | ../TODO.md | 🔄 In Progress | 2025-12-30 | 90% |
 
 ---
@@ -249,7 +278,7 @@ docker logs robomonkey-postgres  # View database logs
 
 ## 🔄 Keeping Documentation Up to Date
 
-This documentation is current as of **December 31, 2025**.
+This documentation is current as of **January 12, 2026**.
 
 If you find errors or outdated information:
 1. Check the `Last Updated` date above

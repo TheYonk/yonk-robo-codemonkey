@@ -1,0 +1,2094 @@
+openapi: 3.1.0
+info:
+  title: RoboMonkey Code Intelligence API
+  description: |
+    REST API for RoboMonkey code intelligence tools. This API provides programmatic access
+    to all MCP (Model Context Protocol) tools for code search, symbol analysis, documentation,
+    and database migration assessment.
+
+    ## Overview
+    RoboMonkey indexes codebases into PostgreSQL with pgvector, providing:
+    - Hybrid search (vector + full-text + tags)
+    - Symbol and call graph analysis
+    - Documentation search and validation
+    - Database migration assessment
+
+    ## Authentication
+    API key authentication via `X-API-Key` header or `api_key` query parameter.
+
+    ## Rate Limiting
+    Default: 100 requests/minute per API key.
+  version: 1.0.0
+  contact:
+    name: RoboMonkey Support
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+  - url: https://api.robomonkey.dev/v1
+    description: Production server
+
+security:
+  - ApiKeyHeader: []
+  - ApiKeyQuery: []
+
+tags:
+  - name: Search
+    description: Code and documentation search tools
+  - name: Symbols
+    description: Symbol lookup and analysis
+  - name: Call Graph
+    description: Call graph traversal (callers/callees)
+  - name: Documentation
+    description: Documentation search and validation
+  - name: Summaries
+    description: AI-generated code summaries
+  - name: Tags
+    description: Semantic tagging system
+  - name: Repository
+    description: Repository management
+  - name: Features
+    description: Feature analysis and context
+  - name: Database
+    description: Database schema analysis
+  - name: Migration
+    description: Database migration assessment
+  - name: SQL Intelligence
+    description: SQL schema and query analysis
+  - name: Meta
+    description: Utility and meta tools
+
+paths:
+  /ping:
+    get:
+      summary: Health check
+      description: Verify server is running and responsive
+      operationId: ping
+      tags: [Meta]
+      security: []
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: string
+                    example: "true"
+
+  /repos:
+    get:
+      summary: List repositories
+      description: |
+        List all indexed repositories with their status, statistics, and overview.
+        Call this first to discover available repositories.
+      operationId: listRepos
+      tags: [Repository]
+      responses:
+        '200':
+          description: List of repositories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoListResponse'
+
+  /repos/{repo}/status:
+    get:
+      summary: Get repository index status
+      description: Get detailed indexing status and freshness metadata
+      operationId: indexStatus
+      tags: [Repository]
+      parameters:
+        - $ref: '#/components/parameters/RepoPath'
+      responses:
+        '200':
+          description: Repository status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexStatusResponse'
+
+  /search/hybrid:
+    post:
+      summary: Hybrid search
+      description: |
+        Primary code search combining vector similarity, full-text search, and tag filtering.
+        Results are merged and re-ranked using weighted scoring (55% vector, 35% FTS, 10% tags).
+      operationId: hybridSearch
+      tags: [Search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HybridSearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HybridSearchResponse'
+
+  /search/universal:
+    post:
+      summary: Universal search with LLM analysis
+      description: |
+        Most comprehensive search. Runs three strategies in parallel (hybrid + docs + semantic),
+        then uses LLM to synthesize an intelligent answer.
+      operationId: universalSearch
+      tags: [Search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UniversalSearchRequest'
+      responses:
+        '200':
+          description: Search results with LLM summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniversalSearchResponse'
+
+  /search/docs:
+    post:
+      summary: Documentation search
+      description: |
+        Search documentation files (README, docs/, .md files) using full-text search.
+        Returns conceptual explanations and guides.
+      operationId: docSearch
+      tags: [Documentation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocSearchRequest'
+      responses:
+        '200':
+          description: Documentation results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocSearchResponse'
+
+  /search/ask:
+    post:
+      summary: Ask codebase
+      description: |
+        Natural language Q&A about the codebase. Orchestrates documentation,
+        code, and symbol search to provide comprehensive answers.
+      operationId: askCodebase
+      tags: [Search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskCodebaseRequest'
+      responses:
+        '200':
+          description: Structured answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AskCodebaseResponse'
+
+  /symbols/lookup:
+    post:
+      summary: Symbol lookup
+      description: Find symbol definition by fully-qualified name or UUID
+      operationId: symbolLookup
+      tags: [Symbols]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SymbolLookupRequest'
+      responses:
+        '200':
+          description: Symbol details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SymbolResponse'
+
+  /symbols/context:
+    post:
+      summary: Symbol context
+      description: |
+        Get symbol definition plus call graph context (callers, callees, evidence).
+        Uses token budget management to pack related code.
+      operationId: symbolContext
+      tags: [Symbols]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SymbolContextRequest'
+      responses:
+        '200':
+          description: Symbol with context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SymbolContextResponse'
+
+  /symbols/callers:
+    post:
+      summary: Get callers
+      description: |
+        Find all functions/methods that call the specified symbol.
+        Traverses call graph backwards up to max_depth levels.
+      operationId: getCallers
+      tags: [Call Graph]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallGraphRequest'
+      responses:
+        '200':
+          description: List of calling symbols
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallGraphResponse'
+
+  /symbols/callees:
+    post:
+      summary: Get callees
+      description: |
+        Find all functions/methods that the specified symbol calls.
+        Traverses call graph forwards up to max_depth levels.
+      operationId: getCallees
+      tags: [Call Graph]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallGraphRequest'
+      responses:
+        '200':
+          description: List of called symbols
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallGraphResponse'
+
+  /summaries/file:
+    post:
+      summary: Get file summary
+      description: Get or generate AI summary for a file
+      operationId: fileSummary
+      tags: [Summaries]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_id]
+              properties:
+                file_id:
+                  type: string
+                  format: uuid
+                  description: File UUID
+                generate:
+                  type: boolean
+                  default: false
+                  description: Generate summary if not exists
+      responses:
+        '200':
+          description: File summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummaryResponse'
+
+  /summaries/symbol:
+    post:
+      summary: Get symbol summary
+      description: Get or generate AI summary for a symbol
+      operationId: symbolSummary
+      tags: [Summaries]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol_id]
+              properties:
+                symbol_id:
+                  type: string
+                  format: uuid
+                  description: Symbol UUID
+                generate:
+                  type: boolean
+                  default: false
+                  description: Generate summary if not exists
+      responses:
+        '200':
+          description: Symbol summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummaryResponse'
+
+  /summaries/module:
+    post:
+      summary: Get module summary
+      description: Get or generate AI summary for a module/directory
+      operationId: moduleSummary
+      tags: [Summaries]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, module_path]
+              properties:
+                repo:
+                  type: string
+                  description: Repository name or UUID
+                module_path:
+                  type: string
+                  description: Module path (e.g., 'src/api')
+                generate:
+                  type: boolean
+                  default: false
+                  description: Generate summary if not exists
+      responses:
+        '200':
+          description: Module summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummaryResponse'
+
+  /tags:
+    get:
+      summary: List tags
+      description: List all available semantic tags
+      operationId: listTags
+      tags: [Tags]
+      parameters:
+        - name: repo
+          in: query
+          schema:
+            type: string
+          description: Optional repository filter
+      responses:
+        '200':
+          description: List of tags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagListResponse'
+
+  /tags/entity:
+    post:
+      summary: Tag entity
+      description: Manually tag an entity (chunk, document, symbol, file)
+      operationId: tagEntity
+      tags: [Tags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagEntityRequest'
+      responses:
+        '200':
+          description: Tag applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  entity_tag_id:
+                    type: string
+                    format: uuid
+
+  /tags/sync-rules:
+    post:
+      summary: Sync tag rules
+      description: Sync starter tag rules to database (creates default tags)
+      operationId: tagRulesSync
+      tags: [Tags]
+      responses:
+        '200':
+          description: Rules synced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tags_synced:
+                    type: integer
+                  rules_synced:
+                    type: integer
+
+  /features:
+    get:
+      summary: List features
+      description: List known features/concepts for a repository from the feature index
+      operationId: listFeatures
+      tags: [Features]
+      parameters:
+        - $ref: '#/components/parameters/RepoQuery'
+        - name: prefix
+          in: query
+          schema:
+            type: string
+          description: Optional name prefix filter
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+          description: Maximum features to return
+      responses:
+        '200':
+          description: List of features
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureListResponse'
+
+  /features/context:
+    post:
+      summary: Feature context
+      description: |
+        Deep dive into a feature implementation. Searches for feature across
+        code, docs, and symbols, then packages related files and patterns.
+      operationId: featureContext
+      tags: [Features]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureContextRequest'
+      responses:
+        '200':
+          description: Feature implementation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureContextResponse'
+
+  /features/build-index:
+    post:
+      summary: Build feature index
+      description: Build or update feature index for a repository
+      operationId: buildFeatureIndex
+      tags: [Features]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              properties:
+                repo:
+                  type: string
+                  description: Repository name or UUID
+                regenerate:
+                  type: boolean
+                  default: false
+                  description: Force regeneration
+      responses:
+        '200':
+          description: Build result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  features_indexed:
+                    type: integer
+                  status:
+                    type: string
+
+  /review/comprehensive:
+    post:
+      summary: Comprehensive review
+      description: |
+        Generate high-level architecture report analyzing entire codebase structure,
+        tech stack, patterns, entry points, data layer, and risks.
+      operationId: comprehensiveReview
+      tags: [Features]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComprehensiveReviewRequest'
+      responses:
+        '200':
+          description: Architecture report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComprehensiveReviewResponse'
+
+  /db/review:
+    post:
+      summary: Database review
+      description: |
+        Analyze PostgreSQL schema, stored routines, and application database calls.
+        Generates comprehensive database architecture report.
+      operationId: dbReview
+      tags: [Database]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DbReviewRequest'
+      responses:
+        '200':
+          description: Database report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DbReviewResponse'
+
+  /db/feature-context:
+    post:
+      summary: Database feature context
+      description: Find all code and database objects related to a feature, table, or query pattern
+      operationId: dbFeatureContext
+      tags: [Database]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DbFeatureContextRequest'
+      responses:
+        '200':
+          description: Database feature context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DbFeatureContextResponse'
+
+  /migration/assess:
+    post:
+      summary: Migration assessment
+      description: |
+        Assess migration complexity from source database to PostgreSQL.
+        Analyzes code patterns, SQL dialect usage, and schema artifacts.
+      operationId: migrationAssess
+      tags: [Migration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrationAssessRequest'
+      responses:
+        '200':
+          description: Assessment report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationAssessResponse'
+
+  /migration/inventory:
+    post:
+      summary: Migration inventory
+      description: Get raw migration findings grouped by category
+      operationId: migrationInventory
+      tags: [Migration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              properties:
+                repo:
+                  type: string
+                source_db:
+                  type: string
+                  default: auto
+      responses:
+        '200':
+          description: Inventory findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationInventoryResponse'
+
+  /migration/risks:
+    post:
+      summary: Migration risks
+      description: Get medium/high/critical migration risks with impacted files
+      operationId: migrationRisks
+      tags: [Migration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              properties:
+                repo:
+                  type: string
+                min_severity:
+                  type: string
+                  enum: [low, medium, high, critical]
+                  default: medium
+      responses:
+        '200':
+          description: Risk analysis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationRisksResponse'
+
+  /migration/plan:
+    post:
+      summary: Migration plan outline
+      description: Get phased migration plan with work packages and timeline estimates
+      operationId: migrationPlanOutline
+      tags: [Migration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              properties:
+                repo:
+                  type: string
+      responses:
+        '200':
+          description: Migration plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationPlanResponse'
+
+  /sql/tables:
+    get:
+      summary: List SQL tables
+      description: List all SQL tables discovered in the codebase
+      operationId: listSqlTables
+      tags: [SQL Intelligence]
+      parameters:
+        - $ref: '#/components/parameters/RepoQuery'
+      responses:
+        '200':
+          description: List of tables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SqlTableListResponse'
+
+  /sql/tables/{table}/context:
+    get:
+      summary: SQL table context
+      description: Get comprehensive context for a SQL table
+      operationId: sqlTableContext
+      tags: [SQL Intelligence]
+      parameters:
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Table name
+        - $ref: '#/components/parameters/RepoQuery'
+      responses:
+        '200':
+          description: Table context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SqlTableContextResponse'
+
+  /sql/columns/{table}/{column}/usage:
+    get:
+      summary: SQL column usage
+      description: Find all code references to a specific column
+      operationId: sqlColumnUsage
+      tags: [SQL Intelligence]
+      parameters:
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: column
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/RepoQuery'
+      responses:
+        '200':
+          description: Column usage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SqlColumnUsageResponse'
+
+  /sql/search:
+    post:
+      summary: SQL schema search
+      description: Search SQL schema objects by name or description
+      operationId: sqlSchemaSearch
+      tags: [SQL Intelligence]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query, repo]
+              properties:
+                query:
+                  type: string
+                repo:
+                  type: string
+                top_k:
+                  type: integer
+                  default: 10
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SqlSearchResponse'
+
+  /docs/validity:
+    post:
+      summary: Document validity score
+      description: Score a document's validity against the codebase
+      operationId: docValidityScore
+      tags: [Documentation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doc_id, repo]
+              properties:
+                doc_id:
+                  type: string
+                  format: uuid
+                repo:
+                  type: string
+      responses:
+        '200':
+          description: Validity score
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocValidityResponse'
+
+  /docs/stale:
+    get:
+      summary: List stale docs
+      description: List documents that may be outdated
+      operationId: listStaleDocs
+      tags: [Documentation]
+      parameters:
+        - $ref: '#/components/parameters/RepoQuery'
+        - name: threshold
+          in: query
+          schema:
+            type: number
+            default: 0.5
+          description: Validity threshold (0-1)
+      responses:
+        '200':
+          description: List of stale documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stale_docs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StaleDocItem'
+
+  /docs/drift:
+    get:
+      summary: List documentation drift
+      description: List documents with detected code/doc drift
+      operationId: listDocDrift
+      tags: [Documentation]
+      parameters:
+        - $ref: '#/components/parameters/RepoQuery'
+      responses:
+        '200':
+          description: Drift issues
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drift_issues:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DriftIssue'
+
+  /docs/verify-claims:
+    post:
+      summary: Verify document claims
+      description: Extract and verify behavioral claims from a document
+      operationId: verifyDocClaims
+      tags: [Documentation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doc_id, repo]
+              properties:
+                doc_id:
+                  type: string
+                  format: uuid
+                repo:
+                  type: string
+      responses:
+        '200':
+          description: Claim verification results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimVerificationResponse'
+
+  /suggest-tool:
+    post:
+      summary: Suggest tool
+      description: |
+        Meta-tool that analyzes a user query and recommends which tool(s) to use.
+        Helpful when uncertain which API endpoint fits the task.
+      operationId: suggestTool
+      tags: [Meta]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_query]
+              properties:
+                user_query:
+                  type: string
+                  description: The user's question or request
+                context:
+                  type: string
+                  description: Additional context
+      responses:
+        '200':
+          description: Tool recommendation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolSuggestionResponse'
+
+  /daemon/status:
+    get:
+      summary: Daemon status
+      description: Get status of background processing daemon
+      operationId: daemonStatus
+      tags: [Repository]
+      responses:
+        '200':
+          description: Daemon status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaemonStatusResponse'
+
+  /repos/add:
+    post:
+      summary: Add repository
+      description: Register a new repository for indexing
+      operationId: repoAdd
+      tags: [Repository]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, path]
+              properties:
+                name:
+                  type: string
+                  description: Repository name
+                path:
+                  type: string
+                  description: Absolute path to repository
+      responses:
+        '200':
+          description: Repository added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  repo_id:
+                    type: string
+                    format: uuid
+                  schema_name:
+                    type: string
+                  status:
+                    type: string
+
+  /repos/{repo}/reindex:
+    post:
+      summary: Enqueue reindex
+      description: Queue file(s) for reindexing
+      operationId: enqueueReindex
+      tags: [Repository]
+      parameters:
+        - $ref: '#/components/parameters/RepoPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                file_path:
+                  type: string
+                  description: Single file to reindex
+                file_paths:
+                  type: array
+                  items:
+                    type: string
+                  description: Multiple files to reindex
+      responses:
+        '200':
+          description: Files queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued:
+                    type: integer
+                  status:
+                    type: string
+
+components:
+  securitySchemes:
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    ApiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+
+  parameters:
+    RepoPath:
+      name: repo
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Repository name or UUID
+
+    RepoQuery:
+      name: repo
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Repository name or UUID
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        code:
+          type: string
+          description: Error code
+        suggestions:
+          type: array
+          items:
+            type: string
+          description: Suggested fixes
+
+    HybridSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: Search query
+          example: "user authentication login"
+        repo:
+          type: string
+          description: Repository name or UUID
+        tags_any:
+          type: array
+          items:
+            type: string
+          description: Match chunks with any of these tags
+          example: ["auth", "security"]
+        tags_all:
+          type: array
+          items:
+            type: string
+          description: Match chunks with all of these tags
+        final_top_k:
+          type: integer
+          default: 12
+          description: Number of results to return
+
+    HybridSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        query:
+          type: string
+        total_results:
+          type: integer
+        schema_name:
+          type: string
+
+    SearchResult:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        file_id:
+          type: string
+          format: uuid
+        symbol_id:
+          type: string
+          format: uuid
+          nullable: true
+        content:
+          type: string
+          description: Code content
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+        file_path:
+          type: string
+        score:
+          type: number
+          description: Combined relevance score
+        vec_rank:
+          type: integer
+          nullable: true
+        vec_score:
+          type: number
+          nullable: true
+        fts_rank:
+          type: integer
+          nullable: true
+        fts_score:
+          type: number
+          nullable: true
+        matched_tags:
+          type: array
+          items:
+            type: string
+        tag_boost:
+          type: number
+
+    UniversalSearchRequest:
+      type: object
+      required: [query, repo]
+      properties:
+        query:
+          type: string
+          description: Search query
+        repo:
+          type: string
+          description: Repository name
+        top_k:
+          type: integer
+          default: 10
+          description: Results per strategy
+        deep_mode:
+          type: boolean
+          default: true
+          description: Enable LLM summarization
+
+    UniversalSearchResponse:
+      type: object
+      properties:
+        total_results_found:
+          type: integer
+        strategies_used:
+          type: array
+          items:
+            type: string
+        top_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        top_files:
+          type: array
+          items:
+            type: string
+        llm_summary:
+          type: string
+          description: LLM-generated summary (if deep_mode=true)
+
+    DocSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        repo:
+          type: string
+        top_k:
+          type: integer
+          default: 10
+
+    DocSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocResult'
+        total_results:
+          type: integer
+
+    DocResult:
+      type: object
+      properties:
+        doc_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        file_path:
+          type: string
+        score:
+          type: number
+
+    AskCodebaseRequest:
+      type: object
+      required: [question, repo]
+      properties:
+        question:
+          type: string
+          description: Natural language question
+          example: "How does authentication work?"
+        repo:
+          type: string
+          description: Repository name
+        top_docs:
+          type: integer
+          default: 3
+        top_code:
+          type: integer
+          default: 5
+        top_symbols:
+          type: integer
+          default: 5
+        format_as_markdown:
+          type: boolean
+          default: true
+
+    AskCodebaseResponse:
+      type: object
+      properties:
+        documentation:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocResult'
+        code_files:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeFileResult'
+        symbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/SymbolResult'
+        key_files:
+          type: array
+          items:
+            type: string
+        suggested_actions:
+          type: array
+          items:
+            type: string
+        formatted_output:
+          type: string
+          description: Markdown-formatted output (if format_as_markdown=true)
+
+    CodeFileResult:
+      type: object
+      properties:
+        file_path:
+          type: string
+        lines:
+          type: string
+          description: Line range (e.g., "45-120")
+        language:
+          type: string
+        context:
+          type: string
+          description: Parent class/function
+        snippet:
+          type: string
+        relevance:
+          type: number
+
+    SymbolLookupRequest:
+      type: object
+      properties:
+        fqn:
+          type: string
+          description: Fully qualified name
+          example: "UserService.authenticate"
+        symbol_id:
+          type: string
+          format: uuid
+          description: Symbol UUID (alternative to fqn)
+        repo:
+          type: string
+
+    SymbolResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fqn:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [function, method, class, interface, struct, typedef]
+        signature:
+          type: string
+        file_path:
+          type: string
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+        docstring:
+          type: string
+          nullable: true
+
+    SymbolResult:
+      type: object
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+        signature:
+          type: string
+        file_path:
+          type: string
+        line:
+          type: integer
+        description:
+          type: string
+          nullable: true
+        relevance:
+          type: number
+
+    SymbolContextRequest:
+      type: object
+      properties:
+        fqn:
+          type: string
+        symbol_id:
+          type: string
+          format: uuid
+        repo:
+          type: string
+        max_depth:
+          type: integer
+          default: 2
+          description: Graph traversal depth
+        budget_tokens:
+          type: integer
+          description: Token budget for context
+
+    SymbolContextResponse:
+      type: object
+      properties:
+        symbol:
+          $ref: '#/components/schemas/SymbolResponse'
+        callers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallSite'
+        callees:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallSite'
+        related_chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        token_budget_used:
+          type: integer
+
+    CallSite:
+      type: object
+      properties:
+        symbol:
+          $ref: '#/components/schemas/SymbolResponse'
+        evidence:
+          type: string
+          description: Code snippet showing the call
+        file_path:
+          type: string
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+        depth:
+          type: integer
+
+    CallGraphRequest:
+      type: object
+      properties:
+        fqn:
+          type: string
+        symbol_id:
+          type: string
+          format: uuid
+        repo:
+          type: string
+        max_depth:
+          type: integer
+          default: 2
+
+    CallGraphResponse:
+      type: object
+      properties:
+        symbol:
+          $ref: '#/components/schemas/SymbolResponse'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallSite'
+        total_count:
+          type: integer
+
+    SummaryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        summary:
+          type: string
+          description: AI-generated summary
+        generated_at:
+          type: string
+          format: date-time
+        model:
+          type: string
+          description: LLM model used
+
+    TagListResponse:
+      type: object
+      properties:
+        tags:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              usage_count:
+                type: integer
+
+    TagEntityRequest:
+      type: object
+      required: [entity_type, entity_id, tag_name, repo]
+      properties:
+        entity_type:
+          type: string
+          enum: [chunk, document, symbol, file]
+        entity_id:
+          type: string
+          format: uuid
+        tag_name:
+          type: string
+        repo:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 1.0
+        source:
+          type: string
+          default: MANUAL
+
+    RepoListResponse:
+      type: object
+      properties:
+        repositories:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepoInfo'
+
+    RepoInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        schema_name:
+          type: string
+        root_path:
+          type: string
+        last_updated:
+          type: string
+          format: date-time
+        stats:
+          type: object
+          properties:
+            files:
+              type: integer
+            symbols:
+              type: integer
+            chunks:
+              type: integer
+            embeddings:
+              type: integer
+            indexed_percent:
+              type: number
+        overview:
+          type: string
+          description: Summary of what the codebase does
+
+    IndexStatusResponse:
+      type: object
+      properties:
+        repo_name:
+          type: string
+        schema_name:
+          type: string
+        last_indexed:
+          type: string
+          format: date-time
+        git_commit:
+          type: string
+        stats:
+          type: object
+          properties:
+            files:
+              type: integer
+            symbols:
+              type: integer
+            chunks:
+              type: integer
+            edges:
+              type: integer
+            embeddings:
+              type: integer
+            documents:
+              type: integer
+
+    FeatureListResponse:
+      type: object
+      properties:
+        features:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              file_count:
+                type: integer
+
+    FeatureContextRequest:
+      type: object
+      required: [query, repo]
+      properties:
+        query:
+          type: string
+          description: Feature/concept to search
+          example: "authentication"
+        repo:
+          type: string
+        top_k_files:
+          type: integer
+          default: 25
+        depth:
+          type: integer
+          default: 2
+          description: Graph expansion depth
+        budget_tokens:
+          type: integer
+          default: 12000
+        filters:
+          type: object
+          properties:
+            language:
+              type: array
+              items:
+                type: string
+            path_prefix:
+              type: string
+            tags_any:
+              type: array
+              items:
+                type: string
+            tags_all:
+              type: array
+              items:
+                type: string
+
+    FeatureContextResponse:
+      type: object
+      properties:
+        feature_name:
+          type: string
+        related_files:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              relevance:
+                type: number
+              summary:
+                type: string
+        key_symbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/SymbolResponse'
+        data_models:
+          type: array
+          items:
+            type: string
+        implementation_summary:
+          type: string
+        code_snippets:
+          type: array
+          items:
+            type: string
+
+    ComprehensiveReviewRequest:
+      type: object
+      required: [repo]
+      properties:
+        repo:
+          type: string
+        include_sections:
+          type: array
+          items:
+            type: string
+          default: ["overview", "architecture", "flows", "data", "auth", "observability", "risks"]
+        max_modules:
+          type: integer
+          default: 25
+        max_files_per_module:
+          type: integer
+          default: 20
+        regenerate:
+          type: boolean
+          default: false
+
+    ComprehensiveReviewResponse:
+      type: object
+      properties:
+        repo_name:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        report:
+          type: string
+          description: Markdown-formatted architecture report
+        sections:
+          type: object
+          additionalProperties:
+            type: string
+
+    DbReviewRequest:
+      type: object
+      required: [repo, target_db_url]
+      properties:
+        repo:
+          type: string
+        target_db_url:
+          type: string
+          description: PostgreSQL connection string
+        schemas:
+          type: array
+          items:
+            type: string
+          description: Schemas to analyze (default: all non-system)
+        max_routines:
+          type: integer
+          default: 50
+        max_app_calls:
+          type: integer
+          default: 100
+        regenerate:
+          type: boolean
+          default: false
+
+    DbReviewResponse:
+      type: object
+      properties:
+        repo_name:
+          type: string
+        report:
+          type: string
+          description: Markdown database architecture report
+        tables_analyzed:
+          type: integer
+        routines_analyzed:
+          type: integer
+        app_calls_found:
+          type: integer
+
+    DbFeatureContextRequest:
+      type: object
+      required: [query, repo]
+      properties:
+        query:
+          type: string
+          description: Feature/table/pattern to search
+        repo:
+          type: string
+        target_db_url:
+          type: string
+          nullable: true
+        top_k:
+          type: integer
+          default: 25
+        filters:
+          type: object
+          additionalProperties: true
+
+    DbFeatureContextResponse:
+      type: object
+      properties:
+        query:
+          type: string
+        code_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        schema_objects:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              description:
+                type: string
+
+    MigrationAssessRequest:
+      type: object
+      required: [repo]
+      properties:
+        repo:
+          type: string
+        source_db:
+          type: string
+          enum: [auto, oracle, sqlserver, mongodb, mysql]
+          default: auto
+        target_db:
+          type: string
+          default: postgresql
+        top_k_evidence:
+          type: integer
+          default: 50
+        regenerate:
+          type: boolean
+          default: false
+
+    MigrationAssessResponse:
+      type: object
+      properties:
+        repo_name:
+          type: string
+        source_database:
+          type: string
+        target_database:
+          type: string
+        complexity_tier:
+          type: string
+          enum: [trivial, low, medium, high, critical]
+        summary:
+          type: string
+        findings_count:
+          type: integer
+        high_risk_count:
+          type: integer
+        estimated_effort:
+          type: string
+
+    MigrationInventoryResponse:
+      type: object
+      properties:
+        categories:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              properties:
+                pattern:
+                  type: string
+                count:
+                  type: integer
+                files:
+                  type: array
+                  items:
+                    type: string
+
+    MigrationRisksResponse:
+      type: object
+      properties:
+        risks:
+          type: array
+          items:
+            type: object
+            properties:
+              severity:
+                type: string
+                enum: [low, medium, high, critical]
+              category:
+                type: string
+              description:
+                type: string
+              impacted_files:
+                type: array
+                items:
+                  type: string
+              postgres_equivalent:
+                type: string
+
+    MigrationPlanResponse:
+      type: object
+      properties:
+        phases:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              work_packages:
+                type: array
+                items:
+                  type: string
+              dependencies:
+                type: array
+                items:
+                  type: string
+        timeline_estimate:
+          type: string
+        recommended_approach:
+          type: string
+
+    SqlTableListResponse:
+      type: object
+      properties:
+        tables:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              schema:
+                type: string
+              description:
+                type: string
+              column_count:
+                type: integer
+              usage_count:
+                type: integer
+
+    SqlTableContextResponse:
+      type: object
+      properties:
+        table_name:
+          type: string
+        schema:
+          type: string
+        columns:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              nullable:
+                type: boolean
+              description:
+                type: string
+        relationships:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              target_table:
+                type: string
+              columns:
+                type: array
+                items:
+                  type: string
+        code_references:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+
+    SqlColumnUsageResponse:
+      type: object
+      properties:
+        table:
+          type: string
+        column:
+          type: string
+        usages:
+          type: array
+          items:
+            type: object
+            properties:
+              file_path:
+                type: string
+              line:
+                type: integer
+              context:
+                type: string
+              operation:
+                type: string
+                enum: [SELECT, INSERT, UPDATE, DELETE, WHERE, JOIN]
+
+    SqlSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              object_type:
+                type: string
+                enum: [table, column, routine, index]
+              name:
+                type: string
+              parent:
+                type: string
+                nullable: true
+              description:
+                type: string
+              score:
+                type: number
+
+    DocValidityResponse:
+      type: object
+      properties:
+        doc_id:
+          type: string
+          format: uuid
+        validity_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        claims_verified:
+          type: integer
+        claims_failed:
+          type: integer
+        last_verified:
+          type: string
+          format: date-time
+
+    StaleDocItem:
+      type: object
+      properties:
+        doc_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        file_path:
+          type: string
+        validity_score:
+          type: number
+        last_updated:
+          type: string
+          format: date-time
+        issues:
+          type: array
+          items:
+            type: string
+
+    DriftIssue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        doc_id:
+          type: string
+          format: uuid
+        doc_title:
+          type: string
+        claim:
+          type: string
+        expected:
+          type: string
+        actual:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high]
+        detected_at:
+          type: string
+          format: date-time
+
+    ClaimVerificationResponse:
+      type: object
+      properties:
+        doc_id:
+          type: string
+          format: uuid
+        claims:
+          type: array
+          items:
+            type: object
+            properties:
+              claim_text:
+                type: string
+              verdict:
+                type: string
+                enum: [match, mismatch, uncertain]
+              confidence:
+                type: number
+              evidence:
+                type: array
+                items:
+                  type: string
+              actual_value:
+                type: string
+                nullable: true
+
+    ToolSuggestionResponse:
+      type: object
+      properties:
+        recommended_tool:
+          type: string
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        reasoning:
+          type: string
+        matched_keywords:
+          type: array
+          items:
+            type: string
+        alternative_tools:
+          type: array
+          items:
+            type: object
+            properties:
+              tool:
+                type: string
+              reasoning:
+                type: string
+        suggested_workflow:
+          type: array
+          items:
+            type: string
+
+    DaemonStatusResponse:
+      type: object
+      properties:
+        running:
+          type: boolean
+        uptime_seconds:
+          type: integer
+        workers:
+          type: object
+          properties:
+            indexer:
+              type: object
+              properties:
+                status:
+                  type: string
+                queue_size:
+                  type: integer
+            embedder:
+              type: object
+              properties:
+                status:
+                  type: string
+                queue_size:
+                  type: integer
+            summarizer:
+              type: object
+              properties:
+                status:
+                  type: string
+                queue_size:
+                  type: integer
+        last_activity:
+          type: string
+          format: date-time

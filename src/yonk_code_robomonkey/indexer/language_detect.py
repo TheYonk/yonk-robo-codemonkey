@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-Language = Literal["python", "javascript", "typescript", "go", "java", "sql", "unknown"]
+Language = Literal["python", "javascript", "typescript", "go", "java", "c", "sql", "unknown"]
 
 # Extension to language mapping
 EXTENSION_MAP: dict[str, Language] = {
@@ -44,6 +44,10 @@ EXTENSION_MAP: dict[str, Language] = {
     # Java
     ".java": "java",
     ".jsp": "java",  # JavaServer Pages
+
+    # C
+    ".c": "c",
+    ".h": "c",
 
     # SQL and related
     ".sql": "sql",

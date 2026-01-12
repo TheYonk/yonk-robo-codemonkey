@@ -49,6 +49,7 @@ def extract_edges(
         "typescript": _extract_typescript_edges,
         "go": _extract_go_edges,
         "java": _extract_java_edges,
+        "c": _extract_c_edges,
     }
 
     extractor = extractors.get(language)
@@ -452,11 +453,12 @@ def _extract_go_calls(source: bytes, root: any) -> Iterator[Edge]:
 # Java edge extraction
 
 def _extract_java_edges(source: bytes, tree: any, file_path: str) -> Iterator[Edge]:
-    """Extract Java edges: imports, inheritance, implements."""
+    """Extract Java edges: imports, inheritance, implements, calls."""
     root = tree.root_node
 
     yield from _extract_java_imports(source, root)
     yield from _extract_java_inheritance(source, root)
+    yield from _extract_java_calls(source, root)
 
 
 def _extract_java_imports(source: bytes, root: any) -> Iterator[Edge]:
@@ -524,6 +526,154 @@ def _extract_java_inheritance(source: bytes, root: any) -> Iterator[Edge]:
                                 evidence_start_line=start_line,
                                 evidence_end_line=end_line
                             )
+
+
+def _extract_java_calls(source: bytes, root: any) -> Iterator[Edge]:
+    """Extract Java method calls (best-effort)."""
+    current_method = None
+
+    for node in _traverse_tree(root):
+        # Track current method context
+        if node.type == "method_declaration":
+            name_node = _find_child(node, "identifier")
+            if name_node:
+                current_method = _get_text(source, name_node)
+        elif node.type == "constructor_declaration":
+            name_node = _find_child(node, "identifier")
+            if name_node:
+                current_method = _get_text(source, name_node)
+
+        # Find method invocations
+        if node.type == "method_invocation" and current_method:
+            # Get method name being called
+            # Handles: foo(), obj.foo(), this.foo(), super.foo()
+            called_name = None
+
+            # Look for the identifier (method name) in the invocation
+            for child in node.children:
+                if child.type == "identifier":
+                    called_name = _get_text(source, child)
+                    break
+
+            if called_name:
+                start_line = node.start_point[0] + 1
+                end_line = node.end_point[0] + 1
+
+                yield Edge(
+                    edge_type="CALLS",
+                    from_symbol_fqn=current_method,
+                    to_symbol_fqn=called_name,
+                    confidence=0.5,  # Best-effort
+                    evidence_start_line=start_line,
+                    evidence_end_line=end_line
+                )
+
+        # Handle object creation: new ClassName()
+        if node.type == "object_creation_expression" and current_method:
+            # Get the class being instantiated
+            type_node = _find_child(node, "type_identifier")
+            if type_node:
+                class_name = _get_text(source, type_node)
+                start_line = node.start_point[0] + 1
+                end_line = node.end_point[0] + 1
+
+                yield Edge(
+                    edge_type="CALLS",
+                    from_symbol_fqn=current_method,
+                    to_symbol_fqn=class_name,  # Constructor call
+                    confidence=0.6,
+                    evidence_start_line=start_line,
+                    evidence_end_line=end_line
+                )
+
+
+# C edge extraction
+
+def _extract_c_edges(source: bytes, tree: any, file_path: str) -> Iterator[Edge]:
+    """Extract C edges: includes, calls."""
+    root = tree.root_node
+
+    yield from _extract_c_includes(source, root)
+    yield from _extract_c_calls(source, root)
+
+
+def _extract_c_includes(source: bytes, root: any) -> Iterator[Edge]:
+    """Extract C #include directives."""
+    for node in _traverse_tree(root):
+        if node.type == "preproc_include":
+            start_line = node.start_point[0] + 1
+            end_line = node.end_point[0] + 1
+
+            # Get included file: <header.h> or "header.h"
+            for child in node.children:
+                if child.type == "system_lib_string":
+                    # <stdio.h> -> stdio.h
+                    include_path = _get_text(source, child).strip("<>")
+                    yield Edge(
+                        edge_type="IMPORTS",
+                        from_symbol_fqn=None,
+                        to_symbol_fqn=include_path,
+                        confidence=1.0,
+                        evidence_start_line=start_line,
+                        evidence_end_line=end_line
+                    )
+                elif child.type == "string_literal":
+                    # "myheader.h" -> myheader.h
+                    include_path = _get_text(source, child).strip('"')
+                    yield Edge(
+                        edge_type="IMPORTS",
+                        from_symbol_fqn=None,
+                        to_symbol_fqn=include_path,
+                        confidence=1.0,
+                        evidence_start_line=start_line,
+                        evidence_end_line=end_line
+                    )
+
+
+def _extract_c_calls(source: bytes, root: any) -> Iterator[Edge]:
+    """Extract C function calls (best-effort)."""
+    current_function = None
+
+    for node in _traverse_tree(root):
+        # Track current function context
+        if node.type == "function_definition":
+            # Get function name from declarator
+            declarator = _find_child(node, "function_declarator")
+            if declarator:
+                # The identifier is the function name
+                name_node = _find_child(declarator, "identifier")
+                if name_node:
+                    current_function = _get_text(source, name_node)
+
+        # Find call expressions
+        if node.type == "call_expression" and current_function:
+            # Get function being called
+            func_node = node.children[0] if node.children else None
+            if not func_node:
+                continue
+
+            called_name = None
+            if func_node.type == "identifier":
+                # Simple call: foo()
+                called_name = _get_text(source, func_node)
+            elif func_node.type == "field_expression":
+                # Struct member call: obj->func() or obj.func()
+                field_node = _find_child(func_node, "field_identifier")
+                if field_node:
+                    called_name = _get_text(source, field_node)
+
+            if called_name:
+                start_line = node.start_point[0] + 1
+                end_line = node.end_point[0] + 1
+
+                yield Edge(
+                    edge_type="CALLS",
+                    from_symbol_fqn=current_function,
+                    to_symbol_fqn=called_name,
+                    confidence=0.5,  # Best-effort
+                    evidence_start_line=start_line,
+                    evidence_end_line=end_line
+                )
 
 
 # Helper functions (same as extract_symbols.py)

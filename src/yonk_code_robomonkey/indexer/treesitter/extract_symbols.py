@@ -46,6 +46,7 @@ def extract_symbols(
         "typescript": _extract_typescript_symbols,
         "go": _extract_go_symbols,
         "java": _extract_java_symbols,
+        "c": _extract_c_symbols,
     }
 
     extractor = extractors.get(language)
@@ -457,6 +458,142 @@ def _extract_java_method(source: bytes, node: any, parents: list[str]) -> Symbol
         name=name,
         kind="method",
         signature=f"{name}{params}",
+        start_line=start_line,
+        end_line=end_line,
+        start_byte=node.start_byte,
+        end_byte=node.end_byte,
+        docstring=None,
+        hash=content_hash
+    )
+
+
+def _extract_c_symbols(source: bytes, tree: any, file_path: str) -> Iterator[Symbol]:
+    """Extract C functions, structs, and typedefs."""
+    root = tree.root_node
+
+    # Track extracted struct names to avoid duplicates
+    extracted_structs = set()
+
+    for node in root.children:
+        if node.type == "function_definition":
+            yield _extract_c_function(source, node)
+
+        elif node.type == "struct_specifier":
+            # Only extract named structs (not anonymous) at top level
+            name_node = _find_child(node, "type_identifier")
+            if name_node:
+                name = _get_text(source, name_node)
+                if name not in extracted_structs:
+                    extracted_structs.add(name)
+                    yield _extract_c_struct(source, node, name_node)
+
+        elif node.type == "declaration":
+            # Check for struct declarations like: struct Node { ... };
+            for child in node.children:
+                if child.type == "struct_specifier":
+                    name_node = _find_child(child, "type_identifier")
+                    if name_node:
+                        name = _get_text(source, name_node)
+                        if name not in extracted_structs:
+                            extracted_structs.add(name)
+                            yield _extract_c_struct(source, child, name_node)
+
+        elif node.type == "type_definition":
+            # typedef struct { ... } MyType;
+            # typedef int MyInt;
+            yield from _extract_c_typedef(source, node)
+
+
+def _extract_c_function(source: bytes, node: any) -> Symbol:
+    """Extract C function definition."""
+    # Get function name from declarator
+    declarator = _find_child(node, "function_declarator")
+    if not declarator:
+        # Try pointer_declarator for functions returning pointers
+        ptr_decl = _find_child(node, "pointer_declarator")
+        if ptr_decl:
+            declarator = _find_child(ptr_decl, "function_declarator")
+
+    name = "unknown"
+    params = "()"
+
+    if declarator:
+        name_node = _find_child(declarator, "identifier")
+        if name_node:
+            name = _get_text(source, name_node)
+
+        params_node = _find_child(declarator, "parameter_list")
+        if params_node:
+            params = _get_text(source, params_node)
+
+    start_line = node.start_point[0] + 1
+    end_line = node.end_point[0] + 1
+    content = source[node.start_byte:node.end_byte]
+    content_hash = hashlib.sha256(content).hexdigest()[:16]
+
+    return Symbol(
+        fqn=name,
+        name=name,
+        kind="function",
+        signature=f"{name}{params}",
+        start_line=start_line,
+        end_line=end_line,
+        start_byte=node.start_byte,
+        end_byte=node.end_byte,
+        docstring=None,
+        hash=content_hash
+    )
+
+
+def _extract_c_struct(source: bytes, node: any, name_node: any) -> Symbol:
+    """Extract C struct definition."""
+    name = _get_text(source, name_node)
+
+    start_line = node.start_point[0] + 1
+    end_line = node.end_point[0] + 1
+    content = source[node.start_byte:node.end_byte]
+    content_hash = hashlib.sha256(content).hexdigest()[:16]
+
+    return Symbol(
+        fqn=name,
+        name=name,
+        kind="struct",
+        signature=f"struct {name}",
+        start_line=start_line,
+        end_line=end_line,
+        start_byte=node.start_byte,
+        end_byte=node.end_byte,
+        docstring=None,
+        hash=content_hash
+    )
+
+
+def _extract_c_typedef(source: bytes, node: any) -> Iterator[Symbol]:
+    """Extract C typedef."""
+    # Find the type name (last identifier in typedef)
+    # typedef int MyInt;  -> MyInt is type_identifier
+    # typedef struct {...} MyStruct; -> MyStruct is type_identifier
+
+    name_node = None
+    for child in node.children:
+        if child.type == "type_identifier":
+            name_node = child
+
+    if not name_node:
+        return
+
+    name = _get_text(source, name_node)
+
+    start_line = node.start_point[0] + 1
+    end_line = node.end_point[0] + 1
+    content = source[node.start_byte:node.end_byte]
+    content_hash = hashlib.sha256(content).hexdigest()[:16]
+
+    yield Symbol(
+        fqn=name,
+        name=name,
+        kind="typedef",
+        signature=f"typedef ... {name}",
         start_line=start_line,
         end_line=end_line,
         start_byte=node.start_byte,

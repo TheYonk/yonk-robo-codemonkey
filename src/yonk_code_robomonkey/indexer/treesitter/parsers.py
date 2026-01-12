@@ -30,6 +30,7 @@ def get_parser(language: str) -> Parser | None:
         "typescript": "typescript",
         "go": "go",
         "java": "java",
+        "c": "c",
     }
 
     ts_lang_name = lang_map.get(language)
