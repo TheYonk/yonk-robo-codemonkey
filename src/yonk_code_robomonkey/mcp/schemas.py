@@ -20,7 +20,9 @@ USE THIS WHEN: You need to find code by meaning or keywords - "where is user aut
 
 DON'T USE WHEN: (1) You need documentation/README content → use doc_search, (2) You want comprehensive multi-angle coverage → use universal_search, (3) You already know the exact function name → use symbol_lookup.
 
-RETURNS: Ranked code chunks with file paths, line ranges, relevance scores, matched tags, and explainability metrics (why each result was returned). Each result shows which search strategy contributed most.""",
+RETURNS: Ranked code chunks with file paths, line ranges, relevance scores, matched tags, and explainability metrics (why each result was returned). Each result shows which search strategy contributed most.
+
+TIP: Use require_text_match=true when searching for specific constructs like DBMS_UTILITY or function names to filter out semantic-similar but irrelevant results.""",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -46,6 +48,11 @@ RETURNS: Ranked code chunks with file paths, line ranges, relevance scores, matc
                     "type": "integer",
                     "description": "Number of results to return (default 12)",
                     "default": 12
+                },
+                "require_text_match": {
+                    "type": "boolean",
+                    "description": "If true, filter out results that don't contain the query text (case-insensitive). Use for exact construct matching like DBMS_UTILITY, function names, etc. Default false.",
+                    "default": False
                 }
             },
             "required": ["query"]

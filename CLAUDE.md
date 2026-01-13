@@ -107,6 +107,10 @@ robomonkey db ping
   - Algorithm: merge vector candidates (pgvector) + FTS candidates (websearch_to_tsquery)
   - Score: 0.55*vec_norm + 0.35*fts_norm + 0.10*tag_boost
   - Explainability: vec_rank, vec_score, fts_rank, fts_score, matched_tags
+  - `require_text_match` param: filters out semantic-only matches, keeps only results containing query text
+- `fts_search.py` - Full-text search with compound identifier support
+  - Handles underscore-joined identifiers (DBMS_UTILITY, snake_case) via prefix matching
+  - Falls back to ILIKE when FTS tokenization fails
 - `graph_expand.py` - Graph traversal (callers/callees/hierarchy)
 - `context_pack.py` - Pack context within token budget
 - `summarizer.py` - Generate summaries (file/module/symbol)
@@ -147,7 +151,7 @@ The hybrid search combines three retrieval methods:
 
 ### MCP Tools (Planned v1)
 
-- `hybrid_search` - Hybrid retrieval with filters
+- `hybrid_search` - Hybrid retrieval with filters (supports `require_text_match` for exact construct matching)
 - `symbol_lookup` - Find symbol by FQN
 - `symbol_context` - Pack context around symbol (definition + callsites + neighborhood)
 - `callers` / `callees` - Graph traversal

@@ -31,15 +31,22 @@ def sanitize_fts_query(query: str) -> str:
     return sanitized.strip()
 
 
-def build_or_tsquery(query: str) -> str:
+def build_or_tsquery(query: str, use_prefix: bool = True) -> str:
     """Build a tsquery string with OR logic from plain text.
+
+    Handles compound identifiers (e.g., DBMS_UTILITY, foo.bar) by:
+    1. Keeping the full compound token with prefix matching
+    2. Splitting on underscores and dots to match partial tokens
 
     Args:
         query: Plain text search query
+        use_prefix: If True, add :* for prefix matching (default True)
 
     Returns:
-        tsquery string with OR operators (e.g., "word1 | word2 | word3")
+        tsquery string with OR operators (e.g., "word1:* | word2:*")
     """
+    import re
+
     # Sanitize first to remove FTS-breaking characters
     sanitized = sanitize_fts_query(query)
 
@@ -47,8 +54,32 @@ def build_or_tsquery(query: str) -> str:
     words = [w.strip() for w in sanitized.split() if w.strip()]
     if not words:
         return ""
-    # Join with OR operator
-    return " | ".join(words)
+
+    # Expand compound identifiers (split on _ and .)
+    expanded_tokens = set()
+    for word in words:
+        # Add the full word (lowercased for consistency)
+        word_lower = word.lower()
+        expanded_tokens.add(word_lower)
+
+        # Split on underscores and dots to get component parts
+        # e.g., "DBMS_UTILITY" -> ["dbms", "utility"]
+        # e.g., "dbms_utility.get_time" -> ["dbms", "utility", "get", "time"]
+        parts = re.split(r'[_.]', word_lower)
+        for part in parts:
+            if part and len(part) >= 2:  # Skip single-char tokens
+                expanded_tokens.add(part)
+
+    if not expanded_tokens:
+        return ""
+
+    # Build query with optional prefix matching
+    if use_prefix:
+        # Use :* for prefix matching to find compound tokens
+        # e.g., "dbms:*" matches "dbms_utility.get_time"
+        return " | ".join(f"{token}:*" for token in expanded_tokens)
+    else:
+        return " | ".join(expanded_tokens)
 
 
 @dataclass
@@ -71,12 +102,95 @@ class FTSResult:
     path: str | None = None
 
 
+async def _ilike_search_chunks(
+    query: str,
+    conn: asyncpg.Connection,
+    repo_id: str | None = None,
+    schema_name: str | None = None,
+    top_k: int = 30
+) -> list[FTSResult]:
+    """Fallback ILIKE search for exact substring matching.
+
+    Used when FTS doesn't find results due to tokenization issues.
+    """
+    # Sanitize query for ILIKE (escape % and _)
+    sanitized = sanitize_fts_query(query)
+    if not sanitized:
+        return []
+
+    # Build ILIKE pattern
+    like_pattern = f"%{sanitized}%"
+
+    if repo_id:
+        sql = """
+            SELECT
+                c.id as entity_id,
+                'chunk' as entity_type,
+                c.content,
+                c.file_id,
+                c.symbol_id,
+                c.start_line,
+                c.end_line,
+                f.path as file_path,
+                1.0 as rank
+            FROM chunk c
+            JOIN file f ON c.file_id = f.id
+            WHERE c.repo_id = $1
+            AND c.content ILIKE $2
+            ORDER BY c.start_line
+            LIMIT $3
+        """
+        params = (repo_id, like_pattern, top_k)
+    else:
+        sql = """
+            SELECT
+                c.id as entity_id,
+                'chunk' as entity_type,
+                c.content,
+                c.file_id,
+                c.symbol_id,
+                c.start_line,
+                c.end_line,
+                f.path as file_path,
+                1.0 as rank
+            FROM chunk c
+            JOIN file f ON c.file_id = f.id
+            WHERE c.content ILIKE $1
+            ORDER BY c.start_line
+            LIMIT $2
+        """
+        params = (like_pattern, top_k)
+
+    if schema_name:
+        async with schema_context(conn, schema_name):
+            rows = await conn.fetch(sql, *params)
+    else:
+        rows = await conn.fetch(sql, *params)
+
+    results = []
+    for row in rows:
+        results.append(FTSResult(
+            entity_id=row["entity_id"],
+            entity_type=row["entity_type"],
+            content=row["content"],
+            rank=row["rank"],
+            file_id=row["file_id"],
+            symbol_id=row["symbol_id"],
+            start_line=row["start_line"],
+            end_line=row["end_line"],
+            file_path=row["file_path"]
+        ))
+
+    return results
+
+
 async def fts_search_chunks(
     query: str,
     database_url: str,
     repo_id: str | None = None,
     schema_name: str | None = None,
-    top_k: int = 30
+    top_k: int = 30,
+    fallback_to_ilike: bool = True
 ) -> list[FTSResult]:
     """Search chunks using full-text search with OR logic.
 
@@ -86,12 +200,13 @@ async def fts_search_chunks(
         repo_id: Optional repository UUID to filter by
         schema_name: Optional schema name for isolation
         top_k: Number of results to return
+        fallback_to_ilike: If True, fall back to ILIKE when FTS returns no results
 
     Returns:
         List of FTS results ordered by rank (highest first)
     """
-    # Build OR query
-    or_query = build_or_tsquery(query)
+    # Build OR query with prefix matching for compound identifiers
+    or_query = build_or_tsquery(query, use_prefix=True)
     if not or_query:
         return []
 
@@ -158,6 +273,12 @@ async def fts_search_chunks(
                 end_line=row["end_line"],
                 file_path=row["file_path"]
             ))
+
+        # Fall back to ILIKE if FTS returns no results
+        if not results and fallback_to_ilike:
+            results = await _ilike_search_chunks(
+                query, conn, repo_id, schema_name, top_k
+            )
 
         return results
 

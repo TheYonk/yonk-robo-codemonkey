@@ -70,7 +70,8 @@ async def hybrid_search(
     repo_id: str | None = None,
     tags_any: list[str] | None = None,
     tags_all: list[str] | None = None,
-    final_top_k: int = 12
+    final_top_k: int = 12,
+    require_text_match: bool = False
 ) -> dict[str, Any]:
     """Perform hybrid search combining vector similarity, FTS, and tag filtering.
 
@@ -81,6 +82,8 @@ async def hybrid_search(
         tags_any: Optional list of tags (match any)
         tags_all: Optional list of tags (match all)
         final_top_k: Number of results to return (default 12)
+        require_text_match: If True, filter out results that don't contain the query
+            text (case-insensitive). Useful for exact construct matching like DBMS_UTILITY.
 
     Returns:
         Dictionary with results and explainability information
@@ -122,7 +125,8 @@ async def hybrid_search(
         tags_all=tags_all,
         vector_top_k=settings.vector_top_k,
         fts_top_k=settings.fts_top_k,
-        final_top_k=final_top_k
+        final_top_k=final_top_k,
+        require_text_match=require_text_match
     )
 
     # Convert results to dictionary format

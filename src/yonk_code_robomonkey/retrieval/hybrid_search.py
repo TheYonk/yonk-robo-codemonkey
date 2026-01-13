@@ -52,7 +52,8 @@ async def hybrid_search(
     final_top_k: int = 12,
     vector_weight: float = 0.55,
     fts_weight: float = 0.35,
-    tag_weight: float = 0.10
+    tag_weight: float = 0.10,
+    require_text_match: bool = False
 ) -> list[HybridSearchResult]:
     """Perform hybrid search combining vector similarity, FTS, and tag filtering.
 
@@ -73,6 +74,8 @@ async def hybrid_search(
         vector_weight: Weight for vector score (default 0.55)
         fts_weight: Weight for FTS score (default 0.35)
         tag_weight: Weight for tag boost (default 0.10)
+        require_text_match: If True, filter out results that don't contain
+            the query text (case-insensitive). Useful for exact construct matching.
 
     Returns:
         List of hybrid search results with explainability fields
@@ -206,6 +209,22 @@ async def hybrid_search(
                 continue  # Skip this candidate
 
         filtered_candidates.append(candidate)
+
+    # 6b. Apply text match filter (second pass to remove semantic-only matches)
+    if require_text_match:
+        # Extract search terms from query, preserving compound identifiers
+        import re
+        query_lower = query.lower()
+        # Split on whitespace but keep compound identifiers (with _ or .)
+        search_terms = [t.strip() for t in query_lower.split() if t.strip()]
+
+        text_matched = []
+        for candidate in filtered_candidates:
+            content_lower = candidate["content"].lower()
+            # Check if ANY of the search terms appear in the content
+            if any(term in content_lower for term in search_terms):
+                text_matched.append(candidate)
+        filtered_candidates = text_matched
 
     # 7. Compute combined scores
     # Normalize vector and FTS scores
