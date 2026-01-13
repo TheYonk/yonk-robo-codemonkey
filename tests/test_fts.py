@@ -2,7 +2,12 @@
 import pytest
 import pytest_asyncio
 from pathlib import Path
-from yonk_code_robomonkey.retrieval.fts_search import fts_search_chunks, fts_search
+from yonk_code_robomonkey.retrieval.fts_search import (
+    fts_search_chunks,
+    fts_search,
+    build_or_tsquery,
+    sanitize_fts_query,
+)
 from yonk_code_robomonkey.indexer.indexer import index_repository
 
 
@@ -142,3 +147,125 @@ async def test_fts_search_combined(database_url, indexed_repo):
     assert len(results) > 0
     # All results should be chunks
     assert all(r.entity_type == "chunk" for r in results)
+
+
+# =============================================================================
+# Unit tests for build_or_tsquery - compound identifier handling
+# =============================================================================
+
+
+def test_build_or_tsquery_compound_identifier_not_split():
+    """Test that compound identifiers like DBMS_XMLPARSER are NOT split on underscores.
+
+    This was a bug where "DBMS_XMLPARSER" would produce:
+        dbms_xmlparser:* | dbms:* | xmlparser:*
+
+    Which matched ANY result containing "DBMS" or "XMLPARSER".
+
+    Now it should produce only:
+        dbms_xmlparser:*
+    """
+    result = build_or_tsquery("DBMS_XMLPARSER")
+
+    # Should be exactly one token - the full compound identifier
+    assert result == "dbms_xmlparser:*"
+
+    # Split into tokens to verify no separate parts
+    tokens = [t.strip() for t in result.split("|")]
+    assert len(tokens) == 1
+    assert tokens[0] == "dbms_xmlparser:*"
+
+
+def test_build_or_tsquery_multiple_compound_identifiers():
+    """Test multiple compound identifiers in one query."""
+    result = build_or_tsquery("DBMS_UTILITY DBMS_XMLPARSER")
+
+    # Split into tokens
+    tokens = {t.strip() for t in result.split("|")}
+
+    # Should have exactly 2 tokens - the full compound identifiers
+    assert len(tokens) == 2
+    assert "dbms_utility:*" in tokens
+    assert "dbms_xmlparser:*" in tokens
+
+    # Should NOT have the split parts as separate tokens
+    assert "dbms:*" not in tokens
+    assert "utility:*" not in tokens
+    assert "xmlparser:*" not in tokens
+
+
+def test_build_or_tsquery_dotted_identifier_not_split():
+    """Test that dotted identifiers like foo.bar are NOT split."""
+    result = build_or_tsquery("package.ClassName.methodName")
+
+    # Should be exactly one token - the full dotted identifier
+    tokens = [t.strip() for t in result.split("|")]
+    assert len(tokens) == 1
+    assert tokens[0] == "package.classname.methodname:*"
+
+
+def test_build_or_tsquery_mixed_compound_and_simple():
+    """Test query with both compound identifiers and simple words."""
+    result = build_or_tsquery("DBMS_UTILITY function")
+
+    # Split into tokens
+    tokens = {t.strip() for t in result.split("|")}
+
+    # Should have exactly 2 tokens
+    assert len(tokens) == 2
+    assert "dbms_utility:*" in tokens
+    assert "function:*" in tokens
+
+    # Should NOT have split parts as separate tokens
+    assert "dbms:*" not in tokens
+    assert "utility:*" not in tokens
+
+
+def test_build_or_tsquery_simple_words_still_work():
+    """Test that simple words still work correctly."""
+    result = build_or_tsquery("hello world")
+
+    assert "hello:*" in result
+    assert "world:*" in result
+    assert "|" in result
+
+
+def test_build_or_tsquery_without_prefix():
+    """Test building query without prefix matching."""
+    result = build_or_tsquery("DBMS_XMLPARSER", use_prefix=False)
+
+    assert result == "dbms_xmlparser"
+    assert ":*" not in result
+
+
+def test_build_or_tsquery_single_char_filtered():
+    """Test that single character tokens are filtered out."""
+    result = build_or_tsquery("a")
+
+    # Single char should be filtered
+    assert result == ""
+
+
+def test_build_or_tsquery_empty_query():
+    """Test empty query returns empty string."""
+    assert build_or_tsquery("") == ""
+    assert build_or_tsquery("   ") == ""
+
+
+def test_sanitize_fts_query_preserves_underscores():
+    """Test that sanitize_fts_query preserves underscores in identifiers."""
+    result = sanitize_fts_query("DBMS_XMLPARSER")
+
+    # Underscore should be preserved
+    assert "_" in result
+    assert result == "DBMS_XMLPARSER"
+
+
+def test_sanitize_fts_query_removes_special_chars():
+    """Test that special FTS characters are removed."""
+    result = sanitize_fts_query("foo:bar|baz&qux")
+
+    # Special chars should become spaces
+    assert ":" not in result
+    assert "|" not in result
+    assert "&" not in result
