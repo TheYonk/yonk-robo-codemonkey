@@ -34,9 +34,10 @@ def sanitize_fts_query(query: str) -> str:
 def build_or_tsquery(query: str, use_prefix: bool = True) -> str:
     """Build a tsquery string with OR logic from plain text.
 
-    Handles compound identifiers (e.g., DBMS_UTILITY, foo.bar) by:
-    1. Keeping the full compound token with prefix matching
-    2. Splitting on underscores and dots to match partial tokens
+    Treats compound identifiers (e.g., DBMS_UTILITY, foo.bar) as single tokens.
+    Does NOT split on underscores or dots - searching for "DBMS_XMLPARSER"
+    will only match that exact identifier, not "DBMS_UTILITY" or other
+    unrelated matches.
 
     Args:
         query: Plain text search query
@@ -45,8 +46,6 @@ def build_or_tsquery(query: str, use_prefix: bool = True) -> str:
     Returns:
         tsquery string with OR operators (e.g., "word1:* | word2:*")
     """
-    import re
-
     # Sanitize first to remove FTS-breaking characters
     sanitized = sanitize_fts_query(query)
 
@@ -55,31 +54,22 @@ def build_or_tsquery(query: str, use_prefix: bool = True) -> str:
     if not words:
         return ""
 
-    # Expand compound identifiers (split on _ and .)
-    expanded_tokens = set()
+    # Keep compound identifiers as single tokens (don't split on _ or .)
+    tokens = set()
     for word in words:
-        # Add the full word (lowercased for consistency)
         word_lower = word.lower()
-        expanded_tokens.add(word_lower)
+        if word_lower and len(word_lower) >= 2:  # Skip single-char tokens
+            tokens.add(word_lower)
 
-        # Split on underscores and dots to get component parts
-        # e.g., "DBMS_UTILITY" -> ["dbms", "utility"]
-        # e.g., "dbms_utility.get_time" -> ["dbms", "utility", "get", "time"]
-        parts = re.split(r'[_.]', word_lower)
-        for part in parts:
-            if part and len(part) >= 2:  # Skip single-char tokens
-                expanded_tokens.add(part)
-
-    if not expanded_tokens:
+    if not tokens:
         return ""
 
     # Build query with optional prefix matching
     if use_prefix:
-        # Use :* for prefix matching to find compound tokens
-        # e.g., "dbms:*" matches "dbms_utility.get_time"
-        return " | ".join(f"{token}:*" for token in expanded_tokens)
+        # Use :* for prefix matching
+        return " | ".join(f"{token}:*" for token in tokens)
     else:
-        return " | ".join(expanded_tokens)
+        return " | ".join(tokens)
 
 
 @dataclass
