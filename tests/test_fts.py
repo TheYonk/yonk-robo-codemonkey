@@ -269,3 +269,88 @@ def test_sanitize_fts_query_removes_special_chars():
     assert ":" not in result
     assert "|" not in result
     assert "&" not in result
+
+
+# =============================================================================
+# Unit tests for text match filtering helper function
+# =============================================================================
+
+
+def _filter_by_text_match(results: list[dict], query: str) -> list[dict]:
+    """Helper to simulate text match filtering logic used in tools."""
+    query_lower = query.lower()
+    search_terms = [t.strip() for t in query_lower.split() if t.strip()]
+    return [
+        r for r in results
+        if any(term in r.get("content", "").lower() for term in search_terms)
+    ]
+
+
+def test_text_match_filter_exact_identifier():
+    """Test that text match filter works with exact identifiers like DBMS_XMLPARSER."""
+    results = [
+        {"content": "This uses DBMS_XMLPARSER.parse() to parse XML"},
+        {"content": "This uses DBMS_UTILITY for something else"},
+        {"content": "Generic XML parsing code here"},
+    ]
+
+    filtered = _filter_by_text_match(results, "DBMS_XMLPARSER")
+
+    assert len(filtered) == 1
+    assert "DBMS_XMLPARSER" in filtered[0]["content"]
+
+
+def test_text_match_filter_multiple_terms():
+    """Test text match filter with multiple search terms."""
+    results = [
+        {"content": "Authentication module handles login"},
+        {"content": "Session management for users"},
+        {"content": "Database connection pooling"},
+    ]
+
+    filtered = _filter_by_text_match(results, "authentication login")
+
+    # Should match the first one (contains "authentication")
+    assert len(filtered) == 1
+    assert "Authentication" in filtered[0]["content"]
+
+
+def test_text_match_filter_case_insensitive():
+    """Test that text match filter is case insensitive."""
+    results = [
+        {"content": "DBMS_XMLPARSER handles XML"},
+        {"content": "dbms_utility is different"},
+    ]
+
+    filtered = _filter_by_text_match(results, "dbms_xmlparser")
+
+    assert len(filtered) == 1
+    assert "DBMS_XMLPARSER" in filtered[0]["content"]
+
+
+def test_text_match_filter_no_matches():
+    """Test text match filter when nothing matches."""
+    results = [
+        {"content": "Something about apples"},
+        {"content": "Something about oranges"},
+    ]
+
+    filtered = _filter_by_text_match(results, "DBMS_XMLPARSER")
+
+    assert len(filtered) == 0
+
+
+def test_text_match_filter_preserves_compound_identifier():
+    """Test that compound identifiers are not split during filtering."""
+    results = [
+        {"content": "Uses DBMS_XMLPARSER for XML parsing"},
+        {"content": "Uses DBMS_UTILITY for other things"},
+        {"content": "Some XMLPARSER standalone reference"},  # Should NOT match
+    ]
+
+    # When filtering for "DBMS_XMLPARSER", only the first should match
+    # NOT the third one which has "XMLPARSER" but not "DBMS_XMLPARSER"
+    filtered = _filter_by_text_match(results, "DBMS_XMLPARSER")
+
+    assert len(filtered) == 1
+    assert "DBMS_XMLPARSER" in filtered[0]["content"]

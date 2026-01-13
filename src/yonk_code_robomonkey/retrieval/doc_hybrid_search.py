@@ -43,7 +43,8 @@ async def doc_hybrid_search(
     fts_top_k: int = 30,
     final_top_k: int = 12,
     vector_weight: float = 0.55,
-    fts_weight: float = 0.45
+    fts_weight: float = 0.45,
+    require_text_match: bool = False
 ) -> list[DocHybridSearchResult]:
     """Perform hybrid search on documents combining vector similarity and FTS.
 
@@ -61,6 +62,8 @@ async def doc_hybrid_search(
         final_top_k: Final number of results to return
         vector_weight: Weight for vector score (default 0.55)
         fts_weight: Weight for FTS score (default 0.45)
+        require_text_match: If True, filter out results that don't contain
+            the query text (case-insensitive). Useful for exact construct matching.
 
     Returns:
         List of hybrid search results with explainability fields
@@ -166,6 +169,15 @@ async def doc_hybrid_search(
             fts_score=candidate["fts_score"]
         ))
 
-    # 6. Sort by combined score and return top K
+    # 6. Apply text match filter if requested
+    if require_text_match:
+        query_lower = query.lower()
+        search_terms = [t.strip() for t in query_lower.split() if t.strip()]
+        results = [
+            r for r in results
+            if any(term in r.content.lower() for term in search_terms)
+        ]
+
+    # 7. Sort by combined score and return top K
     results.sort(key=lambda r: r.score, reverse=True)
     return results[:final_top_k]

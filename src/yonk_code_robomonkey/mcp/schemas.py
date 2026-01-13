@@ -205,7 +205,9 @@ USE THIS WHEN: Looking for project documentation, setup instructions, architectu
 
 DON'T USE WHEN: (1) Searching for code implementations → use hybrid_search, (2) Need both code and docs → use universal_search, (3) Documentation wasn't indexed (some repos may not have .md files indexed yet).
 
-RETURNS: Documentation chunks with file paths, relevance scores, and content snippets. Focuses exclusively on prose documentation rather than code.""",
+RETURNS: Documentation chunks with file paths, relevance scores, and content snippets. Focuses exclusively on prose documentation rather than code.
+
+TIP: Use require_text_match=true when searching for specific terms to filter out semantic-similar but irrelevant results.""",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -221,6 +223,11 @@ RETURNS: Documentation chunks with file paths, relevance scores, and content sni
                     "type": "integer",
                     "description": "Number of results to return (default 10)",
                     "default": 10
+                },
+                "require_text_match": {
+                    "type": "boolean",
+                    "description": "If true, filter out results that don't contain the query text (case-insensitive). Use for exact term matching. Default false.",
+                    "default": False
                 }
             },
             "required": ["query"]
@@ -773,6 +780,11 @@ RETURNS: {total_results_found: int, strategies_used: [3 strategies], top_results
                     "type": "boolean",
                     "description": "Whether to use LLM summarization (default True). Disable for faster results without summary.",
                     "default": True
+                },
+                "require_text_match": {
+                    "type": "boolean",
+                    "description": "If true, filter out results that don't contain the query text (case-insensitive). Use for exact construct matching. Default false.",
+                    "default": False
                 }
             },
             "required": ["query", "repo"]
@@ -819,6 +831,11 @@ RETURNS: Structured answer with: top documentation results with summaries, top c
                     "type": "boolean",
                     "description": "Return formatted markdown output (default true)",
                     "default": True
+                },
+                "require_text_match": {
+                    "type": "boolean",
+                    "description": "If true, filter out results that don't contain the query text (case-insensitive). Use for exact construct matching. Default false.",
+                    "default": False
                 }
             },
             "required": ["question", "repo"]

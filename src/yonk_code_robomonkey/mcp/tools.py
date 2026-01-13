@@ -447,7 +447,8 @@ async def doc_search(
     repo: str | None = None,
     repo_id: str | None = None,
     top_k: int = 10,
-    min_validity_score: int | None = None
+    min_validity_score: int | None = None,
+    require_text_match: bool = False
 ) -> dict[str, Any]:
     """Search documentation and markdown files using hybrid search (vector + FTS).
 
@@ -458,6 +459,8 @@ async def doc_search(
         top_k: Number of results to return (default 10)
         min_validity_score: Minimum doc validity score (0-100). Docs below this are filtered out.
                            Default None means no filtering. Set to 50 to skip stale docs.
+        require_text_match: If True, filter out results that don't contain the query
+            text (case-insensitive). Use for exact construct matching.
 
     Returns:
         Dictionary with document search results and ranking info, including validity scores
@@ -500,7 +503,8 @@ async def doc_search(
         schema_name=schema_name,
         vector_top_k=30,
         fts_top_k=30,
-        final_top_k=top_k * 2 if min_validity_score else top_k  # Fetch more if filtering
+        final_top_k=top_k * 2 if min_validity_score or require_text_match else top_k,  # Fetch more if filtering
+        require_text_match=require_text_match
     )
 
     # Get validity scores for results if filtering or for display
@@ -2570,7 +2574,8 @@ async def universal_search(
     repo: str,
     top_k: int = 10,
     deep_mode: bool = True,
-    min_validity_score: int | None = None
+    min_validity_score: int | None = None,
+    require_text_match: bool = False
 ) -> dict[str, Any]:
     """Comprehensive multi-strategy search with LLM-powered summarization.
 
@@ -2588,6 +2593,8 @@ async def universal_search(
         deep_mode: Whether to use LLM summarization (default True)
         min_validity_score: Minimum doc validity score (0-100). Docs below this are filtered out.
                            Default None means no filtering. Set to 50 to skip stale docs.
+        require_text_match: If True, filter out results that don't contain the query
+            text (case-insensitive). Use for exact construct matching.
 
     Returns:
         Combined search results with LLM summary and top files
@@ -2618,7 +2625,8 @@ async def universal_search(
             schema_name=schema_name,
             vector_top_k=settings.vector_top_k,
             fts_top_k=settings.fts_top_k,
-            final_top_k=top_k
+            final_top_k=top_k,
+            require_text_match=require_text_match
         )
 
         # 2. Doc search
@@ -2643,7 +2651,8 @@ async def universal_search(
             schema_name=schema_name,
             vector_top_k=top_k * 2,
             fts_top_k=5,  # Minimal FTS for semantic search
-            final_top_k=top_k
+            final_top_k=top_k,
+            require_text_match=require_text_match
         )
 
         # Execute all searches concurrently
@@ -2692,10 +2701,22 @@ async def universal_search(
                 """, doc_ids)
                 validity_scores = {row['document_id']: row['score'] for row in rows}
 
+        # Prepare text match filter terms
+        search_terms = []
+        if require_text_match:
+            query_lower = query.lower()
+            search_terms = [t.strip() for t in query_lower.split() if t.strip()]
+
         for r in doc_results:
             # Doc results have different structure (FTSResult dataclass)
             doc_id = r.entity_id
             doc_id_str = str(doc_id) if doc_id else None
+
+            # Filter by text match if required
+            if require_text_match and search_terms:
+                content_lower = (r.content or "").lower()
+                if not any(term in content_lower for term in search_terms):
+                    continue
 
             # Filter by validity if threshold set
             if min_validity_score is not None and doc_id_str:
@@ -3101,7 +3122,8 @@ async def ask_codebase_tool(
     top_code: int = 5,
     top_symbols: int = 5,
     format_as_markdown: bool = True,
-    min_validity_score: int | None = None
+    min_validity_score: int | None = None,
+    require_text_match: bool = False
 ) -> dict[str, Any]:
     """Ask a natural language question about the codebase and get comprehensive answers.
 
@@ -3123,6 +3145,8 @@ async def ask_codebase_tool(
         format_as_markdown: Return formatted markdown (default True)
         min_validity_score: Minimum doc validity score (0-100). Docs below this are filtered out.
                            Default None means no filtering. Set to 50 to skip stale docs.
+        require_text_match: If True, filter out results that don't contain the query
+            text (case-insensitive). Use for exact construct matching.
 
     Returns:
         Comprehensive answer with documentation, code, symbols, and summary
@@ -3151,8 +3175,12 @@ async def ask_codebase_tool(
         schema_name = result["schema"]
 
         # Call the ask_codebase function with embedding configuration
-        # Request more docs if we're filtering by validity
-        docs_to_request = top_docs * 2 if min_validity_score is not None else top_docs
+        # Request more results if we're filtering
+        needs_extra = min_validity_score is not None or require_text_match
+        docs_to_request = top_docs * 2 if needs_extra else top_docs
+        code_to_request = top_code * 2 if require_text_match else top_code
+        symbols_to_request = top_symbols * 2 if require_text_match else top_symbols
+
         answer = await _ask_codebase(
             question=question,
             repo_name=repo,
@@ -3163,16 +3191,46 @@ async def ask_codebase_tool(
             embeddings_base_url=settings.embeddings_base_url,
             embeddings_api_key=getattr(settings, 'embeddings_api_key', ''),
             top_docs=docs_to_request,
-            top_code=top_code,
-            top_symbols=top_symbols,
+            top_code=code_to_request,
+            top_symbols=symbols_to_request,
             use_llm_summary=False,  # For now, basic summary
             use_vector_search=True  # Enable semantic search!
         )
 
+        # Apply text match filter if requested
+        filtered_code = list(answer.code_files)
+        filtered_symbols = list(answer.symbols)
+
+        if require_text_match:
+            query_lower = question.lower()
+            search_terms = [t.strip() for t in query_lower.split() if t.strip()]
+
+            # Filter code results
+            filtered_code = [
+                code for code in answer.code_files
+                if any(term in code.snippet.lower() for term in search_terms)
+            ][:top_code]
+
+            # Filter symbol results
+            filtered_symbols = [
+                sym for sym in answer.symbols
+                if any(term in sym.name.lower() or term in (sym.description or "").lower()
+                       for term in search_terms)
+            ][:top_symbols]
+
+        # Filter documentation by text match if requested
+        docs_text_filtered = list(answer.documentation)
+        if require_text_match:
+            docs_text_filtered = [
+                doc for doc in answer.documentation
+                if any(term in doc.summary.lower() or term in doc.title.lower()
+                       for term in search_terms)
+            ]
+
         # Filter documentation by validity if threshold is set
         docs_filtered_count = 0
         validity_scores = {}
-        filtered_docs = list(answer.documentation)
+        filtered_docs = docs_text_filtered
 
         if min_validity_score is not None and answer.documentation:
             # Get document IDs from results
@@ -3234,7 +3292,7 @@ async def ask_codebase_tool(
                         "context": code.context,
                         "relevance": code.relevance_score
                     }
-                    for code in answer.code_files
+                    for code in filtered_code
                 ],
                 "symbols": [
                     {
@@ -3246,14 +3304,14 @@ async def ask_codebase_tool(
                         "description": sym.description,
                         "relevance": sym.relevance_score
                     }
-                    for sym in answer.symbols
+                    for sym in filtered_symbols
                 ],
                 "summary": answer.summary,
                 "key_files": answer.key_files,
                 "suggested_actions": answer.suggested_actions,
                 "total_results": answer.total_results_found,
                 "search_strategies": answer.search_strategies_used,
-                "why": f"Searched {answer.repo_name} using {len(answer.search_strategies_used)} strategies. Found {answer.total_results_found} total results: {len(filtered_docs)} docs, {len(answer.code_files)} code files, {len(answer.symbols)} symbols.{f' Filtered {docs_filtered_count} stale docs.' if docs_filtered_count else ''} Key files: {', '.join(answer.key_files[:3])}"
+                "why": f"Searched {answer.repo_name} using {len(answer.search_strategies_used)} strategies. Found {answer.total_results_found} total results: {len(filtered_docs)} docs, {len(filtered_code)} code files, {len(filtered_symbols)} symbols.{f' Filtered {docs_filtered_count} stale docs.' if docs_filtered_count else ''} Key files: {', '.join(answer.key_files[:3])}"
             }
         else:
             # Return raw structured data
@@ -3267,8 +3325,8 @@ async def ask_codebase_tool(
                     }
                     for doc in filtered_docs
                 ],
-                "code_files": [code.__dict__ for code in answer.code_files],
-                "symbols": [sym.__dict__ for sym in answer.symbols],
+                "code_files": [code.__dict__ for code in filtered_code],
+                "symbols": [sym.__dict__ for sym in filtered_symbols],
                 "summary": answer.summary,
                 "key_files": answer.key_files,
                 "suggested_actions": answer.suggested_actions,
