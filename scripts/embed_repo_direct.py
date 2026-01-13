@@ -6,7 +6,7 @@ Usage:
     python scripts/embed_repo_direct.py <repo_name> <schema_name>
 
 Example:
-    python scripts/embed_repo_direct.py pg_go_app codegraph_pg_go_app
+    python scripts/embed_repo_direct.py pg_go_app robomonkey_pg_go_app
 """
 import asyncio
 import logging
@@ -28,7 +28,7 @@ from yonk_code_robomonkey.embeddings.embedder import embed_repo
 async def main():
     if len(sys.argv) < 3:
         print("Usage: python scripts/embed_repo_direct.py <repo_name> <schema_name>")
-        print("Example: python scripts/embed_repo_direct.py pg_go_app codegraph_pg_go_app")
+        print("Example: python scripts/embed_repo_direct.py pg_go_app robomonkey_pg_go_app")
         sys.exit(1)
 
     repo_name = sys.argv[1]

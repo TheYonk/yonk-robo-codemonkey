@@ -44,7 +44,7 @@ robomonkey db ping
 - `robomonkey index --repo /path/to/repo --name myrepo` - Index a repository
 
 **MCP Server:**
-- `python -m robomonkey_mcp.mcp.server` - Run MCP server in stdio mode
+- `python -m yonk_code_robomonkey.mcp.server` - Run MCP server in stdio mode
 
 **Testing:**
 - `pytest` - Run all tests

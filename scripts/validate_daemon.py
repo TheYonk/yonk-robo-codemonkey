@@ -21,12 +21,12 @@ from pathlib import Path
 DATABASE_URL = "postgresql://postgres:postgres@localhost:5433/codegraph"
 TEST_REPO_1 = {
     "name": "test_repo_1",
-    "schema_name": "codegraph_test_repo_1",
+    "schema_name": "robomonkey_test_repo_1",
     "root_path": "/tmp/test_repo_1"
 }
 TEST_REPO_2 = {
     "name": "test_repo_2",
-    "schema_name": "codegraph_test_repo_2",
+    "schema_name": "robomonkey_test_repo_2",
     "root_path": "/tmp/test_repo_2"
 }
 

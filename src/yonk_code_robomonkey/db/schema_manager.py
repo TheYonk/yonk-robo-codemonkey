@@ -87,8 +87,8 @@ async def schema_context(
         The same connection with search_path set
 
     Example:
-        async with schema_context(conn, "codegraph_legacy1"):
-            # All queries now use codegraph_legacy1 schema
+        async with schema_context(conn, "robomonkey_myrepo"):
+            # All queries now use robomonkey_myrepo schema
             await conn.fetch("SELECT * FROM repo")
     """
     # Save current search_path

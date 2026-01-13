@@ -21,7 +21,7 @@ async def extract_and_store_sql_metadata(
     repo_id: str,
     file_path: Path | str,
     source_file_path: str,
-    dialect: str = "postgres",
+    dialect: str = "auto",
     document_id: str | None = None,
     file_id: str | None = None
 ) -> dict[str, int]:
@@ -67,7 +67,7 @@ async def extract_and_store_sql_content(
     repo_id: str,
     content: str,
     source_file_path: str,
-    dialect: str = "postgres",
+    dialect: str = "auto",
     document_id: str | None = None,
     file_id: str | None = None
 ) -> dict[str, int]:
@@ -134,7 +134,7 @@ async def extract_schema_metadata_from_repo(
     conn: asyncpg.Connection,
     repo_id: str,
     repo_root: Path | str,
-    dialect: str = "postgres"
+    dialect: str = "auto"
 ) -> dict[str, int]:
     """Extract all SQL schema metadata from a repository.
 

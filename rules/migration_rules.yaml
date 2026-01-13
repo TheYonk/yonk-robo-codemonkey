@@ -159,7 +159,7 @@ oracle_rules:
     category: "sql_dialect"
     severity: "medium"
     title: "ROWNUM pagination"
-    pattern: "\\bROWNUM\\b"
+    pattern: "\\yROWNUM\\y"
     description: "ROWNUM is Oracle-specific - use LIMIT/OFFSET or ROW_NUMBER()"
     mapping:
       postgres_equivalent: "LIMIT/OFFSET or ROW_NUMBER() OVER()"
@@ -170,7 +170,7 @@ oracle_rules:
     category: "sql_dialect"
     severity: "high"
     title: "Hierarchical queries (CONNECT BY)"
-    pattern: "(?i)\\bCONNECT\\s+BY\\b"
+    pattern: "(?i)\\yCONNECT\\s+BY\\y"
     description: "CONNECT BY is Oracle hierarchical query syntax"
     mapping:
       postgres_equivalent: "Recursive CTEs (WITH RECURSIVE)"
@@ -181,7 +181,7 @@ oracle_rules:
     category: "sql_dialect"
     severity: "low"
     title: "NVL function"
-    pattern: "\\bNVL\\s*\\("
+    pattern: "\\yNVL\\s*\\("
     description: "NVL is Oracle-specific NULL handling"
     mapping:
       postgres_equivalent: "COALESCE() or NULLIF()"
@@ -192,7 +192,7 @@ oracle_rules:
     category: "sql_dialect"
     severity: "medium"
     title: "DECODE function"
-    pattern: "\\bDECODE\\s*\\("
+    pattern: "\\yDECODE\\s*\\("
     description: "DECODE is Oracle-specific conditional logic"
     mapping:
       postgres_equivalent: "CASE WHEN expressions"
@@ -203,7 +203,7 @@ oracle_rules:
     category: "sql_dialect"
     severity: "low"
     title: "DUAL table usage"
-    pattern: "(?i)\\bFROM\\s+DUAL\\b"
+    pattern: "(?i)\\yFROM\\s+DUAL\\y"
     description: "DUAL is Oracle dummy table"
     mapping:
       postgres_equivalent: "No FROM clause needed"
@@ -214,7 +214,7 @@ oracle_rules:
     category: "sql_dialect"
     severity: "low"
     title: "SYSDATE function"
-    pattern: "\\bSYSDATE\\b"
+    pattern: "\\ySYSDATE\\y"
     description: "SYSDATE is Oracle current timestamp"
     mapping:
       postgres_equivalent: "CURRENT_TIMESTAMP or now()"
@@ -247,7 +247,7 @@ oracle_rules:
     category: "procedures"
     severity: "critical"
     title: "PL/SQL packages"
-    pattern: "(?i)\\b(CREATE\\s+(OR\\s+REPLACE\\s+)?PACKAGE|PACKAGE\\s+BODY)\\b"
+    pattern: "(?i)\\y(CREATE\\s+(OR\\s+REPLACE\\s+)?PACKAGE|PACKAGE\\s+BODY)\\y"
     description: "Oracle PL/SQL packages - significant refactoring needed"
     mapping:
       postgres_equivalent: "PL/pgSQL functions and schemas"
@@ -258,7 +258,7 @@ oracle_rules:
     category: "procedures"
     severity: "high"
     title: "Oracle DBMS_ package usage"
-    pattern: "\\bDBMS_\\w+"
+    pattern: "\\yDBMS_\\w+"
     description: "Oracle built-in DBMS packages - find PostgreSQL equivalents"
     mapping:
       postgres_equivalent: "Varies by package - pg_catalog functions or extensions"
@@ -280,7 +280,7 @@ oracle_rules:
     category: "sql_dialect"
     severity: "medium"
     title: "MERGE statement"
-    pattern: "(?i)\\bMERGE\\s+INTO\\b"
+    pattern: "(?i)\\yMERGE\\s+INTO\\y"
     description: "Oracle MERGE statement"
     mapping:
       postgres_equivalent: "INSERT ... ON CONFLICT (PostgreSQL 9.5+)"
@@ -317,7 +317,7 @@ sqlserver_rules:
     category: "sql_dialect"
     severity: "low"
     title: "TOP clause"
-    pattern: "(?i)\\bSELECT\\s+TOP\\s+\\d+"
+    pattern: "(?i)\\ySELECT\\s+TOP\\s+\\d+"
     description: "TOP is SQL Server pagination syntax"
     mapping:
       postgres_equivalent: "LIMIT clause"
@@ -328,7 +328,7 @@ sqlserver_rules:
     category: "schema"
     severity: "low"
     title: "IDENTITY columns"
-    pattern: "(?i)\\bIDENTITY\\s*\\("
+    pattern: "(?i)\\yIDENTITY\\s*\\("
     description: "SQL Server IDENTITY auto-increment"
     mapping:
       postgres_equivalent: "SERIAL or IDENTITY (PostgreSQL 10+)"
@@ -361,7 +361,7 @@ sqlserver_rules:
     category: "procedures"
     severity: "high"
     title: "T-SQL stored procedures"
-    pattern: "(?i)\\bCREATE\\s+(OR\\s+ALTER\\s+)?PROC(EDURE)?\\b"
+    pattern: "(?i)\\yCREATE\\s+(OR\\s+ALTER\\s+)?PROC(EDURE)?\\y"
     description: "SQL Server T-SQL procedures - rewrite in PL/pgSQL"
     mapping:
       postgres_equivalent: "PL/pgSQL functions"
@@ -372,7 +372,7 @@ sqlserver_rules:
     category: "procedures"
     severity: "medium"
     title: "sp_executesql dynamic SQL"
-    pattern: "(?i)\\bsp_executesql\\b"
+    pattern: "(?i)\\ysp_executesql\\y"
     description: "SQL Server dynamic SQL procedure"
     mapping:
       postgres_equivalent: "EXECUTE with USING clause"
@@ -394,7 +394,7 @@ sqlserver_rules:
     category: "procedures"
     severity: "medium"
     title: "TRY...CATCH blocks"
-    pattern: "(?i)\\b(BEGIN\\s+TRY|BEGIN\\s+CATCH)\\b"
+    pattern: "(?i)\\y(BEGIN\\s+TRY|BEGIN\\s+CATCH)\\y"
     description: "SQL Server exception handling"
     mapping:
       postgres_equivalent: "BEGIN...EXCEPTION blocks"
@@ -405,7 +405,7 @@ sqlserver_rules:
     category: "procedures"
     severity: "medium"
     title: "OUTPUT parameters"
-    pattern: "(?i)\\bOUTPUT\\b"
+    pattern: "(?i)\\yOUTPUT\\y"
     description: "SQL Server OUTPUT parameters in stored procedures"
     mapping:
       postgres_equivalent: "OUT or INOUT parameters"
@@ -510,7 +510,7 @@ mysql_rules:
     category: "sql_dialect"
     severity: "low"
     title: "LIMIT with OFFSET"
-    pattern: "(?i)\\bLIMIT\\s+\\d+\\s*,\\s*\\d+"
+    pattern: "(?i)\\yLIMIT\\s+\\d+\\s*,\\s*\\d+"
     description: "MySQL LIMIT offset,count syntax"
     mapping:
       postgres_equivalent: "LIMIT count OFFSET offset"
@@ -521,7 +521,7 @@ mysql_rules:
     category: "schema"
     severity: "low"
     title: "AUTO_INCREMENT columns"
-    pattern: "(?i)\\bAUTO_INCREMENT\\b"
+    pattern: "(?i)\\yAUTO_INCREMENT\\y"
     description: "MySQL AUTO_INCREMENT"
     mapping:
       postgres_equivalent: "SERIAL or IDENTITY"

@@ -28,7 +28,7 @@ from yonk_code_robomonkey.reports.feature_context import get_feature_context
 from yonk_code_robomonkey.reports.feature_index_builder import build_feature_index as _build_feature_index
 from yonk_code_robomonkey.db_introspect.report_generator import generate_db_architecture_report
 from yonk_code_robomonkey.migration.assessor import assess_migration
-from yonk_code_robomonkey.config import Settings
+from yonk_code_robomonkey.config import Settings, get_schema_name
 from yonk_code_robomonkey.db.schema_manager import (
     resolve_repo_to_schema,
     resolve_repo_with_suggestions,
@@ -1948,7 +1948,8 @@ async def repo_add(
     path: str,
     auto_index: bool = True,
     auto_embed: bool = True,
-    auto_watch: bool = False
+    auto_watch: bool = False,
+    auto_summaries: bool = True
 ) -> dict[str, Any]:
     """Add a new repository to the daemon registry.
 
@@ -1956,11 +1957,12 @@ async def repo_add(
     a full index job.
 
     Args:
-        name: Repository name (used for schema: codegraph_<name>)
+        name: Repository name (used for schema: <prefix>_<name>)
         path: Absolute path to repository root
         auto_index: Whether to automatically enqueue full index
         auto_embed: Whether to automatically generate embeddings
         auto_watch: Whether to watch for file changes
+        auto_summaries: Whether to automatically generate file/symbol summaries (default True)
 
     Returns:
         Repository registration confirmation
@@ -1969,8 +1971,8 @@ async def repo_add(
     conn = await asyncpg.connect(dsn=settings.database_url)
 
     try:
-        # Derive schema name
-        schema_name = f"codegraph_{name}"
+        # Derive schema name (uses settings.schema_prefix, default "robomonkey_")
+        schema_name = get_schema_name(name)
 
         # Check if repo already exists
         existing = await conn.fetchval(
@@ -1997,9 +1999,9 @@ async def repo_add(
         # Insert into registry
         await conn.execute("""
             INSERT INTO robomonkey_control.repo_registry
-                (name, schema_name, root_path, enabled, auto_index, auto_embed, auto_watch)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-        """, name, schema_name, path, True, auto_index, auto_embed, auto_watch)
+                (name, schema_name, root_path, enabled, auto_index, auto_embed, auto_watch, auto_summaries)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        """, name, schema_name, path, True, auto_index, auto_embed, auto_watch, auto_summaries)
 
         # Enqueue full index if requested
         job_id = None

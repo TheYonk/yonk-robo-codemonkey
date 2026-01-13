@@ -48,7 +48,7 @@ class WorkerPool:
             },
             "summary": {
                 "count": 1,  # One summary worker per daemon
-                "job_types": ["REGENERATE_SUMMARY"],
+                "job_types": ["REGENERATE_SUMMARY", "SUMMARIZE_FILES", "SUMMARIZE_SYMBOLS"],
             },
         }
 
@@ -78,6 +78,11 @@ class WorkerPool:
                         await self._maybe_enqueue_docs_scan(job)
                         await self._maybe_enqueue_embeddings(job)
                         await self._maybe_enqueue_summary_regen(job)
+
+                    # Auto-enqueue file/symbol summaries after DOCS_SCAN
+                    if job.job_type == "DOCS_SCAN":
+                        await self._maybe_enqueue_file_summaries(job)
+                        await self._maybe_enqueue_symbol_summaries(job)
 
                 except Exception as e:
                     logger.error(f"Job {job.id} failed: {e}", exc_info=True)
@@ -190,6 +195,50 @@ class WorkerPool:
                 priority=5,  # Lowest priority (lower than embeddings)
                 dedup_key=f"{job.repo_name}:regenerate_summary"
             )
+
+    async def _maybe_enqueue_file_summaries(self, job: Job):
+        """Auto-enqueue file summaries after DOCS_SCAN if auto_summaries is enabled."""
+        async with self.pool.acquire() as conn:
+            # Check if auto_summaries is enabled for this repo
+            auto_summaries = await conn.fetchval(
+                "SELECT auto_summaries FROM robomonkey_control.repo_registry WHERE name = $1",
+                job.repo_name
+            )
+
+        if not auto_summaries:
+            return
+
+        logger.info(f"Auto-enqueuing SUMMARIZE_FILES for repo {job.repo_name}")
+        await self.job_queue.enqueue(
+            repo_name=job.repo_name,
+            schema_name=job.schema_name,
+            job_type="SUMMARIZE_FILES",
+            payload={},
+            priority=3,  # Lower priority than embeddings
+            dedup_key=f"{job.repo_name}:summarize_files"
+        )
+
+    async def _maybe_enqueue_symbol_summaries(self, job: Job):
+        """Auto-enqueue symbol summaries after DOCS_SCAN if auto_summaries is enabled."""
+        async with self.pool.acquire() as conn:
+            # Check if auto_summaries is enabled for this repo
+            auto_summaries = await conn.fetchval(
+                "SELECT auto_summaries FROM robomonkey_control.repo_registry WHERE name = $1",
+                job.repo_name
+            )
+
+        if not auto_summaries:
+            return
+
+        logger.info(f"Auto-enqueuing SUMMARIZE_SYMBOLS for repo {job.repo_name}")
+        await self.job_queue.enqueue(
+            repo_name=job.repo_name,
+            schema_name=job.schema_name,
+            job_type="SUMMARIZE_SYMBOLS",
+            payload={},
+            priority=2,  # Lowest priority (after file summaries)
+            dedup_key=f"{job.repo_name}:summarize_symbols"
+        )
 
     async def _worker_loop(self, worker_id: str, job_types: list[str]):
         """Worker loop: claim and process jobs."""

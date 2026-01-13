@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS repo_registry (
     auto_index BOOLEAN NOT NULL DEFAULT true,
     auto_embed BOOLEAN NOT NULL DEFAULT true,
     auto_watch BOOLEAN NOT NULL DEFAULT false,
+    auto_summaries BOOLEAN NOT NULL DEFAULT true,  -- Generate file/symbol summaries
 
     -- Metadata
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -79,7 +80,10 @@ CREATE TABLE IF NOT EXISTS job_queue (
         'EMBED_CHUNK',
         'DOCS_SCAN',
         'SUMMARIZE_MISSING',
-        'TAG_RULES_SYNC'
+        'SUMMARIZE_FILES',
+        'SUMMARIZE_SYMBOLS',
+        'TAG_RULES_SYNC',
+        'REGENERATE_SUMMARY'
     )),
     CONSTRAINT valid_status CHECK (status IN ('PENDING', 'CLAIMED', 'DONE', 'FAILED', 'RETRY'))
 );

@@ -402,6 +402,152 @@ class TagRulesSyncProcessor(JobProcessor):
         logger.info(f"TAG_RULES_SYNC complete for {job.repo_name}: {stats}")
 
 
+class SummarizeFilesProcessor(JobProcessor):
+    """Processor for SUMMARIZE_FILES jobs - generates file summaries in batch."""
+
+    async def process(self, job: Job) -> None:
+        """Generate summaries for files without summaries."""
+        logger.info(f"Processing SUMMARIZE_FILES for {job.repo_name}")
+
+        # Get repo info
+        async with self.control_pool.acquire() as conn:
+            repo = await conn.fetchrow(
+                """
+                SELECT name, schema_name
+                FROM robomonkey_control.repo_registry
+                WHERE name = $1
+                """,
+                job.repo_name
+            )
+
+        if not repo:
+            raise ValueError(f"Repo not found: {job.repo_name}")
+
+        schema_name = repo["schema_name"]
+
+        # Get repo_id and files without summaries
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
+            # Get files that don't have summaries yet
+            rows = await conn.fetch(
+                """
+                SELECT f.id
+                FROM file f
+                LEFT JOIN file_summary fs ON f.id = fs.file_id
+                WHERE fs.file_id IS NULL
+                  AND f.language IS NOT NULL
+                  AND f.language NOT IN ('binary', 'image', 'unknown')
+                ORDER BY f.path
+                LIMIT 500
+                """
+            )
+            file_ids = [str(row['id']) for row in rows]
+
+        finally:
+            await conn.close()
+
+        if not file_ids:
+            logger.info(f"No files need summaries for {job.repo_name}")
+            return
+
+        logger.info(f"Generating summaries for {len(file_ids)} files in {job.repo_name}")
+
+        # Import batch generator
+        from yonk_code_robomonkey.summaries.batch_generator import generate_file_summaries_batch
+
+        # Generate summaries in batches
+        result = await generate_file_summaries_batch(
+            file_ids=file_ids,
+            database_url=self.config.database.control_dsn,
+            batch_size=5,  # Small batches to avoid overloading LLM
+            schema_name=schema_name
+        )
+
+        logger.info(
+            f"SUMMARIZE_FILES complete for {job.repo_name}: "
+            f"{result.success} success, {result.failed} failed, {result.total} total"
+        )
+
+
+class SummarizeSymbolsProcessor(JobProcessor):
+    """Processor for SUMMARIZE_SYMBOLS jobs - generates symbol summaries in batch."""
+
+    async def process(self, job: Job) -> None:
+        """Generate summaries for symbols without summaries."""
+        logger.info(f"Processing SUMMARIZE_SYMBOLS for {job.repo_name}")
+
+        # Get repo info
+        async with self.control_pool.acquire() as conn:
+            repo = await conn.fetchrow(
+                """
+                SELECT name, schema_name
+                FROM robomonkey_control.repo_registry
+                WHERE name = $1
+                """,
+                job.repo_name
+            )
+
+        if not repo:
+            raise ValueError(f"Repo not found: {job.repo_name}")
+
+        schema_name = repo["schema_name"]
+
+        # Get symbols without summaries
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
+            # Get symbols that don't have summaries yet
+            # Prioritize functions and classes over variables
+            rows = await conn.fetch(
+                """
+                SELECT s.id
+                FROM symbol s
+                LEFT JOIN symbol_summary ss ON s.id = ss.symbol_id
+                WHERE ss.symbol_id IS NULL
+                  AND s.kind IN ('function', 'method', 'class', 'interface')
+                ORDER BY
+                    CASE s.kind
+                        WHEN 'class' THEN 1
+                        WHEN 'interface' THEN 2
+                        WHEN 'function' THEN 3
+                        WHEN 'method' THEN 4
+                        ELSE 5
+                    END,
+                    s.fqn
+                LIMIT 500
+                """
+            )
+            symbol_ids = [str(row['id']) for row in rows]
+
+        finally:
+            await conn.close()
+
+        if not symbol_ids:
+            logger.info(f"No symbols need summaries for {job.repo_name}")
+            return
+
+        logger.info(f"Generating summaries for {len(symbol_ids)} symbols in {job.repo_name}")
+
+        # Import batch generator
+        from yonk_code_robomonkey.summaries.batch_generator import generate_symbol_summaries_batch
+
+        # Generate summaries in batches
+        result = await generate_symbol_summaries_batch(
+            symbol_ids=symbol_ids,
+            database_url=self.config.database.control_dsn,
+            batch_size=5,  # Small batches to avoid overloading LLM
+            schema_name=schema_name
+        )
+
+        logger.info(
+            f"SUMMARIZE_SYMBOLS complete for {job.repo_name}: "
+            f"{result.success} success, {result.failed} failed, {result.total} total"
+        )
+
+
 class RegenerateSummaryProcessor(JobProcessor):
     """Processor for REGENERATE_SUMMARY jobs."""
 
@@ -466,6 +612,8 @@ PROCESSORS: dict[str, type[JobProcessor]] = {
     "EMBED_MISSING": EmbedMissingProcessor,
     "DOCS_SCAN": DocsScanProcessor,
     "TAG_RULES_SYNC": TagRulesSyncProcessor,
+    "SUMMARIZE_FILES": SummarizeFilesProcessor,
+    "SUMMARIZE_SYMBOLS": SummarizeSymbolsProcessor,
     "REGENERATE_SUMMARY": RegenerateSummaryProcessor,
 }
 

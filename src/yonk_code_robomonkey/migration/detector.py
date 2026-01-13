@@ -156,7 +156,8 @@ async def _find_dialect_keywords(
 
     for keyword in keywords:
         # Search for keyword as whole word
-        pattern = f"\\b{keyword}\\b"
+        # Note: PostgreSQL uses \y for word boundary (not \b like Python/Perl)
+        pattern = f"\\y{keyword}\\y"
 
         rows = await conn.fetch(
             """

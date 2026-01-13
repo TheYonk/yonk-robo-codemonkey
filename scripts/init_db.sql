@@ -1,6 +1,7 @@
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- For similarity() function
 
 CREATE TABLE IF NOT EXISTS repo (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

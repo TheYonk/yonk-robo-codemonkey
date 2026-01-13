@@ -90,24 +90,110 @@ class ParsedRoutine:
     content_hash: str = ""
 
 
+def detect_sql_dialect(content: str) -> str:
+    """Auto-detect SQL dialect from content.
+
+    Looks for dialect-specific patterns to determine the source database.
+
+    Args:
+        content: SQL file content
+
+    Returns:
+        Detected dialect: "oracle", "postgres", "mysql", "sqlserver", or "postgres" (default)
+    """
+    content_upper = content.upper()
+
+    # Oracle patterns (check first as it has most distinctive syntax)
+    oracle_patterns = [
+        r'\bROWNUM\b',
+        r'\bCONNECT\s+BY\b',
+        r'\bSTART\s+WITH\b',
+        r'\bNVL\s*\(',
+        r'\bNVL2\s*\(',
+        r'\bDECODE\s*\(',
+        r'\bFROM\s+DUAL\b',
+        r'\bSYSDATE\b',
+        r'\bSYSTIMESTAMP\b',
+        r'\w+\.NEXTVAL\b',
+        r'\w+\.CURRVAL\b',
+        r'\bDBMS_\w+',
+        r'\bUTL_\w+',
+        r'RETURN\s+\w+\s+IS\b',  # Oracle function syntax
+        r'RETURN\s+\w+\s+AS\b',
+        r'\bPRAGMA\s+',
+        r'\bVARCHAR2\b',
+        r'\bNUMBER\s*\(',
+        r'\bPLS_INTEGER\b',
+        r'\bBINARY_DOUBLE\b',
+        r'\bBINARY_FLOAT\b',
+        r'^\s*/\s*$',  # Oracle statement delimiter on its own line
+    ]
+    oracle_score = sum(1 for p in oracle_patterns if re.search(p, content, re.IGNORECASE | re.MULTILINE))
+
+    # SQL Server patterns
+    sqlserver_patterns = [
+        r'\bTOP\s+\d+\b',
+        r'\bWITH\s*\(\s*NOLOCK\s*\)',
+        r'\bIDENTITY\s*\(',
+        r'^\s*GO\s*$',
+        r'\bsp_\w+',
+        r'\bxp_\w+',
+        r'\[@\w+\]',
+        r'\bNVARCHAR\b',
+        r'\bDATETIME2\b',
+    ]
+    sqlserver_score = sum(1 for p in sqlserver_patterns if re.search(p, content, re.IGNORECASE | re.MULTILINE))
+
+    # MySQL patterns
+    mysql_patterns = [
+        r'\bAUTO_INCREMENT\b',
+        r'\bLIMIT\s+\d+\s*,\s*\d+',
+        r'`\w+`',
+        r'\bENGINE\s*=',
+        r'\bTINYINT\b',
+        r'\bMEDIUMINT\b',
+    ]
+    mysql_score = sum(1 for p in mysql_patterns if re.search(p, content, re.IGNORECASE | re.MULTILINE))
+
+    # Determine winner
+    scores = {
+        'oracle': oracle_score,
+        'sqlserver': sqlserver_score,
+        'mysql': mysql_score,
+    }
+
+    max_score = max(scores.values())
+    if max_score >= 2:  # Need at least 2 patterns to be confident
+        for dialect, score in scores.items():
+            if score == max_score:
+                return dialect
+
+    return "postgres"  # Default
+
+
 def parse_sql_file(
     content: str,
-    dialect: str = "postgres"
+    dialect: str = "auto"
 ) -> tuple[list[ParsedTable], list[ParsedRoutine]]:
     """Parse SQL file and extract all CREATE statements.
 
     Args:
         content: SQL file content
-        dialect: SQL dialect (postgres, mysql, sqlite, etc.)
+        dialect: SQL dialect (auto, postgres, oracle, mysql, sqlserver, etc.)
+                 If "auto", will attempt to detect from content.
 
     Returns:
         Tuple of (tables, routines)
     """
+    # Auto-detect dialect if requested
+    if dialect == "auto":
+        dialect = detect_sql_dialect(content)
+
     tables = []
     routines = []
 
     # Split into statements while tracking line numbers
-    statements = _split_sql_statements(content)
+    statements = _split_sql_statements(content, dialect)
 
     for stmt_text, start_line, end_line in statements:
         stmt_upper = stmt_text.strip().upper()
@@ -131,6 +217,17 @@ def parse_sql_file(
             routine = parse_create_trigger(stmt_text, dialect, start_line, end_line)
             if routine:
                 routines.append(routine)
+
+        # Oracle PACKAGE BODY contains multiple routines
+        elif stmt_upper.startswith(("CREATE PACKAGE BODY", "CREATE OR REPLACE PACKAGE BODY")):
+            pkg_routines = parse_oracle_package_body(stmt_text, dialect, start_line, end_line)
+            routines.extend(pkg_routines)
+
+        # Oracle PACKAGE spec (just declarations, but we can extract signatures)
+        elif stmt_upper.startswith(("CREATE PACKAGE", "CREATE OR REPLACE PACKAGE")):
+            # Package spec contains declarations - we could extract these as signatures
+            # but the real implementations are in PACKAGE BODY, so skip spec for now
+            pass
 
     return tables, routines
 
@@ -371,17 +468,299 @@ def parse_create_trigger(
         return None
 
 
+def parse_oracle_package_body(
+    statement: str,
+    dialect: str = "oracle",
+    start_line: int = 0,
+    end_line: int = 0
+) -> list[ParsedRoutine]:
+    """Parse an Oracle PACKAGE BODY and extract all routines within.
+
+    Oracle PACKAGE BODY contains multiple PROCEDURE and FUNCTION definitions
+    without the CREATE keyword. Each routine ends with END routine_name;
+
+    Args:
+        statement: SQL CREATE PACKAGE BODY statement
+        dialect: SQL dialect (should be oracle)
+        start_line: Starting line number
+        end_line: Ending line number
+
+    Returns:
+        List of ParsedRoutine for each procedure/function in the package
+    """
+    routines = []
+
+    try:
+        # Extract package name
+        pkg_name_match = re.search(
+            r'CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGE\s+BODY\s+(?:IF\s+NOT\s+EXISTS\s+)?(["\w.]+)',
+            statement,
+            re.IGNORECASE
+        )
+        if not pkg_name_match:
+            return routines
+
+        full_pkg_name = pkg_name_match.group(1).strip('"')
+        if '.' in full_pkg_name:
+            schema_name, pkg_name = full_pkg_name.rsplit('.', 1)
+        else:
+            schema_name = None
+            pkg_name = full_pkg_name
+
+        # Find the body content after AS/IS
+        body_match = re.search(
+            r'PACKAGE\s+BODY\s+["\w.]+\s+(?:AS|IS)\s+(.*?)(?:END\s+' + re.escape(pkg_name) + r'\s*;)',
+            statement,
+            re.IGNORECASE | re.DOTALL
+        )
+        if not body_match:
+            # Try without the END package_name (might be at the very end)
+            body_match = re.search(
+                r'PACKAGE\s+BODY\s+["\w.]+\s+(?:AS|IS)\s+(.*)',
+                statement,
+                re.IGNORECASE | re.DOTALL
+            )
+        if not body_match:
+            return routines
+
+        body_content = body_match.group(1)
+
+        # Find all PROCEDURE and FUNCTION definitions in the body
+        # Oracle syntax: PROCEDURE name(...) IS|AS ... END name;
+        #                FUNCTION name(...) RETURN type IS|AS ... END name;
+
+        # Pattern to find routine headers (simplified - we extract params separately)
+        # This just finds the routine type and name, then we parse forward
+        routine_header_pattern = re.compile(
+            r'(?:^|\s)(PROCEDURE|FUNCTION)\s+(\w+)\s*\(',
+            re.IGNORECASE | re.MULTILINE
+        )
+
+        # Track line offset within the body
+        body_start_offset = statement.find(body_content)
+        body_lines_before = statement[:body_start_offset].count('\n')
+
+        for match in routine_header_pattern.finditer(body_content):
+            routine_type = match.group(1).upper()
+            routine_name = match.group(2)
+
+            # Find balanced closing parenthesis for parameters
+            paren_start = match.end() - 1  # Position of opening (
+            paren_end = _find_balanced_paren(body_content, paren_start)
+            if paren_end == -1:
+                continue
+
+            params_str = body_content[paren_start:paren_end + 1]
+
+            # Find RETURN type and IS/AS after parameters
+            after_params = body_content[paren_end + 1:]
+            return_type = None
+
+            # Check for RETURN clause (functions)
+            return_match = re.match(
+                r'\s*RETURN\s+(\w+)\s*(?:PIPELINED|DETERMINISTIC|PARALLEL_ENABLE|RESULT_CACHE)?\s*(?:IS|AS)\b',
+                after_params,
+                re.IGNORECASE
+            )
+            if return_match:
+                return_type = return_match.group(1)
+            else:
+                # Must be a procedure - check for IS/AS
+                is_match = re.match(r'\s*(?:IS|AS)\b', after_params, re.IGNORECASE)
+                if not is_match:
+                    continue  # Not a valid routine definition
+
+            # Calculate line numbers within the package body
+            match_pos = match.start()
+            routine_line_offset = body_content[:match_pos].count('\n')
+            routine_start_line = start_line + body_lines_before + routine_line_offset
+
+            # Find the END statement for this routine to get end line
+            end_pattern = re.compile(
+                rf'END\s+{re.escape(routine_name)}\s*;',
+                re.IGNORECASE
+            )
+            end_match = end_pattern.search(body_content, paren_end)
+            if end_match:
+                routine_end_offset = body_content[:end_match.end()].count('\n')
+                routine_end_line = start_line + body_lines_before + routine_end_offset
+                # Extract the full routine text
+                routine_text = body_content[match.start():end_match.end()]
+            else:
+                routine_end_line = end_line
+                routine_text = body_content[match.start():]
+
+            # Extract parameters
+            parameters = _extract_oracle_package_params(params_str)
+
+            # Qualified name includes package
+            qualified_name = f"{pkg_name}.{routine_name}"
+            if schema_name:
+                qualified_name = f"{schema_name}.{qualified_name}"
+
+            content_hash = hashlib.sha256(routine_text.encode()).hexdigest()[:16]
+
+            routines.append(ParsedRoutine(
+                schema_name=schema_name,
+                routine_name=routine_name,
+                qualified_name=qualified_name,
+                routine_type=routine_type,
+                parameters=parameters,
+                return_type=return_type,
+                language="plsql",
+                create_statement=routine_text.strip(),
+                start_line=routine_start_line,
+                end_line=routine_end_line,
+                content_hash=content_hash
+            ))
+
+    except Exception:
+        pass
+
+    return routines
+
+
+def _extract_oracle_package_params(params_str: str) -> list[ParsedParameter]:
+    """Extract parameters from Oracle package routine parameter list.
+
+    Handles Oracle-specific syntax like:
+        p_name IN VARCHAR2 DEFAULT 'value'
+        p_id NUMBER
+        p_result OUT NUMBER
+    """
+    params = []
+
+    # Remove outer parentheses
+    params_str = params_str.strip()
+    if params_str.startswith('('):
+        params_str = params_str[1:]
+    if params_str.endswith(')'):
+        params_str = params_str[:-1]
+
+    if not params_str.strip():
+        return params
+
+    # Split on commas (but not inside parentheses)
+    param_parts = _split_outside_parens(params_str, ',')
+
+    for part in param_parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        mode = "IN"
+        name = None
+        data_type = "unknown"
+        default = None
+
+        # Oracle parameter format: name [IN|OUT|IN OUT] type [DEFAULT value]
+        tokens = part.split()
+        if not tokens:
+            continue
+
+        idx = 0
+
+        # First token is usually the name
+        name = tokens[idx]
+        idx += 1
+
+        # Check for mode
+        if idx < len(tokens) and tokens[idx].upper() in ('IN', 'OUT'):
+            if tokens[idx].upper() == 'IN' and idx + 1 < len(tokens) and tokens[idx + 1].upper() == 'OUT':
+                mode = "INOUT"
+                idx += 2
+            elif tokens[idx].upper() == 'OUT':
+                mode = "OUT"
+                idx += 1
+            else:
+                mode = "IN"
+                idx += 1
+
+        # Rest is type (and possibly DEFAULT)
+        remaining = ' '.join(tokens[idx:])
+
+        # Check for DEFAULT
+        default_match = re.search(r'\bDEFAULT\s+(.+)$', remaining, re.IGNORECASE)
+        if default_match:
+            default = default_match.group(1).strip()
+            remaining = remaining[:default_match.start()].strip()
+
+        # Also check for := which Oracle uses as alternative to DEFAULT
+        assign_match = re.search(r':=\s*(.+)$', remaining)
+        if assign_match:
+            default = assign_match.group(1).strip()
+            remaining = remaining[:assign_match.start()].strip()
+
+        if remaining:
+            data_type = remaining
+
+        params.append(ParsedParameter(
+            name=name,
+            data_type=data_type,
+            mode=mode,
+            default=default
+        ))
+
+    return params
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
 
-def _split_sql_statements(content: str) -> list[tuple[str, int, int]]:
+def _find_balanced_paren(text: str, start: int) -> int:
+    """Find the position of the closing parenthesis that balances the opening one.
+
+    Args:
+        text: The text to search in
+        start: Position of the opening parenthesis
+
+    Returns:
+        Position of the closing parenthesis, or -1 if not found
+    """
+    if start >= len(text) or text[start] != '(':
+        return -1
+
+    depth = 0
+    in_string = False
+    string_char = None
+
+    for i in range(start, len(text)):
+        char = text[i]
+
+        # Handle string literals
+        if char in ("'", '"') and not in_string:
+            in_string = True
+            string_char = char
+        elif char == string_char and in_string:
+            # Check for escaped quote
+            if i + 1 < len(text) and text[i + 1] == string_char:
+                continue  # Skip escaped quote
+            in_string = False
+            string_char = None
+        elif not in_string:
+            if char == '(':
+                depth += 1
+            elif char == ')':
+                depth -= 1
+                if depth == 0:
+                    return i
+
+    return -1
+
+
+def _split_sql_statements(content: str, dialect: str = "postgres") -> list[tuple[str, int, int]]:
     """Split SQL content into individual statements with line numbers.
 
     Handles:
-    - Dollar-quoted strings ($$ or $tag$)
+    - Dollar-quoted strings ($$ or $tag$) for PostgreSQL
+    - Oracle PL/SQL blocks delimited by / on its own line
     - Standard string literals
     - Comments (-- and /* */)
+
+    Args:
+        content: SQL file content
+        dialect: SQL dialect (affects delimiter handling)
 
     Returns:
         List of (statement, start_line, end_line)
@@ -393,37 +772,69 @@ def _split_sql_statements(content: str) -> list[tuple[str, int, int]]:
     current_start = 1
     in_dollar_quote = False
     dollar_tag = None
+    in_plsql_block = False  # Track if we're inside a PL/SQL block
 
     for line_num, line in enumerate(lines, start=1):
-        # Track dollar-quoted strings
-        if not in_dollar_quote:
-            # Check for start of dollar quote
+        line_stripped = line.strip()
+        line_upper = line_stripped.upper()
+
+        # For Oracle: check if we're starting a PL/SQL block
+        if dialect == "oracle" and not in_plsql_block:
+            if any(line_upper.startswith(prefix) for prefix in [
+                "CREATE FUNCTION", "CREATE OR REPLACE FUNCTION",
+                "CREATE PROCEDURE", "CREATE OR REPLACE PROCEDURE",
+                "CREATE TRIGGER", "CREATE OR REPLACE TRIGGER",
+                "CREATE PACKAGE", "CREATE OR REPLACE PACKAGE",
+                "CREATE TYPE", "CREATE OR REPLACE TYPE",
+                "DECLARE", "BEGIN"
+            ]):
+                in_plsql_block = True
+
+        # Track dollar-quoted strings (PostgreSQL)
+        if dialect == "postgres" and not in_dollar_quote:
             dollar_match = re.search(r'\$(\w*)\$', line)
             if dollar_match:
                 in_dollar_quote = True
                 dollar_tag = dollar_match.group(1)
-                # Check if same line closes it
                 if line.count(f'${dollar_tag}$') >= 2:
                     in_dollar_quote = False
                     dollar_tag = None
-        else:
-            # Check for end of dollar quote
+        elif dialect == "postgres" and in_dollar_quote:
             if f'${dollar_tag}$' in line:
                 in_dollar_quote = False
                 dollar_tag = None
 
         current_stmt.append(line)
 
-        # Check for statement end (semicolon outside dollar quote)
-        if not in_dollar_quote and ';' in line:
-            # Don't split on semicolon inside comments
-            clean_line = re.sub(r'--.*$', '', line)
-            if ';' in clean_line:
-                stmt_text = '\n'.join(current_stmt)
-                if stmt_text.strip():
-                    statements.append((stmt_text, current_start, line_num))
-                current_stmt = []
-                current_start = line_num + 1
+        # Check for statement end based on dialect
+        statement_complete = False
+
+        if dialect == "oracle":
+            # Oracle: / on its own line ends PL/SQL blocks
+            if line_stripped == '/':
+                if in_plsql_block:
+                    # End of PL/SQL block - don't include the / in the statement
+                    current_stmt.pop()  # Remove the / line
+                    statement_complete = True
+                    in_plsql_block = False
+            # For non-PL/SQL statements, semicolon still works
+            elif not in_plsql_block and ';' in line:
+                clean_line = re.sub(r'--.*$', '', line)
+                if ';' in clean_line:
+                    statement_complete = True
+        else:
+            # PostgreSQL/MySQL/etc: semicolon ends statements
+            if not in_dollar_quote and ';' in line:
+                clean_line = re.sub(r'--.*$', '', line)
+                if ';' in clean_line:
+                    statement_complete = True
+
+        if statement_complete:
+            stmt_text = '\n'.join(current_stmt)
+            if stmt_text.strip():
+                statements.append((stmt_text, current_start, line_num))
+            current_stmt = []
+            current_start = line_num + 1
 
     # Handle remaining content
     if current_stmt:
