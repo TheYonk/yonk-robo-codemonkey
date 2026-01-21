@@ -2,6 +2,10 @@
 
 Local-first MCP server that indexes code and documentation into Postgres with pgvector, providing hybrid retrieval (vector + full-text search + tags) for LLM coding clients.
 
+# history
+
+This is 100% unapologetically vibe coded and coded with the assistantance of claude.  The idea came from working on a series of video games over winter break and running into some problems with coding agents losing some of the info about files and not understanding the relationships between files.
+
 ## 🚀 Quick Start
 
 **New to RoboMonkey?** Start here:
