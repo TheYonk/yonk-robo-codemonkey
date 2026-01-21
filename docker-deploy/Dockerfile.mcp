@@ -1,0 +1,29 @@
+# RoboMonkey MCP Server Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY pyproject.toml README.md ./
+COPY yonk_code_robomonkey/ ./yonk_code_robomonkey/
+
+# Install the package
+RUN pip install --no-cache-dir -e .
+
+# Copy config files
+COPY config/ ./config/
+
+# Default environment variables
+ENV DATABASE_URL=postgresql://postgres:postgres@postgres:5432/robomonkey
+ENV EMBEDDINGS_PROVIDER=ollama
+ENV EMBEDDINGS_MODEL=snowflake-arctic-embed2:latest
+ENV EMBEDDINGS_BASE_URL=http://ollama:11434
+ENV EMBEDDINGS_DIMENSION=1024
+
+# Run MCP server in stdio mode
+CMD ["python", "-m", "yonk_code_robomonkey.mcp.server"]

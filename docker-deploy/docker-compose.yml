@@ -1,0 +1,89 @@
+# RoboMonkey Docker Deployment with Pre-populated Database
+#
+# Usage:
+#   1. Place backup .dump file in backup/ directory
+#   2. Run: docker compose up -d
+#   3. Connect MCP client to the server
+#
+# For MCP stdio mode, use:
+#   docker compose run --rm mcp
+
+services:
+  # PostgreSQL with pgvector - stores the indexed codebase
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: robomonkey-postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-robomonkey}
+      # Optional: Set this to remap source code paths in the backup
+      NEW_ROOT_PATH: ${NEW_ROOT_PATH:-}
+    volumes:
+      # Persistent data
+      - pgdata:/var/lib/postgresql/data
+      # Backup files to restore
+      - ./backup:/backup:ro
+      # Initialization scripts (run in alphabetical order)
+      - ../scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init_schema.sql:ro
+      - ./scripts/restore_backup.sh:/docker-entrypoint-initdb.d/02_restore_backup.sh:ro
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d robomonkey"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # RoboMonkey MCP Server - provides code search tools
+  mcp:
+    build:
+      context: ..
+      dockerfile: docker-deploy/Dockerfile.mcp
+    container_name: robomonkey-mcp
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-robomonkey}
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-ollama}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-snowflake-arctic-embed2:latest}
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://ollama:11434}
+      EMBEDDINGS_DIMENSION: ${EMBEDDINGS_DIMENSION:-1024}
+      DEFAULT_REPO: ${DEFAULT_REPO:-sko_test}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # MCP runs in stdio mode - use `docker compose run --rm mcp` to connect
+    stdin_open: true
+    tty: true
+    profiles:
+      - mcp  # Only start with --profile mcp or `docker compose run`
+
+  # Optional: Ollama for local embeddings and LLM inference
+  ollama:
+    image: ollama/ollama:latest
+    container_name: robomonkey-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles:
+      - full  # Only start with --profile full
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    name: robomonkey_pgdata
+  ollama_data:
+    name: robomonkey_ollama
+
+# Network for inter-service communication
+networks:
+  default:
+    name: robomonkey_network

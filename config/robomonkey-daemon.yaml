@@ -132,8 +132,7 @@ summaries:
 
   # How often to check for entities needing summaries (minutes: 1-1440)
   # Default: 60 (check every hour)
-  # Reduced to 10 minutes for more responsive summary generation
-  check_interval_minutes: 10
+  check_interval_minutes: 60
 
   # Generate summaries immediately after indexing (not just on schedule)
   generate_on_index: true
