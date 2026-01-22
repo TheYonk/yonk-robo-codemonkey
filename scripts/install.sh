@@ -1263,6 +1263,27 @@ setup_llm_options() {
     esac
 }
 
+setup_webui_options() {
+    log_step "Web UI Configuration"
+
+    echo ""
+    echo "The Web UI provides:"
+    echo "  - HTTP API for external integrations (port 9832)"
+    echo "  - Admin panel for database inspection"
+    echo "  - MCP tool testing interface"
+    echo ""
+
+    if prompt_yes_no "Enable Web UI?" "y"; then
+        ENABLE_WEBUI=true
+        WEBUI_PORT=$(prompt_input "Web UI port" "9832")
+        log_success "Web UI will be enabled on port $WEBUI_PORT"
+    else
+        ENABLE_WEBUI=false
+        WEBUI_PORT="9832"
+        log_info "Web UI disabled (can enable later with: docker compose --profile webui up -d)"
+    fi
+}
+
 # =============================================================================
 # Service Setup Functions
 # =============================================================================
@@ -1706,7 +1727,7 @@ COMPOSE_EMBED_DEP
 COMPOSE_OLLAMA_DEP
     fi
 
-    cat >> "$compose_file" << 'COMPOSE_DAEMON_END'
+    cat >> "$compose_file" << 'COMPOSE_MCP_SECTION'
     restart: unless-stopped
 
   # RoboMonkey MCP Server - provides code search tools to IDEs
@@ -1730,7 +1751,7 @@ COMPOSE_OLLAMA_DEP
     profiles:
       - mcp  # Only start with: docker compose run --rm mcp
 
-  # RoboMonkey Web UI - admin panel
+  # RoboMonkey Web UI - admin panel and HTTP API
   webui:
     build:
       context: .
@@ -1743,8 +1764,17 @@ COMPOSE_OLLAMA_DEP
     depends_on:
       postgres:
         condition: service_healthy
+COMPOSE_MCP_SECTION
+
+    # Add profile restriction only if webui is NOT enabled by default
+    if [ "$ENABLE_WEBUI" != "true" ]; then
+        cat >> "$compose_file" << 'COMPOSE_WEBUI_PROFILE'
     profiles:
       - webui  # Only start with: docker compose --profile webui up -d
+COMPOSE_WEBUI_PROFILE
+    fi
+
+    cat >> "$compose_file" << 'COMPOSE_END'
     restart: unless-stopped
 
 volumes:
@@ -1758,7 +1788,7 @@ volumes:
 networks:
   default:
     name: robomonkey_network
-COMPOSE_DAEMON_END
+COMPOSE_END
 
     log_success "Generated docker-compose.yml"
 }
@@ -1824,7 +1854,7 @@ DEFAULT_REPO=${DEFAULT_REPO:-}
 OLLAMA_PORT=11434
 
 # Web UI port
-WEBUI_PORT=9832
+WEBUI_PORT=${WEBUI_PORT:-9832}
 EOF
 
     log_success "Generated .env file"
@@ -2187,6 +2217,7 @@ main_docker() {
     setup_database_docker
     setup_embeddings_docker
     setup_llm_options
+    setup_webui_options
 
     # Summary
     log_step "Installation Summary"
@@ -2195,7 +2226,7 @@ main_docker() {
     echo ""
     echo "Database:"
     echo "  - Setup: $DB_SETUP"
-    echo "  - Port: $DB_PORT"
+    echo "  - Port: $DB_HOST_PORT"
     if [ "$USE_SAMPLE_DATA" == "true" ]; then
         echo "  - Sample data: Yes (sko_test repository)"
     fi
@@ -2213,6 +2244,13 @@ main_docker() {
     echo "LLM:"
     echo "  - Deep: $LLM_DEEP_PROVIDER / $LLM_DEEP_MODEL"
     echo "  - Small: $LLM_SMALL_PROVIDER / $LLM_SMALL_MODEL"
+    echo ""
+    echo "Web UI:"
+    if [ "$ENABLE_WEBUI" == "true" ]; then
+        echo "  - Enabled: Yes (port $WEBUI_PORT)"
+    else
+        echo "  - Enabled: No"
+    fi
     echo ""
 
     if ! prompt_yes_no "Proceed with installation?"; then
@@ -2237,13 +2275,19 @@ main_docker() {
     cd "$PROJECT_ROOT"
 
     # Determine which services to start
-    local services="postgres daemon"
+    local services="postgres embeddings daemon"
     if [ "$NEED_DOCKER_OLLAMA" == "true" ]; then
         services="postgres ollama daemon"
     fi
+    if [ "$ENABLE_WEBUI" == "true" ]; then
+        services="$services webui"
+    fi
 
     log_info "Building images..."
-    $DOCKER_COMPOSE build daemon
+    $DOCKER_COMPOSE build daemon embeddings
+    if [ "$ENABLE_WEBUI" == "true" ]; then
+        $DOCKER_COMPOSE build webui
+    fi
 
     log_info "Starting services: $services"
     $DOCKER_COMPOSE up -d $services
@@ -2273,11 +2317,15 @@ main_docker() {
     echo ""
 
     echo -e "${BOLD}Services running:${NC}"
-    echo "  - PostgreSQL:  localhost:$DB_PORT"
+    echo "  - PostgreSQL:   localhost:${DB_HOST_PORT:-$DB_PORT}"
+    echo "  - Embeddings:   localhost:8082"
     if [ "$NEED_DOCKER_OLLAMA" == "true" ]; then
-        echo "  - Ollama:      localhost:11434"
+        echo "  - Ollama:       localhost:11434"
     fi
-    echo "  - Daemon:      background processing"
+    echo "  - Daemon:       background processing"
+    if [ "$ENABLE_WEBUI" == "true" ]; then
+        echo "  - Web UI:       http://localhost:${WEBUI_PORT}"
+    fi
     echo ""
 
     echo -e "${BOLD}Quick Reference:${NC}"
@@ -2288,9 +2336,16 @@ main_docker() {
     echo "  Run MCP server (for IDE integration):"
     echo "     ${CYAN}docker compose run --rm mcp${NC}"
     echo ""
-    echo "  Start Web UI (http://localhost:9832):"
-    echo "     ${CYAN}docker compose --profile webui up -d${NC}"
-    echo ""
+    if [ "$ENABLE_WEBUI" == "true" ]; then
+        echo "  Web UI API:"
+        echo "     ${CYAN}curl http://localhost:${WEBUI_PORT}/health${NC}"
+        echo "     ${CYAN}curl http://localhost:${WEBUI_PORT}/api/repos${NC}"
+        echo ""
+    else
+        echo "  Start Web UI (http://localhost:${WEBUI_PORT}):"
+        echo "     ${CYAN}docker compose --profile webui up -d${NC}"
+        echo ""
+    fi
     echo "  Stop all services:"
     echo "     ${CYAN}docker compose down${NC}"
     echo ""
