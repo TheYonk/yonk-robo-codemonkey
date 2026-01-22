@@ -1776,7 +1776,7 @@ generate_docker_env() {
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_DB=robomonkey
-POSTGRES_PORT=${DB_PORT}
+POSTGRES_PORT=${DB_HOST_PORT:-${DB_PORT}}
 
 # Embeddings
 EMBEDDINGS_PROVIDER=${EMBEDDINGS_PROVIDER}
@@ -2146,7 +2146,16 @@ setup_database_docker() {
     USE_SAMPLE_DATA=false
     DEFAULT_REPO=""
 
-    DB_PORT=$(prompt_input "PostgreSQL port (host)" "$DEFAULT_DB_PORT")
+    # Host-mapped port (for external access from host machine)
+    DB_HOST_PORT=$(prompt_input "PostgreSQL port (host)" "$DEFAULT_DB_PORT")
+
+    # Set Docker-mode database defaults (container name is 'postgres' in docker-compose)
+    # Internal port is always 5432 for container-to-container communication
+    DB_HOST="postgres"
+    DB_PORT="5432"
+    DB_USER="postgres"
+    DB_PASSWORD="postgres"
+    DB_NAME="robomonkey"
 }
 
 main_docker() {

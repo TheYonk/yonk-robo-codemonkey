@@ -91,7 +91,7 @@ class EmbeddingsConfig(BaseModel):
     """Embeddings configuration."""
     enabled: bool = Field(True, description="Enable embeddings generation")
     backfill_on_startup: bool = Field(True, description="Backfill missing embeddings on startup")
-    provider: Literal["ollama", "vllm"] = Field("ollama", description="Embedding provider")
+    provider: Literal["ollama", "vllm", "openai"] = Field("ollama", description="Embedding provider")
     model: str = Field("snowflake-arctic-embed2:latest", description="Model name")
     dimension: int = Field(1024, description="Embedding dimension")
     max_chunk_length: int = Field(8192, description="Max characters per chunk")
