@@ -33,8 +33,10 @@ env/
 *.swo
 *~
 
-# Environment
+# Environment and secrets
 .env
+config/robomonkey-daemon.yaml
+config/*.backup.*
 
 # Testing
 .pytest_cache/

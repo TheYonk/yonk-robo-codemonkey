@@ -43,7 +43,7 @@ class LLMModelConfig(BaseModel):
     base_url: str = Field("http://localhost:11434", description="API endpoint")
     api_key: str | None = Field(None, description="API key (required for openai, optional for vllm)")
     temperature: float = Field(0.3, ge=0, le=2, description="Temperature for generation")
-    max_tokens: int = Field(2000, ge=100, le=32000, description="Max tokens to generate")
+    max_tokens: int = Field(2000, ge=100, le=128000, description="Max tokens to generate")
 
 
 class LLMConfig(BaseModel):
@@ -183,12 +183,22 @@ class DevModeConfig(BaseModel):
     verbose: bool = Field(False, description="Verbose logging")
 
 
+class ReadOnlyConfig(BaseModel):
+    """Per-type read-only settings to prevent overwrites."""
+    summaries: bool = Field(False, description="Don't overwrite existing summaries")
+    file_summaries: bool = Field(False, description="Don't overwrite file summaries")
+    symbol_summaries: bool = Field(False, description="Don't overwrite symbol summaries")
+    module_summaries: bool = Field(False, description="Don't overwrite module summaries")
+    embeddings: bool = Field(False, description="Don't regenerate embeddings")
+
+
 class SummariesConfig(BaseModel):
     """Auto-summary generation configuration."""
     enabled: bool = Field(True, description="Enable auto-summary generation")
+    read_only: ReadOnlyConfig = Field(default_factory=ReadOnlyConfig, description="Per-type read-only settings")
     check_interval_minutes: int = Field(60, ge=1, le=1440, description="How often to check for changes (1-1440 minutes)")
     generate_on_index: bool = Field(False, description="Generate summaries immediately after indexing")
-    provider: Literal["ollama", "vllm"] = Field("ollama", description="LLM provider")
+    provider: Literal["ollama", "vllm", "openai"] = Field("ollama", description="LLM provider")
     model: str = Field("qwen3-coder:30b", description="Model name for summaries")
     base_url: str = Field("http://localhost:11434", description="LLM endpoint")
     batch_size: int = Field(10, ge=1, le=100, description="Batch size for summary generation")
@@ -218,7 +228,7 @@ class DocValidityConfig(BaseModel):
 
     # LLM validation (optional)
     use_llm_validation: bool = Field(False, description="Use LLM for deep validation (expensive)")
-    llm_provider: Literal["ollama", "vllm"] = Field("ollama", description="LLM provider for validation")
+    llm_provider: Literal["ollama", "vllm", "openai"] = Field("ollama", description="LLM provider for validation")
     llm_model: str = Field("qwen3-coder:30b", description="Model name for LLM validation")
     llm_base_url: str = Field("http://localhost:11434", description="LLM endpoint")
     llm_weight: float = Field(0.30, ge=0, le=1, description="Weight for LLM score when enabled")

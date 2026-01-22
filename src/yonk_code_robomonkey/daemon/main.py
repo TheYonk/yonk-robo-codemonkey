@@ -16,6 +16,7 @@ import asyncpg
 from yonk_code_robomonkey.config.daemon import DaemonConfig
 from yonk_code_robomonkey.daemon.queue import JobQueue
 from yonk_code_robomonkey.daemon.workers import WorkerPool
+from yonk_code_robomonkey.llm import set_llm_config
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,27 @@ class CodeGraphDaemon:
     async def startup(self):
         """Initialize daemon resources."""
         logger.info(f"Starting CodeGraph Daemon {self.config.daemon_id}")
+
+        # Set LLM configuration for the unified client
+        llm_config = {
+            "deep": {
+                "provider": self.config.llm.deep.provider,
+                "model": self.config.llm.deep.model,
+                "base_url": self.config.llm.deep.base_url,
+                "api_key": self.config.llm.deep.api_key,
+                "temperature": self.config.llm.deep.temperature,
+                "max_tokens": self.config.llm.deep.max_tokens,
+            },
+            "small": {
+                "provider": self.config.llm.small.provider,
+                "model": self.config.llm.small.model,
+                "base_url": self.config.llm.small.base_url,
+                "api_key": self.config.llm.small.api_key,
+                "temperature": self.config.llm.small.temperature,
+                "max_tokens": self.config.llm.small.max_tokens,
+            },
+        }
+        set_llm_config(llm_config)
 
         # Connect to database
         logger.info(f"Connecting to database: {self.config.database.control_dsn}")

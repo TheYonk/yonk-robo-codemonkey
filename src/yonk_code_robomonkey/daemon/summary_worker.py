@@ -48,6 +48,17 @@ async def summary_worker(config: DaemonConfig) -> None:
                 await asyncio.sleep(60)
                 continue
 
+            # Check global read-only or all per-type read-only settings
+            ro = config.summaries.read_only
+            if ro.summaries:
+                logger.info("Summary generation SKIPPED: summaries.read_only.summaries=true (global read-only)")
+                await asyncio.sleep(config.summaries.check_interval_minutes * 60)
+                continue
+            if ro.file_summaries and ro.symbol_summaries and ro.module_summaries:
+                logger.info("Summary generation SKIPPED: all summary types are read-only (file, symbol, module)")
+                await asyncio.sleep(config.summaries.check_interval_minutes * 60)
+                continue
+
             # Get all repositories
             conn = await asyncpg.connect(dsn=config.database.control_dsn)
 

@@ -405,14 +405,18 @@ function formatAskCodebaseResult(data) {
             const isLong = content.length > 300;
             const preview = isLong ? content.substring(0, 300) + '...' : content;
 
+            // Handle both API field names (file/relevance) and legacy names (file_path/relevance_score)
+            const filePath = doc.file || doc.file_path || 'N/A';
+            const relevance = doc.relevance ?? doc.relevance_score ?? 0;
+
             return `
                 <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-300">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
                             <h4 class="font-semibold text-lg text-gray-900">${escapeHtml(doc.title || 'Untitled')}</h4>
                             <div class="text-sm text-gray-600 mt-1">
-                                <span class="font-mono bg-gray-200 px-2 py-0.5 rounded">📄 ${escapeHtml(doc.file_path || 'N/A')}</span>
-                                <span class="ml-3 font-semibold">⭐ ${(doc.relevance_score || 0).toFixed(3)}</span>
+                                <span class="font-mono bg-gray-200 px-2 py-0.5 rounded">📄 ${escapeHtml(filePath)}</span>
+                                <span class="ml-3 font-semibold">⭐ ${relevance.toFixed(3)}</span>
                             </div>
                         </div>
                         ${isLong ? `
@@ -448,19 +452,24 @@ function formatAskCodebaseResult(data) {
             const isLong = snippet.split('\n').length > 15;
             const previewLines = isLong ? snippet.split('\n').slice(0, 15).join('\n') + '\n...' : snippet;
 
+            // Handle both API field names (file/lines/relevance) and legacy names (file_path/line_range/relevance_score)
+            const filePath = code.file || code.file_path || 'Unknown';
+            const lines = code.lines || (code.line_range ? code.line_range.join('-') : 'N/A');
+            const relevance = code.relevance ?? code.relevance_score ?? 0;
+
             return `
                 <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-300">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
                             <h4 class="font-semibold text-lg text-gray-900">
                                 <span class="font-mono bg-blue-100 px-2 py-0.5 rounded text-blue-900">
-                                    ${escapeHtml(code.file_path || 'Unknown')}
+                                    ${escapeHtml(filePath)}
                                 </span>
                             </h4>
                             <div class="text-sm text-gray-600 mt-2">
-                                <span class="bg-gray-200 px-2 py-0.5 rounded">📍 Lines ${code.line_range ? code.line_range.join('-') : 'N/A'}</span>
+                                <span class="bg-gray-200 px-2 py-0.5 rounded">📍 Lines ${escapeHtml(lines)}</span>
                                 <span class="ml-2 bg-gray-200 px-2 py-0.5 rounded">🔤 ${escapeHtml(code.language || 'unknown')}</span>
-                                <span class="ml-2 font-semibold">⭐ ${(code.relevance_score || 0).toFixed(3)}</span>
+                                <span class="ml-2 font-semibold">⭐ ${relevance.toFixed(3)}</span>
                             </div>
                             ${code.context ? `<p class="text-sm text-gray-700 mt-2 italic">${escapeHtml(code.context)}</p>` : ''}
                         </div>
@@ -491,18 +500,24 @@ function formatAskCodebaseResult(data) {
 
     // Symbols
     if (data.symbols && data.symbols.length > 0) {
-        html += formatSection('🔧 Key Symbols', data.symbols, sym => `
-            <div class="mb-3 p-3 bg-gray-50 rounded-lg">
-                <h4 class="font-semibold">${escapeHtml(sym.name || 'Unknown')}</h4>
-                <div class="text-sm text-gray-600 mt-1">
-                    <span>🏷️ ${escapeHtml(sym.kind || 'symbol')}</span>
-                    <span class="ml-3">📍 ${escapeHtml(sym.file_path || 'N/A')}:${sym.line || '?'}</span>
-                    <span class="ml-3">⭐ ${(sym.relevance_score || 0).toFixed(2)}</span>
+        html += formatSection('🔧 Key Symbols', data.symbols, sym => {
+            // Handle both API field names and legacy names
+            const filePath = sym.file || sym.file_path || 'N/A';
+            const relevance = sym.relevance ?? sym.relevance_score ?? 0;
+
+            return `
+                <div class="mb-3 p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold">${escapeHtml(sym.name || 'Unknown')}</h4>
+                    <div class="text-sm text-gray-600 mt-1">
+                        <span>🏷️ ${escapeHtml(sym.kind || 'symbol')}</span>
+                        <span class="ml-3">📍 ${escapeHtml(filePath)}:${sym.line || '?'}</span>
+                        <span class="ml-3">⭐ ${relevance.toFixed(2)}</span>
+                    </div>
+                    ${sym.signature ? `<code class="text-sm text-gray-700 mt-1 block">${escapeHtml(sym.signature)}</code>` : ''}
+                    ${sym.description ? `<p class="text-sm text-gray-700 mt-1">${escapeHtml(sym.description)}</p>` : ''}
                 </div>
-                ${sym.signature ? `<code class="text-sm text-gray-700 mt-1 block">${escapeHtml(sym.signature)}</code>` : ''}
-                ${sym.description ? `<p class="text-sm text-gray-700 mt-1">${escapeHtml(sym.description)}</p>` : ''}
-            </div>
-        `);
+            `;
+        });
     }
 
     // File Summaries
@@ -513,16 +528,20 @@ function formatAskCodebaseResult(data) {
             const isLong = summary.length > 200;
             const preview = isLong ? summary.substring(0, 200) + '...' : summary;
 
+            // Handle both API field names and legacy names
+            const name = fs.file || fs.name || 'Unknown';
+            const relevance = fs.relevance ?? fs.relevance_score ?? 0;
+
             return `
                 <div class="mb-4 p-4 bg-green-50 rounded-lg border border-green-200">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
                             <h4 class="font-semibold text-green-900">
                                 <span class="font-mono bg-green-100 px-2 py-0.5 rounded">
-                                    📄 ${escapeHtml(fs.name || 'Unknown')}
+                                    📄 ${escapeHtml(name)}
                                 </span>
                             </h4>
-                            <div class="text-sm text-green-700 mt-1 font-semibold">⭐ ${(fs.relevance_score || 0).toFixed(3)}</div>
+                            <div class="text-sm text-green-700 mt-1 font-semibold">⭐ ${relevance.toFixed(3)}</div>
                         </div>
                         ${isLong ? `
                             <button
@@ -555,16 +574,20 @@ function formatAskCodebaseResult(data) {
             const isLong = summary.length > 200;
             const preview = isLong ? summary.substring(0, 200) + '...' : summary;
 
+            // Handle both API field names and legacy names
+            const name = ms.module || ms.name || 'Unknown';
+            const relevance = ms.relevance ?? ms.relevance_score ?? 0;
+
             return `
                 <div class="mb-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
                             <h4 class="font-semibold text-purple-900">
                                 <span class="font-mono bg-purple-100 px-2 py-0.5 rounded">
-                                    📁 ${escapeHtml(ms.name || 'Unknown')}
+                                    📁 ${escapeHtml(name)}
                                 </span>
                             </h4>
-                            <div class="text-sm text-purple-700 mt-1 font-semibold">⭐ ${(ms.relevance_score || 0).toFixed(3)}</div>
+                            <div class="text-sm text-purple-700 mt-1 font-semibold">⭐ ${relevance.toFixed(3)}</div>
                         </div>
                         ${isLong ? `
                             <button
@@ -597,19 +620,24 @@ function formatAskCodebaseResult(data) {
             const isLong = summary.length > 200;
             const preview = isLong ? summary.substring(0, 200) + '...' : summary;
 
+            // Handle both API field names and legacy names
+            const name = ss.symbol || ss.name || 'Unknown';
+            const filePath = ss.file || ss.file_path || '';
+            const relevance = ss.relevance ?? ss.relevance_score ?? 0;
+
             return `
                 <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
                             <h4 class="font-semibold text-yellow-900">
                                 <span class="font-mono bg-yellow-100 px-2 py-0.5 rounded">
-                                    🔍 ${escapeHtml(ss.name || 'Unknown')}
+                                    🔍 ${escapeHtml(name)}
                                 </span>
                             </h4>
                             <div class="text-sm text-yellow-700 mt-1">
-                                ${ss.file_path ? `<span class="font-mono bg-yellow-100 px-2 py-0.5 rounded">📍 ${escapeHtml(ss.file_path)}</span>` : ''}
+                                ${filePath ? `<span class="font-mono bg-yellow-100 px-2 py-0.5 rounded">📍 ${escapeHtml(filePath)}</span>` : ''}
                                 ${ss.summary_type ? `<span class="ml-2 bg-yellow-100 px-2 py-0.5 rounded">🏷️ ${escapeHtml(ss.summary_type)}</span>` : ''}
-                                <span class="ml-2 font-semibold">⭐ ${(ss.relevance_score || 0).toFixed(3)}</span>
+                                <span class="ml-2 font-semibold">⭐ ${relevance.toFixed(3)}</span>
                             </div>
                         </div>
                         ${isLong ? `

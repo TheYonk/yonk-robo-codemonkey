@@ -72,7 +72,8 @@ robomonkey db ping
 - `document_embedding` - vector(1536) embeddings for documents
 
 **Summaries (cached LLM explanations):**
-- `file_summary`, `module_summary`, `symbol_summary`
+- `file_summary`, `module_summary`, `symbol_summary` - LLM-generated summaries
+- `file_summary_embedding`, `symbol_summary_embedding`, `module_summary_embedding` - vector embeddings for summary similarity search
 
 **Tagging:**
 - `tag` - Semantic tags (auth, database, api/http, logging, caching, etc.)
@@ -237,6 +238,25 @@ The daemon uses a dual-model setup configured in `config/robomonkey-daemon.yaml`
 | `openai` | `/v1/chat/completions` | Bearer token | OpenAI, Azure, Together.ai, Groq, etc. |
 | `vllm` | `/v1/completions` | Bearer token | Local vLLM server |
 
+### OpenAI Model Reference (as of 2025)
+
+**GPT-5.x Token Limits:** 400k context window, 128k max output tokens
+
+**Deep models** (for complex analysis, code generation):
+| Model | Description |
+|-------|-------------|
+| `gpt-5.2-codex` | Best for coding, optimized for long-horizon agentic tasks |
+| `gpt-5.2` | Best for coding and agentic tasks across industries |
+| `gpt-5.2-pro` | Smarter and more precise (supports reasoning.effort: medium/high/xhigh) |
+| `gpt-5` | Reasoning model with configurable effort |
+| `gpt-4.1` | Smartest non-reasoning model (32k max output) |
+
+**Small models** (for quick tasks, summaries):
+| Model | Description |
+|-------|-------------|
+| `gpt-5-mini` | Faster, cost-efficient version of GPT-5 |
+| `gpt-5-nano` | Fastest, most cost-efficient version |
+
 ### Using Cloud LLMs (OpenAI, etc.)
 
 1. **Set your API key** as an environment variable:
@@ -249,16 +269,16 @@ The daemon uses a dual-model setup configured in `config/robomonkey-daemon.yaml`
    llm:
      deep:
        provider: "openai"
-       model: "gpt-4o"
+       model: "gpt-5.2-codex"
        base_url: "https://api.openai.com"
        temperature: 0.3
-       max_tokens: 4000
+       max_tokens: 64000    # GPT-5.x supports up to 128000
      small:
        provider: "openai"
-       model: "gpt-4o-mini"
+       model: "gpt-5-mini"
        base_url: "https://api.openai.com"
        temperature: 0.3
-       max_tokens: 1000
+       max_tokens: 32000    # GPT-5.x supports up to 128000
    ```
 
 The `openai` provider works with any OpenAI-compatible API by changing `base_url`:

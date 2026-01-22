@@ -156,15 +156,25 @@ async def call_llm(
                 if not api_key:
                     logger.error("OpenAI API key not configured (set api_key in config or OPENAI_API_KEY env var)")
                     return None
+                # Build request for OpenAI
+                request_body = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                }
+                # GPT-5+ models require max_completion_tokens instead of max_tokens
+                is_new_model = model and ("gpt-5" in model or "gpt-4.1" in model or "o1" in model or "o3" in model)
+                if is_new_model:
+                    request_body["max_completion_tokens"] = max_tokens
+                else:
+                    request_body["max_tokens"] = max_tokens
+                # Mini/nano models don't support custom temperature - only default (1.0)
+                is_restricted_model = model and ("-mini" in model or "-nano" in model)
+                if not is_restricted_model:
+                    request_body["temperature"] = temperature
                 response = await client.post(
                     f"{base_url.rstrip('/')}/v1/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}"},
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": max_tokens,
-                        "temperature": temperature
-                    }
+                    json=request_body
                 )
                 response.raise_for_status()
                 choices = response.json().get("choices", [])

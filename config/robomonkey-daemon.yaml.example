@@ -130,6 +130,15 @@ summaries:
   # Enable/disable automatic summary generation
   enabled: true
 
+  # Read-only settings: prevent overwriting specific data types
+  # Useful when loading pre-generated summaries from a backup
+  read_only:
+    summaries: false        # Global - skip all summary generation
+    file_summaries: false   # Skip file summary generation
+    symbol_summaries: false # Skip symbol summary generation
+    module_summaries: false # Skip module summary generation
+    embeddings: false       # Skip embedding regeneration
+
   # How often to check for entities needing summaries (minutes: 1-1440)
   # Default: 60 (check every hour)
   check_interval_minutes: 60

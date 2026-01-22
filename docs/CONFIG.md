@@ -137,6 +137,24 @@ embeddings:
     base_url: "http://localhost:8000"
     api_key: "local-key"
 
+# Auto-summary generation
+summaries:
+  enabled: true
+  check_interval_minutes: 60
+  generate_on_index: true
+  provider: "ollama"
+  model: "qwen3-coder:30b"
+  batch_size: 10
+
+  # Read-only mode: prevent overwrites of specific data types
+  # Useful for pre-populated databases or preventing accidental regeneration
+  read_only:
+    summaries: false        # Global - skip all summary generation
+    file_summaries: false   # Skip file summary generation only
+    symbol_summaries: false # Skip symbol summary generation only
+    module_summaries: false # Skip module summary generation only
+    embeddings: false       # Skip embedding regeneration
+
 # Worker configuration
 workers:
   global_max_concurrent: 4

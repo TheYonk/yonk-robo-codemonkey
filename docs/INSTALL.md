@@ -4,7 +4,9 @@ Complete guide for setting up RoboMonkey MCP on a new server.
 
 ## Table of Contents
 - [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
+- [Automated Installation (Recommended)](#automated-installation-recommended)
+- [Quick Start (Manual)](#quick-start-manual)
+- [Platform-Specific Notes](#platform-specific-notes)
 - [A. CLI Setup](#a-cli-setup)
 - [B. Daemon Setup](#b-daemon-setup)
 - [C. MCP Server Setup](#c-mcp-server-setup)
@@ -19,49 +21,133 @@ Complete guide for setting up RoboMonkey MCP on a new server.
 - **Python 3.11+** - `python3 --version`
 - **PostgreSQL 16+** with **pgvector** extension
 - **Git** - for cloning the repository
-- **Ollama** (for embeddings) - https://ollama.ai
+- **Docker** - for running PostgreSQL (or native installation)
+- **Ollama** (optional) - for local embeddings and LLM inference
 
 ### System Requirements
 - **RAM:** 8GB minimum (16GB recommended for large repos)
 - **Disk:** 10GB+ free space
-- **OS:** Linux, macOS, or Windows (WSL)
+- **OS:** Linux or macOS (Windows via WSL)
 
 ---
 
-## Quick Start
+## Automated Installation (Recommended)
+
+The interactive installer handles all setup for both macOS and Linux:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/robomonkey-mcp.git
+cd robomonkey-mcp
+
+# Run the installer
+./scripts/install.sh
+```
+
+The installer will:
+- Detect your operating system (macOS or Linux)
+- Check prerequisites (Python, Docker, Git)
+- Prompt for database setup (fresh or existing)
+- Configure embeddings (local Ollama, remote Ollama, OpenAI, or other endpoints)
+- Configure LLM endpoints (Ollama, OpenAI, NVIDIA NIM, etc.)
+- Generate `.env` and `config/robomonkey-daemon.yaml`
+- Pull required Ollama models (if using local Ollama)
+- Initialize the database
+
+---
+
+## Platform-Specific Notes
+
+### macOS
+
+**Ollama Installation:**
+The standard Ollama install script (`curl -fsSL https://ollama.com/install.sh | sh`) is Linux-only.
+On macOS, use one of these methods:
+
+```bash
+# Option 1: Homebrew (recommended)
+brew install ollama
+
+# Option 2: Download from website
+# Visit https://ollama.com/download and download Ollama.app
+# Drag to Applications folder, then launch it
+```
+
+**PostgreSQL (native, if not using Docker):**
+```bash
+brew install postgresql@16 pgvector
+brew services start postgresql@16
+```
+
+**Python:**
+```bash
+# If you need Python 3.11+
+brew install python@3.11
+```
+
+### Linux
+
+**Ollama Installation:**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+**PostgreSQL with pgvector (if not using Docker):**
+```bash
+# Ubuntu/Debian
+sudo apt install -y postgresql-16 postgresql-server-dev-16
+cd /tmp && git clone https://github.com/pgvector/pgvector.git
+cd pgvector && make && sudo make install
+sudo -u postgres psql -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# RHEL/Fedora
+sudo dnf install postgresql16-server postgresql16-devel
+# Then install pgvector from source as above
+```
+
+---
+
+## Quick Start (Manual)
+
+If you prefer manual installation:
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/yourusername/robomonkey-mcp.git
 cd robomonkey-mcp
 
-# 2. Install Ollama and pull embedding model
-curl -fsSL https://ollama.ai/install.sh | sh
+# 2. Install Ollama (platform-specific - see notes above)
+# macOS:
+brew install ollama
+# Linux:
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 3. Pull embedding model
 ollama pull snowflake-arctic-embed2:latest
 
-# 3. Start PostgreSQL with pgvector
-docker-compose up -d
+# 4. Start PostgreSQL with pgvector
+docker compose up -d
 
-# 4. Setup Python environment
+# 5. Setup Python environment
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
 
-# 5. Configure environment
+# 6. Configure environment
 cp .env.example .env
 nano .env  # Edit DATABASE_URL and other settings
 
-# 6. Initialize database
+# 7. Initialize database
 robomonkey db init
 robomonkey db ping
 
-# 7. Index your first repository
+# 8. Index your first repository
 robomonkey index --repo /path/to/your/repo --name myrepo
 
-# 8. Generate embeddings (optional: daemon can do this automatically)
+# 9. Generate embeddings (optional: daemon can do this automatically)
 python scripts/embed_repo_direct.py myrepo robomonkey_myrepo
 
-# 9. Generate summaries (optional: daemon can do this automatically)
+# 10. Generate summaries (optional: daemon can do this automatically)
 ollama pull qwen2.5-coder:7b  # Pull LLM model for summaries
 robomonkey summaries generate --repo-name myrepo
 ```
@@ -123,10 +209,23 @@ brew services start postgresql@16
 
 ### Step 2: Install Ollama
 
+**macOS:**
 ```bash
-# Linux/macOS
-curl -fsSL https://ollama.ai/install.sh | sh
+# Option 1: Homebrew (recommended)
+brew install ollama
+brew services start ollama  # Optional: start as service
 
+# Option 2: Download Ollama.app from https://ollama.com/download
+# Then launch from Applications
+```
+
+**Linux:**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+**After installation:**
+```bash
 # Verify installation
 ollama --version
 
@@ -330,12 +429,26 @@ summaries:
 ```
 
 **Recommended Ollama models for summaries:**
-- `qwen2.5-coder:7b` - Fast, good quality (recommended)
+- `qwen2.5-coder:7b` - Fast, good quality (recommended for local)
 - `qwen2.5-coder:14b` - Balanced quality and speed
 - `qwen3-coder:30b` - Best quality, slower
 - `deepseek-coder:33b` - High quality, slower
 
 Pull a model with: `ollama pull qwen2.5-coder:7b`
+
+**OpenAI models (for cloud-based summaries):**
+
+Deep models (complex analysis):
+- `gpt-5.2-codex` - Best for coding, optimized for agentic tasks
+- `gpt-5.2` - Best for coding and agentic tasks
+- `gpt-5.2-pro` - Smarter and more precise responses
+- `gpt-4.1` - Smartest non-reasoning model
+
+Small models (quick tasks, summaries):
+- `gpt-5-mini` - Fast, cost-efficient (recommended)
+- `gpt-5-nano` - Fastest, most cost-efficient
+
+To use OpenAI, set `provider: "openai"` and configure your API key.
 
 **Manual summary generation:**
 ```bash

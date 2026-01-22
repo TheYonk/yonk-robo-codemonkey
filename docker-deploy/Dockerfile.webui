@@ -1,0 +1,25 @@
+# RoboMonkey Web UI Dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python package
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
+
+# Install the package with web dependencies
+RUN pip install --no-cache-dir -e . uvicorn fastapi jinja2 python-multipart aiofiles
+
+# Copy config and static files
+COPY config/ ./config/
+
+# Expose web UI port
+EXPOSE 9832
+
+# Default command: run web UI
+CMD ["python", "-m", "yonk_code_robomonkey.web.app"]

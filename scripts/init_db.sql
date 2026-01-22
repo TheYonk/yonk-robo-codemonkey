@@ -153,6 +153,24 @@ CREATE TABLE IF NOT EXISTS symbol_summary (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Summary embeddings for vector search
+CREATE TABLE IF NOT EXISTS file_summary_embedding (
+  file_id UUID PRIMARY KEY REFERENCES file(id) ON DELETE CASCADE,
+  embedding vector(1536) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS symbol_summary_embedding (
+  symbol_id UUID PRIMARY KEY REFERENCES symbol(id) ON DELETE CASCADE,
+  embedding vector(1536) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS module_summary_embedding (
+  repo_id UUID NOT NULL REFERENCES repo(id) ON DELETE CASCADE,
+  module_path TEXT NOT NULL,
+  embedding vector(1536) NOT NULL,
+  PRIMARY KEY(repo_id, module_path)
+);
+
 CREATE TABLE IF NOT EXISTS tag (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
@@ -196,6 +214,12 @@ CREATE INDEX IF NOT EXISTS idx_entity_tag_by_tag ON entity_tag(tag_id, repo_id);
 
 CREATE INDEX IF NOT EXISTS idx_feature_index_repo ON feature_index(repo_id);
 CREATE INDEX IF NOT EXISTS idx_feature_index_fts ON feature_index USING GIN (fts);
+
+-- Summary embedding vector indexes (using ivfflat for fast approximate search)
+-- Note: These indexes work best with at least 100+ rows; smaller tables use sequential scan
+CREATE INDEX IF NOT EXISTS idx_file_summary_embedding ON file_summary_embedding USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);
+CREATE INDEX IF NOT EXISTS idx_symbol_summary_embedding ON symbol_summary_embedding USING ivfflat (embedding vector_cosine_ops) WITH (lists = 20);
+CREATE INDEX IF NOT EXISTS idx_module_summary_embedding ON module_summary_embedding USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);
 
 -- FTS triggers
 CREATE OR REPLACE FUNCTION set_chunk_fts() RETURNS trigger AS $$
