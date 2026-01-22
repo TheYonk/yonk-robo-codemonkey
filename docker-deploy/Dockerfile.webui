@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
-# Install the package with uvicorn
-RUN pip install --no-cache-dir -e . uvicorn
+# Install the package with web dependencies
+RUN pip install --no-cache-dir -e . uvicorn fastapi jinja2 python-multipart aiofiles
 
 # Copy config and static files
 COPY config/ ./config/

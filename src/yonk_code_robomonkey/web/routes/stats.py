@@ -2,12 +2,75 @@
 from __future__ import annotations
 
 import asyncpg
+import httpx
+import os
 from fastapi import APIRouter
 from typing import Any
 
 from yonk_code_robomonkey.config import Settings
 
 router = APIRouter()
+
+
+@router.get("/embeddings")
+async def get_embeddings_config() -> dict[str, Any]:
+    """Get embedding service configuration and supported models."""
+    settings = Settings()
+
+    # Get configured values from environment
+    configured = {
+        "provider": os.environ.get("EMBEDDINGS_PROVIDER", "unknown"),
+        "model": os.environ.get("EMBEDDINGS_MODEL", "unknown"),
+        "dimension": int(os.environ.get("EMBEDDINGS_DIMENSION", 0)),
+        "base_url": os.environ.get("EMBEDDINGS_BASE_URL", "unknown"),
+    }
+
+    # Try to query the embedding service for available models
+    available_models = []
+    service_status = "unknown"
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Try /v1/models endpoint (OpenAI-compatible)
+            try:
+                resp = await client.get(f"{configured['base_url']}/v1/models")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    available_models = [
+                        {
+                            "id": m.get("id"),
+                            "dimension": m.get("dimension"),
+                            "owned_by": m.get("owned_by", "unknown")
+                        }
+                        for m in data.get("data", [])
+                    ]
+                    service_status = "healthy"
+            except Exception:
+                pass
+
+            # Try /health endpoint as fallback
+            if service_status != "healthy":
+                try:
+                    resp = await client.get(f"{configured['base_url']}/health")
+                    if resp.status_code == 200:
+                        health = resp.json()
+                        service_status = health.get("status", "healthy")
+                        if "available_models" in health:
+                            available_models = [
+                                {"id": m, "dimension": None}
+                                for m in health["available_models"]
+                            ]
+                except Exception:
+                    service_status = "unreachable"
+
+    except Exception as e:
+        service_status = f"error: {str(e)}"
+
+    return {
+        "configured": configured,
+        "service_status": service_status,
+        "available_models": available_models
+    }
 
 
 @router.get("/overview")

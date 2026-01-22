@@ -1759,6 +1759,10 @@ COMPOSE_OLLAMA_DEP
     container_name: robomonkey-webui
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-robomonkey}
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-openai}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-all-mpnet-base-v2}
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://embeddings:8082}
+      EMBEDDINGS_DIMENSION: ${EMBEDDINGS_DIMENSION:-768}
     ports:
       - "${WEBUI_PORT:-9832}:9832"
     depends_on:
