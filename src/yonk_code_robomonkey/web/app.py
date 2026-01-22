@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from yonk_code_robomonkey.config import Settings
 
 # Import routes
-from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats
+from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats, maintenance
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -44,6 +44,7 @@ app.include_router(repos.router, prefix="/api", tags=["repositories"])
 app.include_router(tables.router, prefix="/api", tags=["database"])
 app.include_router(mcp_tools.router, prefix="/api/mcp", tags=["mcp-tools"])
 app.include_router(stats.router, prefix="/api/stats", tags=["statistics"])
+app.include_router(maintenance.router, prefix="/api/maintenance", tags=["maintenance"])
 
 
 @app.get("/", response_class=HTMLResponse)
