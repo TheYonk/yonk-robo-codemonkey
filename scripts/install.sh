@@ -389,12 +389,12 @@ start_ollama_docker() {
     log_step "Starting Ollama via Docker"
 
     # Check if container already exists
-    if docker ps -a --format '{{.Names}}' | grep -q '^ollama$'; then
-        if docker ps --format '{{.Names}}' | grep -q '^ollama$'; then
+    if docker ps -a --format '{{.Names}}' | grep -q '^robomonkey-ollama$'; then
+        if docker ps --format '{{.Names}}' | grep -q '^robomonkey-ollama$'; then
             log_info "Ollama container already running"
         else
             log_info "Starting existing Ollama container..."
-            docker start ollama
+            docker start robomonkey-ollama
         fi
     else
         log_info "Creating and starting Ollama container..."
@@ -411,9 +411,9 @@ start_ollama_docker() {
         # Run Ollama container
         docker run -d \
             $gpu_flag \
-            -v ollama_data:/root/.ollama \
+            -v robomonkey_ollama_data:/root/.ollama \
             -p 11434:11434 \
-            --name ollama \
+            --name robomonkey-ollama \
             --restart unless-stopped \
             ollama/ollama:latest
     fi
@@ -431,14 +431,14 @@ start_ollama_docker() {
         retries=$((retries-1))
     done
 
-    log_warn "Ollama may not have started. Check: docker logs ollama"
+    log_warn "Ollama may not have started. Check: docker logs robomonkey-ollama"
     return 0
 }
 
 pull_ollama_model_docker() {
     local model="$1"
     log_info "Pulling Ollama model via Docker: $model"
-    docker exec ollama ollama pull "$model"
+    docker exec robomonkey-ollama ollama pull "$model"
     log_success "Model $model pulled successfully"
 }
 
@@ -877,7 +877,7 @@ setup_embeddings_options() {
                         log_info "You'll need to install/start Ollama before using embeddings."
                         log_info "  macOS: brew install ollama && ollama serve"
                         log_info "  Linux: curl -fsSL https://ollama.com/install.sh | sh"
-                        log_info "  Docker: docker run -d -p 11434:11434 --name ollama ollama/ollama"
+                        log_info "  Docker: docker run -d -p 11434:11434 --name robomonkey-ollama ollama/ollama"
                         NEED_OLLAMA_START=false
                         ;;
                     3)

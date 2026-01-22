@@ -174,7 +174,6 @@ stop_docker_containers() {
         "robomonkey-daemon"
         "robomonkey-webui"
         "robomonkey-mcp"
-        "ollama"
     )
 
     for container in "${containers[@]}"; do
