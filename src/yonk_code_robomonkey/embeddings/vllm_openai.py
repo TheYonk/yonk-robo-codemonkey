@@ -33,6 +33,11 @@ async def vllm_embed(
 
     all_embeddings: list[list[float]] = []
 
+    # Build headers - only add Authorization if api_key is provided
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         # Process in batches
         for i in range(0, len(texts), batch_size):
@@ -41,7 +46,7 @@ async def vllm_embed(
             try:
                 response = await client.post(
                     f"{base_url.rstrip('/')}/v1/embeddings",
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    headers=headers,
                     json={"model": model, "input": batch},
                 )
                 response.raise_for_status()

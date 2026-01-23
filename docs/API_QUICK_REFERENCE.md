@@ -343,6 +343,144 @@ Register webhooks for:
 
 ---
 
+---
+
+## Web UI Management API (Port 9832)
+
+The Web UI provides additional management endpoints for monitoring and maintenance.
+
+**Base URL:** `http://localhost:9832/api`
+
+### Statistics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/stats` | Overall indexing statistics |
+| GET | `/stats/embeddings` | Embedding service config and models |
+| GET | `/stats/jobs` | Job queue status (pending, running, failed) |
+
+### Source Mounts (Docker Mode)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/sources` | List all source mounts |
+| POST | `/sources` | Add a new source mount |
+| GET | `/sources/{mount_name}` | Get mount details |
+| PUT | `/sources/{mount_name}` | Update mount settings |
+| DELETE | `/sources/{mount_name}` | Delete a source mount |
+| POST | `/sources/apply` | Apply changes and restart containers |
+| GET | `/sources/status` | Check sync status |
+
+### Daemon Configuration
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/maintenance/config/workers` | Get worker/parallelism config |
+| PUT | `/maintenance/config/workers` | Update worker config (requires restart) |
+
+### Maintenance
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/maintenance/vector-indexes` | List all vector indexes |
+| POST | `/maintenance/vector-indexes/rebuild` | Rebuild indexes (IVFFlat/HNSW) |
+| POST | `/maintenance/vector-indexes/switch` | Switch index type |
+| GET | `/maintenance/vector-indexes/recommendations` | Get index recommendations |
+| POST | `/maintenance/embed-missing` | Queue embedding job for a repo |
+| POST | `/maintenance/reembed-table` | Truncate and regenerate embeddings |
+| GET | `/maintenance/embedding-status` | Embedding completion per schema |
+
+### Web UI Examples
+
+**Queue Embedding Job:**
+```bash
+curl -X POST http://localhost:9832/api/maintenance/embed-missing \
+  -H "Content-Type: application/json" \
+  -d '{"repo_name": "my-backend"}'
+```
+
+**Check Embedding Status:**
+```bash
+curl http://localhost:9832/api/maintenance/embedding-status
+```
+
+**Rebuild Vector Indexes:**
+```bash
+curl -X POST http://localhost:9832/api/maintenance/vector-indexes/rebuild \
+  -H "Content-Type: application/json" \
+  -d '{
+    "schema_name": "robomonkey_my_backend",
+    "index_type": "hnsw",
+    "m": 16,
+    "ef_construction": 64
+  }'
+```
+
+**Regenerate Embeddings for a Table:**
+```bash
+curl -X POST http://localhost:9832/api/maintenance/reembed-table \
+  -H "Content-Type: application/json" \
+  -d '{
+    "schema_name": "robomonkey_my_backend",
+    "table_name": "chunk_embedding",
+    "rebuild_index": true
+  }'
+```
+
+### Source Mount Examples
+
+**Add a Source Mount:**
+```bash
+curl -X POST http://localhost:9832/api/sources \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mount_name": "my-project",
+    "host_path": "/Users/me/projects/my-project",
+    "read_only": true,
+    "enabled": true
+  }'
+```
+
+**List Source Mounts:**
+```bash
+curl http://localhost:9832/api/sources
+```
+
+**Apply Changes (Restart Containers):**
+```bash
+curl -X POST http://localhost:9832/api/sources/apply
+```
+
+### Worker Configuration Examples
+
+**Get Current Worker Config:**
+```bash
+curl http://localhost:9832/api/maintenance/config/workers
+```
+
+**Update Worker Mode to Single-Threaded:**
+```bash
+curl -X PUT http://localhost:9832/api/maintenance/config/workers \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "single"}'
+```
+
+**Update Max Workers and Job Limits:**
+```bash
+curl -X PUT http://localhost:9832/api/maintenance/config/workers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "pool",
+    "max_workers": 8,
+    "job_type_limits": {
+      "FULL_INDEX": 4,
+      "EMBED_MISSING": 6
+    }
+  }'
+```
+
+---
+
 ## See Also
 
 - [API_SPECIFICATION.yaml](API_SPECIFICATION.yaml) - Full OpenAPI 3.1 spec

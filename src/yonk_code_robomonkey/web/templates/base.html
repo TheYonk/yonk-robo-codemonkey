@@ -4,8 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}RoboMonkey Admin Panel{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+    <script>
+        // Fallback check - if Tailwind didn't load, add basic styling
+        window.addEventListener('DOMContentLoaded', function() {
+            if (typeof tailwind === 'undefined') {
+                console.warn('Tailwind CSS CDN failed to load - applying basic styles');
+                document.body.style.fontFamily = 'system-ui, sans-serif';
+                document.body.style.backgroundColor = '#0f172a';
+                document.body.style.color = '#f1f5f9';
+                document.body.style.margin = '0';
+                document.body.style.padding = '20px';
+            }
+        });
+    </script>
     <style>
+        /* JSON viewer - already dark themed */
         .json-view {
             font-family: 'Courier New', monospace;
             font-size: 0.875rem;
@@ -20,29 +34,73 @@
         .json-number { color: #b5cea8; }
         .json-boolean { color: #569cd6; }
         .json-null { color: #569cd6; }
+
+        /* Dark theme form inputs */
+        input[type="text"],
+        input[type="number"],
+        input[type="email"],
+        input[type="password"],
+        select,
+        textarea {
+            background-color: #1e293b;
+            border-color: #475569;
+            color: #f1f5f9;
+        }
+        input[type="text"]::placeholder,
+        input[type="number"]::placeholder,
+        input[type="email"]::placeholder,
+        input[type="password"]::placeholder,
+        textarea::placeholder {
+            color: #64748b;
+        }
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="email"]:focus,
+        input[type="password"]:focus,
+        select:focus,
+        textarea:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+            outline: none;
+        }
+        /* Checkbox styling for dark theme */
+        input[type="checkbox"] {
+            background-color: #1e293b;
+            border-color: #475569;
+        }
+        input[type="checkbox"]:checked {
+            background-color: #3b82f6;
+            border-color: #3b82f6;
+        }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-slate-900">
     <!-- Navigation -->
-    <nav class="bg-white shadow-sm">
+    <nav class="bg-slate-800 border-b border-slate-700">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex">
                     <div class="flex-shrink-0 flex items-center">
-                        <h1 class="text-xl font-bold text-gray-900">🤖 RoboMonkey</h1>
+                        <h1 class="text-xl font-bold text-slate-100">RoboMonkey</h1>
                     </div>
                     <div class="ml-6 flex space-x-8">
-                        <a href="/" class="inline-flex items-center px-1 pt-1 border-b-2 {% if request.url.path == '/' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %} text-sm font-medium">
+                        <a href="/" class="inline-flex items-center px-1 pt-1 border-b-2 {% if request.url.path == '/' %}border-blue-500 text-slate-100{% else %}border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500{% endif %} text-sm font-medium">
                             Dashboard
                         </a>
-                        <a href="/explorer" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/explorer' in request.url.path %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %} text-sm font-medium">
+                        <a href="/repos" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/repos' in request.url.path %}border-blue-500 text-slate-100{% else %}border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500{% endif %} text-sm font-medium">
+                            Repos
+                        </a>
+                        <a href="/explorer" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/explorer' in request.url.path %}border-blue-500 text-slate-100{% else %}border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500{% endif %} text-sm font-medium">
                             Explorer
                         </a>
-                        <a href="/tools" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/tools' in request.url.path %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %} text-sm font-medium">
+                        <a href="/tools" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/tools' in request.url.path %}border-blue-500 text-slate-100{% else %}border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500{% endif %} text-sm font-medium">
                             MCP Tools
                         </a>
-                        <a href="/stats" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/stats' in request.url.path %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %} text-sm font-medium">
+                        <a href="/stats" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/stats' in request.url.path %}border-blue-500 text-slate-100{% else %}border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500{% endif %} text-sm font-medium">
                             Stats
+                        </a>
+                        <a href="/sources" class="inline-flex items-center px-1 pt-1 border-b-2 {% if '/sources' in request.url.path %}border-blue-500 text-slate-100{% else %}border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500{% endif %} text-sm font-medium">
+                            Sources
                         </a>
                     </div>
                 </div>

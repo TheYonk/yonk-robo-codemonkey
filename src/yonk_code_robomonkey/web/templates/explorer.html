@@ -6,12 +6,12 @@
 <div class="grid grid-cols-12 gap-6">
     <!-- Sidebar -->
     <div class="col-span-3">
-        <div class="bg-white shadow rounded-lg p-4">
+        <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-4">
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">Schema</label>
+                <label class="block text-sm font-medium text-slate-300 mb-2">Schema</label>
                 <select
                     id="schema-select"
-                    class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    class="w-full rounded-md bg-slate-700 border-slate-600 text-slate-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                     onchange="loadTables(this.value)"
                 >
                     <option value="">Select schema...</option>
@@ -26,33 +26,33 @@
 
     <!-- Main Content -->
     <div class="col-span-9">
-        <div id="empty-state" class="bg-white shadow rounded-lg p-12 text-center">
-            <h3 class="text-lg font-medium text-gray-900 mb-2">Select a Schema</h3>
-            <p class="text-gray-600">Choose a schema from the dropdown to explore its tables</p>
+        <div id="empty-state" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-12 text-center">
+            <h3 class="text-lg font-medium text-slate-100 mb-2">Select a Schema</h3>
+            <p class="text-slate-400">Choose a schema from the dropdown to explore its tables</p>
         </div>
 
-        <div id="table-view" class="bg-white shadow rounded-lg p-6" style="display: none;">
+        <div id="table-view" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
             <div class="flex justify-between items-center mb-6">
                 <div>
-                    <h3 class="text-xl font-bold text-gray-900" id="table-title"></h3>
-                    <p class="text-sm text-gray-500" id="table-info"></p>
+                    <h3 class="text-xl font-bold text-slate-100" id="table-title"></h3>
+                    <p class="text-sm text-slate-400" id="table-info"></p>
                 </div>
-                <button onclick="exportCSV()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">
+                <button onclick="exportCSV()" class="bg-slate-700 hover:bg-slate-600 text-slate-300 px-4 py-2 rounded">
                     Export CSV
                 </button>
             </div>
 
             <div class="overflow-x-auto">
-                <table id="data-table" class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
+                <table id="data-table" class="min-w-full divide-y divide-slate-700">
+                    <thead class="bg-slate-700">
                         <tr id="table-header"></tr>
                     </thead>
-                    <tbody id="table-body" class="bg-white divide-y divide-gray-200"></tbody>
+                    <tbody id="table-body" class="bg-slate-800 divide-y divide-slate-700"></tbody>
                 </table>
             </div>
 
             <div class="mt-4 flex justify-between items-center">
-                <div id="pagination-info" class="text-sm text-gray-700"></div>
+                <div id="pagination-info" class="text-sm text-slate-400"></div>
                 <div id="pagination-controls" class="flex gap-2"></div>
             </div>
         </div>
@@ -61,11 +61,11 @@
 
 <!-- Row Detail Modal -->
 <div id="row-detail-modal" class="fixed inset-0 z-50 hidden" aria-modal="true">
-    <div class="fixed inset-0 bg-black bg-opacity-50" onclick="closeRowDetail()"></div>
-    <div class="fixed inset-y-0 right-0 w-1/2 bg-white shadow-xl flex flex-col">
-        <div class="flex items-center justify-between px-6 py-4 border-b">
-            <h3 class="text-lg font-semibold text-gray-900" id="detail-title">Row Details</h3>
-            <button onclick="closeRowDetail()" class="text-gray-400 hover:text-gray-600">
+    <div class="fixed inset-0 bg-black/60" onclick="closeRowDetail()"></div>
+    <div class="fixed inset-y-0 right-0 w-1/2 bg-slate-800 border-l border-slate-700 shadow-xl flex flex-col">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100" id="detail-title">Row Details</h3>
+            <button onclick="closeRowDetail()" class="text-slate-400 hover:text-slate-200">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                 </svg>
@@ -111,14 +111,14 @@ async function loadTables(schema) {
     const data = await response.json();
 
     const list = document.getElementById('table-list');
-    list.innerHTML = `<h3 class="text-sm font-semibold text-gray-700 mb-2">Tables (${data.tables.length})</h3>`;
+    list.innerHTML = `<h3 class="text-sm font-semibold text-slate-300 mb-2">Tables (${data.tables.length})</h3>`;
 
     data.tables.forEach(table => {
         const button = document.createElement('button');
-        button.className = 'w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 flex justify-between items-center';
+        button.className = 'w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-700 text-slate-300 flex justify-between items-center';
         button.innerHTML = `
             <span>${table.name}</span>
-            <span class="text-xs text-gray-500">${table.row_count}</span>
+            <span class="text-xs text-slate-500">${table.row_count}</span>
         `;
         button.onclick = () => loadTableData(schema, table.name);
         list.appendChild(button);
@@ -148,18 +148,18 @@ async function loadTableData(schema, table, page = 0) {
         const columns = Object.keys(data.rows[0]);
 
         thead.innerHTML = columns.map(col =>
-            `<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${col}</th>`
+            `<th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">${col}</th>`
         ).join('');
 
         tbody.innerHTML = data.rows.map((row, index) =>
-            `<tr class="hover:bg-blue-50 cursor-pointer" onclick="showRowDetail(${index})">
+            `<tr class="hover:bg-slate-700/50 cursor-pointer" onclick="showRowDetail(${index})">
                 ${columns.map(col => {
                     let value = row[col];
-                    if (value === null) value = '<span class="text-gray-400">null</span>';
+                    if (value === null) value = '<span class="text-slate-500 italic">null</span>';
                     else if (typeof value === 'object') value = JSON.stringify(value);
                     else if (typeof value === 'string' && value.length > 100) value = value.substring(0, 100) + '...';
 
-                    return `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${value}</td>`;
+                    return `<td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">${value}</td>`;
                 }).join('')}
             </tr>`
         ).join('');
@@ -174,14 +174,14 @@ async function loadTableData(schema, table, page = 0) {
         <button
             onclick="loadTableData('${schema}', '${table}', ${page - 1})"
             ${page === 0 ? 'disabled' : ''}
-            class="px-3 py-1 bg-gray-200 rounded text-sm ${page === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-300'}"
+            class="px-3 py-1 bg-slate-700 rounded text-sm text-slate-300 ${page === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-600'}"
         >
             Previous
         </button>
         <button
             onclick="loadTableData('${schema}', '${table}', ${page + 1})"
             ${!data.has_more ? 'disabled' : ''}
-            class="px-3 py-1 bg-gray-200 rounded text-sm ${!data.has_more ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-300'}"
+            class="px-3 py-1 bg-slate-700 rounded text-sm text-slate-300 ${!data.has_more ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-600'}"
         >
             Next
         </button>
@@ -206,9 +206,9 @@ function showRowDetail(rowIndex) {
     let html = '<div class="space-y-4">';
     for (const [key, value] of Object.entries(row)) {
         html += `
-            <div class="border-b pb-3">
-                <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">${key}</label>
-                <div class="text-sm text-gray-900">
+            <div class="border-b border-slate-700 pb-3">
+                <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">${key}</label>
+                <div class="text-sm text-slate-200">
                     ${formatDetailValue(value)}
                 </div>
             </div>
@@ -223,19 +223,19 @@ function showRowDetail(rowIndex) {
 
 function formatDetailValue(value) {
     if (value === null) {
-        return '<span class="text-gray-400 italic">null</span>';
+        return '<span class="text-slate-500 italic">null</span>';
     }
     if (typeof value === 'object') {
         // Pretty print JSON
-        return `<pre class="bg-gray-100 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap">${JSON.stringify(value, null, 2)}</pre>`;
+        return `<pre class="bg-slate-900 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap text-slate-300">${JSON.stringify(value, null, 2)}</pre>`;
     }
     if (typeof value === 'string' && value.length > 200) {
         // Long text - show in scrollable box
-        return `<pre class="bg-gray-50 p-2 rounded text-sm max-h-64 overflow-y-auto whitespace-pre-wrap">${escapeHtml(value)}</pre>`;
+        return `<pre class="bg-slate-900 p-2 rounded text-sm max-h-64 overflow-y-auto whitespace-pre-wrap text-slate-300">${escapeHtml(value)}</pre>`;
     }
     if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
         // UUID - show with monospace
-        return `<code class="bg-gray-100 px-1 rounded text-sm">${value}</code>`;
+        return `<code class="bg-slate-900 px-1 rounded text-sm text-slate-300">${value}</code>`;
     }
     return escapeHtml(String(value));
 }

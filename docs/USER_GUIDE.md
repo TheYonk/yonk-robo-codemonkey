@@ -3,9 +3,337 @@
 Complete guide for using RoboMonkey MCP for code search and analysis.
 
 ## Table of Contents
+- [A. Embedding Providers](#a-embedding-providers)
+- [B. Vector Index Management](#b-vector-index-management)
+- [C. Web UI & Maintenance](#c-web-ui--maintenance)
+- [D. Docker Deployment](#d-docker-deployment)
 - [E. Usage Examples](#e-usage-examples)
 - [F. Clearing Data and Starting Over](#f-clearing-data-and-starting-over)
 - [G. Troubleshooting](#g-troubleshooting)
+
+---
+
+## A. Embedding Providers
+
+RoboMonkey supports three embedding providers for generating vector embeddings of your code.
+
+### Provider Options
+
+| Provider | Endpoint | Best For |
+|----------|----------|----------|
+| `ollama` | `/api/embeddings` | Local Ollama server (default) |
+| `vllm` | `/v1/embeddings` | Local vLLM server |
+| `openai` | `/v1/embeddings` | OpenAI API or any OpenAI-compatible service |
+
+### Ollama (Default)
+
+Best for: Local development, no cloud costs.
+
+```yaml
+# config/robomonkey-daemon.yaml
+embeddings:
+  provider: "ollama"
+  model: "snowflake-arctic-embed2:latest"
+  dimension: 1024
+  ollama:
+    base_url: "http://localhost:11434"
+```
+
+```bash
+# Pull the model
+ollama pull snowflake-arctic-embed2:latest
+```
+
+### OpenAI (Cloud)
+
+Best for: High-quality embeddings, production workloads.
+
+```yaml
+# config/robomonkey-daemon.yaml
+embeddings:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  dimension: 1536
+  openai:
+    base_url: "https://api.openai.com"
+    # api_key: "sk-..."  # Or set OPENAI_API_KEY env var
+```
+
+Available OpenAI models:
+- `text-embedding-3-small` (1536 dimensions) - Cost-effective
+- `text-embedding-3-large` (3072 dimensions) - Higher quality
+
+### Local Embedding Service (Docker)
+
+Best for: Docker deployments, consistent results, no external API calls.
+
+The Docker deployment includes a local embedding service using sentence-transformers:
+
+```yaml
+# config/robomonkey-daemon.yaml
+embeddings:
+  provider: "openai"  # Uses OpenAI-compatible API
+  model: "all-mpnet-base-v2"
+  dimension: 768
+  openai:
+    base_url: "http://embeddings:8082"  # Docker service name
+    api_key: ""  # No auth needed for local service
+```
+
+### vLLM
+
+Best for: High-throughput local inference, GPU acceleration.
+
+```yaml
+# config/robomonkey-daemon.yaml
+embeddings:
+  provider: "vllm"
+  model: "BAAI/bge-large-en-v1.5"
+  dimension: 1024
+  vllm:
+    base_url: "http://localhost:8000"
+    api_key: "local-key"  # Optional
+```
+
+### Dimension Mismatch
+
+**Important:** The embedding dimension must match across your configuration and database tables. If you change models, you may need to recreate the embedding tables or regenerate all embeddings.
+
+---
+
+## B. Vector Index Management
+
+RoboMonkey uses pgvector indexes to accelerate similarity searches. Two index types are available:
+
+### Index Types
+
+| Type | Build Speed | Query Speed | Memory | Best For |
+|------|-------------|-------------|--------|----------|
+| **IVFFlat** | Fast | Good | Lower | Frequently changing data, < 100k rows |
+| **HNSW** | Slow | Excellent | Higher | Stable data, > 100k rows, high recall needed |
+
+### Auto-Rebuild After Embedding Jobs
+
+The daemon automatically rebuilds vector indexes after embedding jobs complete:
+
+```yaml
+# config/robomonkey-daemon.yaml
+embeddings:
+  # Auto-rebuild vector indexes after embedding jobs
+  auto_rebuild_indexes: true
+
+  # Minimum change rate (0-1) to trigger rebuild
+  # 0.20 = rebuild if 20% or more embeddings added/changed
+  rebuild_change_threshold: 0.20
+
+  # Index type to use: "ivfflat" or "hnsw"
+  rebuild_index_type: "ivfflat"
+
+  # HNSW-specific parameters (only used when rebuild_index_type: "hnsw")
+  rebuild_hnsw_m: 16              # Max connections per layer (4-64)
+  rebuild_hnsw_ef_construction: 64  # Build-time search width (16-512)
+```
+
+### Manual Index Management via Web UI
+
+The Web UI (port 9832) provides endpoints for index management:
+
+```bash
+# List all vector indexes
+curl http://localhost:9832/api/maintenance/vector-indexes
+
+# Get recommendations based on data size
+curl http://localhost:9832/api/maintenance/vector-indexes/recommendations
+
+# Rebuild indexes for a schema
+curl -X POST http://localhost:9832/api/maintenance/vector-indexes/rebuild \
+  -H "Content-Type: application/json" \
+  -d '{
+    "schema_name": "robomonkey_myrepo",
+    "index_type": "hnsw",
+    "m": 16,
+    "ef_construction": 64
+  }'
+
+# Switch index type (drops old, creates new)
+curl -X POST http://localhost:9832/api/maintenance/vector-indexes/switch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "schema_name": "robomonkey_myrepo",
+    "new_type": "hnsw"
+  }'
+```
+
+### Index Recommendations
+
+General guidelines:
+- **< 10,000 embeddings:** No index needed (sequential scan is fine)
+- **10,000 - 100,000 embeddings:** IVFFlat with `lists = sqrt(row_count)`
+- **> 100,000 embeddings:** HNSW for better recall, or IVFFlat if build time matters
+
+---
+
+## C. Web UI & Maintenance
+
+RoboMonkey includes a Web UI for monitoring and maintenance tasks.
+
+### Starting the Web UI
+
+```bash
+# Via daemon (if webui enabled in config)
+robomonkey daemon run
+
+# Standalone
+python -m yonk_code_robomonkey.web.app
+```
+
+The Web UI runs on port **9832** by default.
+
+### Dashboard
+
+Access `http://localhost:9832` for:
+- Repository overview and statistics
+- Job queue status (pending, running, failed)
+- Embedding completion status
+- Daemon health monitoring
+
+### Maintenance API Endpoints
+
+#### Embedding Status
+
+```bash
+# Get embedding completion per schema
+curl http://localhost:9832/api/maintenance/embedding-status
+```
+
+Response:
+```json
+{
+  "schemas": [
+    {
+      "schema_name": "robomonkey_myrepo",
+      "total_chunks": 5000,
+      "embedded_chunks": 4850,
+      "completion_pct": 97.0
+    }
+  ]
+}
+```
+
+#### Queue Embedding Job
+
+```bash
+# Queue job to embed missing chunks
+curl -X POST http://localhost:9832/api/maintenance/embed-missing \
+  -H "Content-Type: application/json" \
+  -d '{"repo_name": "myrepo"}'
+```
+
+#### Regenerate All Embeddings
+
+```bash
+# Truncate and regenerate all embeddings for a table
+curl -X POST http://localhost:9832/api/maintenance/reembed-table \
+  -H "Content-Type: application/json" \
+  -d '{
+    "schema_name": "robomonkey_myrepo",
+    "table_name": "chunk_embedding",
+    "rebuild_index": true
+  }'
+```
+
+#### Statistics
+
+```bash
+# Overall stats
+curl http://localhost:9832/api/stats
+
+# Embedding service config
+curl http://localhost:9832/api/stats/embeddings
+
+# Job queue status
+curl http://localhost:9832/api/stats/jobs
+```
+
+---
+
+## D. Docker Deployment
+
+RoboMonkey provides a complete Docker deployment with all services included.
+
+### Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `postgres` | 5433 | PostgreSQL 16 with pgvector |
+| `daemon` | - | Background processing daemon |
+| `webui` | 9832 | Web management interface |
+| `embeddings` | 8082 | Local embedding service (sentence-transformers) |
+| `ollama` | 11434 | (Optional) Ollama for local LLM |
+
+### Quick Start
+
+```bash
+# Clone and configure
+git clone https://github.com/yourusername/robomonkey-mcp.git
+cd robomonkey-mcp
+cp .env.example .env
+
+# Start all services
+docker-compose up -d
+
+# Initialize database
+docker exec robomonkey-daemon robomonkey db init
+
+# Index a repository
+docker exec robomonkey-daemon robomonkey index \
+  --repo /path/to/repo --name myrepo
+```
+
+### Using Local Embedding Service
+
+The Docker deployment includes a local embedding service that provides OpenAI-compatible embeddings without cloud API calls:
+
+```yaml
+# config/robomonkey-daemon.yaml (for Docker)
+embeddings:
+  provider: "openai"
+  model: "all-mpnet-base-v2"
+  dimension: 768
+  openai:
+    base_url: "http://embeddings:8082"  # Docker service name
+    api_key: ""  # No auth needed
+```
+
+Test the embedding service:
+```bash
+curl -X POST http://localhost:8082/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model": "all-mpnet-base-v2", "input": ["test embedding"]}'
+```
+
+### Volumes
+
+```yaml
+volumes:
+  pgdata:      # PostgreSQL data
+  ollama_data: # Ollama models (if using)
+```
+
+### Environment Variables
+
+Key variables for Docker deployment (set in `.env` or `docker-compose.yml`):
+
+```env
+# Database
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/robomonkey
+
+# Embeddings (for local embedding service)
+EMBEDDINGS_PROVIDER=openai
+EMBEDDINGS_MODEL=all-mpnet-base-v2
+EMBEDDINGS_BASE_URL=http://embeddings:8082
+EMBEDDINGS_DIMENSION=768
+```
 
 ---
 
@@ -613,7 +941,76 @@ nano .env
 # Change: EMBEDDINGS_MODEL=nomic-embed-text
 ```
 
-#### Issue 5: "Module not found" errors
+#### Issue 5: OpenAI Embedding API Errors
+
+**Symptoms:**
+```
+RuntimeError: vLLM embedding failed: 401 Unauthorized
+```
+or
+```
+httpx.HTTPError: 403 Forbidden
+```
+
+**Debug:**
+```bash
+# Test OpenAI API directly
+curl https://api.openai.com/v1/embeddings \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "text-embedding-3-small", "input": ["test"]}'
+
+# Check if API key is set
+echo $OPENAI_API_KEY
+```
+
+**Solutions:**
+```bash
+# Set API key as environment variable
+export OPENAI_API_KEY="sk-..."
+
+# Or add to daemon config directly (less secure)
+# config/robomonkey-daemon.yaml
+# embeddings:
+#   openai:
+#     api_key: "sk-..."
+
+# Restart daemon
+sudo systemctl restart robomonkey-daemon
+```
+
+#### Issue 5b: Local Embedding Service Not Responding
+
+**Symptoms:**
+```
+httpx.ConnectError: Connection refused
+```
+
+**Debug:**
+```bash
+# Check if local embedding service is running (Docker)
+docker ps | grep embeddings
+
+# Test the endpoint
+curl http://localhost:8082/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model": "all-mpnet-base-v2", "input": ["test"]}'
+```
+
+**Solutions:**
+```bash
+# Restart embedding service
+docker-compose restart embeddings
+
+# Check logs
+docker logs robomonkey-embeddings
+
+# Verify config points to correct URL
+# For Docker: http://embeddings:8082
+# For host access: http://localhost:8082
+```
+
+#### Issue 6: "Module not found" errors
 
 **Symptoms:**
 ```
@@ -641,7 +1038,7 @@ pip install -e .
 pip install asyncpg
 ```
 
-#### Issue 6: Daemon not processing jobs
+#### Issue 7: Daemon not processing jobs
 
 **Symptoms:**
 - Jobs stuck in PENDING status
@@ -681,7 +1078,7 @@ nohup robomonkey daemon run > daemon.log 2>&1 &
 sudo journalctl -u robomonkey-daemon -n 50
 ```
 
-#### Issue 7: Search returns no results
+#### Issue 8: Search returns no results
 
 **Symptoms:**
 - `hybrid_search` returns empty array
@@ -843,30 +1240,57 @@ SQL
    ```
 
 2. **Use more workers in daemon:**
-   ```bash
-   # In .env or daemon config
-   NUM_WORKERS=4
+   ```yaml
+   # config/robomonkey-daemon.yaml
+   workers:
+     global_max_concurrent: 4
+     embed_workers: 2
+     reindex_workers: 2
    ```
 
-3. **Tune PostgreSQL for better search:**
+3. **Choose the right vector index:**
+   - **IVFFlat** for frequently changing data (faster rebuilds)
+   - **HNSW** for stable data with > 100k rows (better recall)
+
+   ```yaml
+   # config/robomonkey-daemon.yaml
+   embeddings:
+     auto_rebuild_indexes: true
+     rebuild_index_type: "hnsw"  # or "ivfflat"
+   ```
+
+4. **Use local embedding service for Docker:**
+   The local embedding service avoids network latency to cloud APIs:
+   ```yaml
+   embeddings:
+     provider: "openai"
+     model: "all-mpnet-base-v2"
+     openai:
+       base_url: "http://embeddings:8082"
+   ```
+
+5. **Tune PostgreSQL for better search:**
    ```sql
    -- Increase shared_buffers
    ALTER SYSTEM SET shared_buffers = '256MB';
-   
+
    -- Increase work_mem for sorting
    ALTER SYSTEM SET work_mem = '64MB';
-   
+
    SELECT pg_reload_conf();
    ```
 
-4. **Monitor resource usage:**
+6. **Monitor resource usage:**
    ```bash
    # CPU and memory
    htop
-   
+
    # PostgreSQL stats
    docker stats robomonkey-postgres
-   
+
+   # Embedding completion status
+   curl http://localhost:9832/api/maintenance/embedding-status
+
    # Disk usage
    du -sh ~/.local/share/docker/volumes/robomonkey-mcp_pgdata
    ```

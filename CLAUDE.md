@@ -10,8 +10,9 @@ RoboMonkey MCP is a local-first MCP (Model Context Protocol) server that indexes
 - Python 3.11+
 - Postgres 16 + pgvector extension
 - tree-sitter for parsing (Python/JavaScript/TypeScript/Go/Java)
-- Embeddings: Ollama or vLLM (OpenAI-compatible API)
+- Embeddings: Ollama, vLLM, or OpenAI-compatible API (including local embedding service)
 - MCP server over stdio
+- Web UI for management (FastAPI on port 9832)
 
 ## Development Setup
 
@@ -101,7 +102,8 @@ robomonkey db ping
 
 **`embeddings/`** - Embedding providers
 - `ollama.py` - Ollama embeddings client (/api/embeddings)
-- `vllm_openai.py` - vLLM OpenAI-compatible client (/v1/embeddings)
+- `vllm_openai.py` - OpenAI-compatible client (/v1/embeddings) - works with vLLM, OpenAI, and local embedding service
+- `embedder.py` - Main embedding pipeline, coordinates chunk/document/summary embedding
 
 **`retrieval/`** - Search and context building
 - `hybrid_search.py` - Hybrid retrieval (vector + FTS + tags)
@@ -128,6 +130,7 @@ robomonkey db ping
 - `fts.py` - Full-text search operations
 - `tags.py` - Tag queries
 - `migrations.py` - Schema migrations
+- `vector_indexes.py` - Vector index management (IVFFlat/HNSW rebuild, recommendations)
 
 **`cli/`** - CLI entry point
 - `main.py` - CLI entry point
@@ -215,12 +218,19 @@ Refer to TODO.md for detailed phase breakdown. High-level:
 
 Key environment variables:
 - `DATABASE_URL` - Postgres connection string
-- `EMBEDDINGS_PROVIDER` - "ollama" or "vllm"
-- `EMBEDDINGS_MODEL` - Model name (e.g., "nomic-embed-text")
+- `EMBEDDINGS_PROVIDER` - "ollama", "vllm", or "openai"
+- `EMBEDDINGS_MODEL` - Model name (e.g., "nomic-embed-text", "all-mpnet-base-v2", "text-embedding-3-small")
 - `EMBEDDINGS_BASE_URL` - Provider base URL
 - `VECTOR_TOP_K`, `FTS_TOP_K`, `FINAL_TOP_K` - Search parameters
 - `CONTEXT_BUDGET_TOKENS` - Token budget for context packing
 - `GRAPH_DEPTH` - Graph traversal depth
+
+**Embedding Provider Options:**
+| Provider | Use Case | Base URL | Auth |
+|----------|----------|----------|------|
+| `ollama` | Local Ollama server | `http://localhost:11434` | None |
+| `vllm` | Local vLLM server | `http://localhost:8000` | Optional |
+| `openai` | Local embedding service OR cloud OpenAI | `http://localhost:8082` or `https://api.openai.com` | None or Bearer token |
 
 **Important:** Default embedding dimension in DDL is 1536. If using a different model, update init_db.sql vector dimensions consistently.
 
@@ -288,6 +298,37 @@ The `openai` provider works with any OpenAI-compatible API by changing `base_url
 - **Azure OpenAI**: `https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT`
 
 See `config/robomonkey-daemon.yaml` for more examples.
+
+## Web UI API (Port 9832)
+
+The web UI provides HTTP endpoints for management and monitoring:
+
+### Stats Endpoints
+- `GET /api/stats` - Overall indexing statistics
+- `GET /api/stats/embeddings` - Embedding service configuration and supported models
+- `GET /api/stats/jobs` - Job queue status (pending, running, failed)
+
+### Maintenance Endpoints
+- `GET /api/maintenance/vector-indexes` - List all vector indexes with type, size, row count
+- `POST /api/maintenance/vector-indexes/rebuild` - Rebuild indexes (IVFFlat or HNSW)
+- `POST /api/maintenance/vector-indexes/switch` - Switch between IVFFlat and HNSW
+- `GET /api/maintenance/vector-indexes/recommendations` - Get index recommendations based on data size
+- `POST /api/maintenance/embed-missing` - Queue embedding job for a repository
+- `POST /api/maintenance/reembed-table` - Truncate and regenerate embeddings for a table
+- `GET /api/maintenance/embedding-status` - Get embedding completion status per schema
+
+### Auto-Rebuild After Embedding Jobs
+
+The daemon automatically rebuilds vector indexes after embedding jobs when significant data changes occur:
+
+```yaml
+embeddings:
+  auto_rebuild_indexes: true        # Enable auto-rebuild
+  rebuild_change_threshold: 0.20    # Rebuild if 20%+ embeddings changed
+  rebuild_index_type: "ivfflat"     # Index type: ivfflat or hnsw
+  rebuild_hnsw_m: 16                # HNSW connections per layer
+  rebuild_hnsw_ef_construction: 64  # HNSW build-time search width
+```
 
 ## Testing
 

@@ -37,6 +37,11 @@ env/
 .env
 config/robomonkey-daemon.yaml
 config/*.backup.*
+config/sources.conf
+
+# Docker overrides (auto-generated)
+docker-compose.override.yml
+.source-placeholder/
 
 # Testing
 .pytest_cache/

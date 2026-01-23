@@ -1,0 +1,469 @@
+{% extends "base.html" %}
+
+{% block title %}Source Mounts - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-100">Source Mounts</h2>
+            <p class="text-sm text-slate-400 mt-1">Map host directories into Docker containers for indexing</p>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="showAddMountModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">
+                + Add Mount
+            </button>
+            <button onclick="applyChanges()" id="apply-btn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                Apply Changes
+            </button>
+            <button onclick="loadMounts()" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Status Banner -->
+    <div id="status-banner" class="hidden">
+        <!-- Populated by JavaScript -->
+    </div>
+
+    <!-- Mounts Table -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg" id="mounts-section">
+        <div class="p-6">
+            <div id="mounts-content">
+                <p class="text-slate-400">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Section -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-slate-100 mb-3">How Source Mounts Work</h3>
+        <div class="text-sm text-slate-400 space-y-2">
+            <p>Source mounts allow RoboMonkey (running in Docker) to access directories on your host machine.</p>
+            <ol class="list-decimal list-inside space-y-1 ml-2">
+                <li>Add a mount by specifying the host path (e.g., <code class="bg-slate-700 px-1 rounded">/Users/you/projects/my-app</code>)</li>
+                <li>The directory will be available in the container at <code class="bg-slate-700 px-1 rounded">/sources/mount-name</code></li>
+                <li>Click <strong class="text-slate-200">Apply Changes</strong> to regenerate docker-compose.yml and restart containers</li>
+                <li>When registering a repo, use the container path (e.g., <code class="bg-slate-700 px-1 rounded">/sources/my-app</code>)</li>
+            </ol>
+            <p class="mt-3 text-amber-400">Note: Mounts are read-only by default to protect your source code.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Mount Modal -->
+<div id="mount-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-lg w-full mx-4">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 id="mount-modal-title" class="text-lg font-semibold text-slate-100">Add Source Mount</h3>
+            <button onclick="closeMountModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <form id="mount-form" onsubmit="submitMountForm(event)" class="p-4 space-y-4">
+            <input type="hidden" id="mount-edit-mode" value="create">
+            <input type="hidden" id="mount-original-name" value="">
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Mount Name *</label>
+                <input type="text" id="mount-name" required
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="my-project">
+                <p class="text-xs text-slate-500 mt-1">Alphanumeric, dash, underscore, or dot. Used as the container path suffix.</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Host Path *</label>
+                <input type="text" id="mount-host-path" required
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="/Users/you/projects/my-project">
+                <p class="text-xs text-slate-500 mt-1">Absolute path on the host machine.</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Container Path</label>
+                <input type="text" id="mount-container-path" readonly
+                    class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400"
+                    value="/sources/">
+                <p class="text-xs text-slate-500 mt-1">Auto-generated based on mount name.</p>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="mount-read-only" checked class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                    <label for="mount-read-only" class="text-sm text-slate-300">Read Only</label>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="mount-enabled" checked class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                    <label for="mount-enabled" class="text-sm text-slate-300">Enabled</label>
+                </div>
+            </div>
+        </form>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeMountModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="document.getElementById('mount-form').requestSubmit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+                Save
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="delete-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div class="p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-red-400">Delete Source Mount</h3>
+        </div>
+        <div class="p-4">
+            <p class="text-slate-300">Are you sure you want to delete <strong id="delete-mount-name" class="text-slate-100"></strong>?</p>
+            <p class="text-sm text-slate-400 mt-2">You'll need to click "Apply Changes" to remove the mount from Docker.</p>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeDeleteModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="confirmDelete()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded">
+                Delete
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Apply Changes Modal -->
+<div id="apply-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-lg w-full mx-4">
+        <div class="p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Apply Source Mount Changes</h3>
+        </div>
+        <div class="p-4">
+            <p class="text-slate-300 mb-4">This will:</p>
+            <ol class="list-decimal list-inside space-y-2 text-slate-400 text-sm">
+                <li>Regenerate <code class="bg-slate-700 px-1 rounded">docker-compose.yml</code> with current mounts</li>
+                <li>Stop the Postgres container</li>
+                <li>Restart with new volume mounts</li>
+            </ol>
+            <div class="mt-4 p-3 bg-amber-900/30 border border-amber-700 rounded">
+                <p class="text-amber-400 text-sm">Warning: This will briefly interrupt database connections.</p>
+            </div>
+        </div>
+        <div id="apply-progress" class="hidden p-4 border-t border-slate-700">
+            <div class="flex items-center gap-3">
+                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+                <span class="text-slate-300" id="apply-status">Applying changes...</span>
+            </div>
+        </div>
+        <div id="apply-buttons" class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeApplyModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="confirmApply()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+                Apply & Restart
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let mountsList = [];
+let deleteTarget = null;
+let needsRestart = false;
+
+document.addEventListener('DOMContentLoaded', loadMounts);
+
+// Update container path preview when mount name changes
+document.getElementById('mount-name').addEventListener('input', function(e) {
+    document.getElementById('mount-container-path').value = '/sources/' + e.target.value;
+});
+
+async function loadMounts() {
+    const content = document.getElementById('mounts-content');
+    content.innerHTML = '<p class="text-slate-400">Loading...</p>';
+
+    try {
+        // Load mounts and status in parallel
+        const [mountsResp, statusResp] = await Promise.all([
+            fetch('/api/sources'),
+            fetch('/api/sources/status')
+        ]);
+
+        const mountsData = await mountsResp.json();
+        const statusData = await statusResp.json();
+
+        if (!mountsData.enabled) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <p class="text-slate-400 mb-4">${mountsData.message || 'Source mounts not configured'}</p>
+                    <p class="text-sm text-slate-500">Run the migration: <code class="bg-slate-700 px-2 py-1 rounded text-slate-300">./scripts/apply_migration.sh scripts/migrations/003_add_source_mounts.sql</code></p>
+                </div>
+            `;
+            return;
+        }
+
+        mountsList = mountsData.mounts || [];
+        needsRestart = statusData.needs_restart || false;
+
+        // Update status banner
+        updateStatusBanner(statusData);
+
+        // Update apply button
+        const applyBtn = document.getElementById('apply-btn');
+        applyBtn.disabled = !needsRestart;
+
+        if (mountsList.length === 0) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <p class="text-slate-400 mb-4">No source mounts configured</p>
+                    <button onclick="showAddMountModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+                        + Add Your First Mount
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        content.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Host Path</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Container Path</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Options</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${mountsList.map(mount => `
+                            <tr class="hover:bg-slate-700/50">
+                                <td class="px-4 py-3 font-medium text-slate-100">${mount.mount_name}</td>
+                                <td class="px-4 py-3 text-sm text-slate-400 font-mono truncate max-w-xs" title="${mount.host_path}">
+                                    ${mount.host_path}
+                                </td>
+                                <td class="px-4 py-3 text-sm text-slate-400 font-mono">
+                                    ${mount.container_path}
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="${mount.enabled ? 'text-emerald-400' : 'text-slate-500'}">${mount.enabled ? 'Enabled' : 'Disabled'}</span>
+                                    <span class="text-slate-500 mx-1">|</span>
+                                    <span class="${mount.read_only ? 'text-amber-400' : 'text-slate-500'}">${mount.read_only ? 'RO' : 'RW'}</span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="flex gap-1">
+                                        <button onclick="showEditModal('${mount.mount_name}')" class="px-2 py-1 text-xs bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded">
+                                            Edit
+                                        </button>
+                                        <button onclick="showDeleteModal('${mount.mount_name}')" class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded">
+                                            Del
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<p class="text-red-400">Error loading mounts: ${error.message}</p>`;
+    }
+}
+
+function updateStatusBanner(status) {
+    const banner = document.getElementById('status-banner');
+
+    if (status.needs_restart) {
+        banner.className = 'p-4 bg-amber-900/30 border border-amber-700 rounded-lg';
+        banner.innerHTML = `
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="text-amber-400 text-lg">!</span>
+                    <div>
+                        <p class="text-amber-400 font-medium">Changes pending</p>
+                        <p class="text-amber-400/70 text-sm">Click "Apply Changes" to update Docker with new mounts.</p>
+                    </div>
+                </div>
+                <button onclick="applyChanges()" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium">
+                    Apply Now
+                </button>
+            </div>
+        `;
+    } else if (status.container_running) {
+        banner.className = 'p-4 bg-emerald-900/30 border border-emerald-700 rounded-lg';
+        banner.innerHTML = `
+            <div class="flex items-center gap-3">
+                <span class="text-emerald-400">&#10003;</span>
+                <p class="text-emerald-400">Container running with ${status.actual_mounts.length} source mount(s)</p>
+            </div>
+        `;
+    } else {
+        banner.className = 'p-4 bg-slate-700 border border-slate-600 rounded-lg';
+        banner.innerHTML = `
+            <div class="flex items-center gap-3">
+                <span class="text-slate-400">-</span>
+                <p class="text-slate-400">Container not running</p>
+            </div>
+        `;
+    }
+
+    banner.classList.remove('hidden');
+}
+
+// Add Modal
+function showAddMountModal() {
+    document.getElementById('mount-modal-title').textContent = 'Add Source Mount';
+    document.getElementById('mount-edit-mode').value = 'create';
+    document.getElementById('mount-original-name').value = '';
+    document.getElementById('mount-name').value = '';
+    document.getElementById('mount-name').disabled = false;
+    document.getElementById('mount-host-path').value = '';
+    document.getElementById('mount-container-path').value = '/sources/';
+    document.getElementById('mount-read-only').checked = true;
+    document.getElementById('mount-enabled').checked = true;
+    document.getElementById('mount-modal').classList.remove('hidden');
+}
+
+function showEditModal(mountName) {
+    const mount = mountsList.find(m => m.mount_name === mountName);
+    if (!mount) return;
+
+    document.getElementById('mount-modal-title').textContent = 'Edit Source Mount';
+    document.getElementById('mount-edit-mode').value = 'edit';
+    document.getElementById('mount-original-name').value = mountName;
+    document.getElementById('mount-name').value = mount.mount_name;
+    document.getElementById('mount-name').disabled = true;
+    document.getElementById('mount-host-path').value = mount.host_path;
+    document.getElementById('mount-container-path').value = mount.container_path;
+    document.getElementById('mount-read-only').checked = mount.read_only;
+    document.getElementById('mount-enabled').checked = mount.enabled;
+    document.getElementById('mount-modal').classList.remove('hidden');
+}
+
+function closeMountModal() {
+    document.getElementById('mount-modal').classList.add('hidden');
+}
+
+async function submitMountForm(event) {
+    event.preventDefault();
+
+    const mode = document.getElementById('mount-edit-mode').value;
+    const name = document.getElementById('mount-name').value;
+    const hostPath = document.getElementById('mount-host-path').value;
+    const readOnly = document.getElementById('mount-read-only').checked;
+    const enabled = document.getElementById('mount-enabled').checked;
+
+    try {
+        let response;
+        if (mode === 'create') {
+            response = await fetch('/api/sources', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mount_name: name,
+                    host_path: hostPath,
+                    read_only: readOnly,
+                    enabled: enabled
+                })
+            });
+        } else {
+            const originalName = document.getElementById('mount-original-name').value;
+            response = await fetch(`/api/sources/${originalName}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    host_path: hostPath,
+                    read_only: readOnly,
+                    enabled: enabled
+                })
+            });
+        }
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Operation failed');
+        }
+
+        alert(result.message || 'Success');
+        closeMountModal();
+        await loadMounts();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Delete Modal
+function showDeleteModal(mountName) {
+    deleteTarget = mountName;
+    document.getElementById('delete-mount-name').textContent = mountName;
+    document.getElementById('delete-modal').classList.remove('hidden');
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.add('hidden');
+    deleteTarget = null;
+}
+
+async function confirmDelete() {
+    if (!deleteTarget) return;
+
+    try {
+        const response = await fetch(`/api/sources/${deleteTarget}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Delete failed');
+        }
+
+        alert(result.message || 'Deleted');
+        closeDeleteModal();
+        await loadMounts();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Apply Changes Modal
+function applyChanges() {
+    document.getElementById('apply-modal').classList.remove('hidden');
+    document.getElementById('apply-progress').classList.add('hidden');
+    document.getElementById('apply-buttons').classList.remove('hidden');
+}
+
+function closeApplyModal() {
+    document.getElementById('apply-modal').classList.add('hidden');
+}
+
+async function confirmApply() {
+    document.getElementById('apply-progress').classList.remove('hidden');
+    document.getElementById('apply-buttons').classList.add('hidden');
+
+    try {
+        const response = await fetch('/api/sources/apply', {
+            method: 'POST'
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Apply failed');
+        }
+
+        document.getElementById('apply-status').textContent = 'Changes applied!';
+
+        setTimeout(() => {
+            closeApplyModal();
+            loadMounts();
+            alert(`Applied ${result.mounts_applied} mount(s). Containers restarted.`);
+        }, 1000);
+    } catch (error) {
+        document.getElementById('apply-status').textContent = 'Error: ' + error.message;
+        document.getElementById('apply-buttons').classList.remove('hidden');
+    }
+}
+</script>
+{% endblock %}

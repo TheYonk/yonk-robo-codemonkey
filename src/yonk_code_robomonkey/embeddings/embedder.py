@@ -26,10 +26,10 @@ async def embed_chunks(
     Args:
         repo_id: Repository UUID
         database_url: Database connection string
-        provider: "ollama" or "vllm"
+        provider: "ollama", "vllm", or "openai" (includes local embedding service)
         model: Embedding model name
         base_url: Provider base URL
-        api_key: API key (for vLLM)
+        api_key: API key (for vLLM/OpenAI)
         only_missing: If True, only embed chunks without embeddings
         batch_size: Batch size for embedding requests
         schema_name: Optional schema name for schema isolation
@@ -42,8 +42,8 @@ async def embed_chunks(
         ValueError: If provider is invalid
     """
     # Validate provider
-    if provider not in ("ollama", "vllm"):
-        raise ValueError(f"Invalid provider: {provider}. Must be 'ollama' or 'vllm'")
+    if provider not in ("ollama", "vllm", "openai"):
+        raise ValueError(f"Invalid provider: {provider}. Must be 'ollama', 'vllm', or 'openai'")
 
     # Use config default if not specified
     if max_chunk_length is None:
@@ -115,7 +115,7 @@ async def embed_chunks(
                     embedding_dim=settings.embeddings_dimension,
                     batch_size=1  # Ollama processes one at a time
                 )
-            else:  # vllm
+            else:  # vllm or openai (OpenAI-compatible API)
                 batch_embeddings = await vllm_embed(
                     batch_texts,
                     model=model,
@@ -172,10 +172,10 @@ async def embed_documents(
     Args:
         repo_id: Repository UUID
         database_url: Database connection string
-        provider: "ollama" or "vllm"
+        provider: "ollama", "vllm", or "openai" (includes local embedding service)
         model: Embedding model name
         base_url: Provider base URL
-        api_key: API key (for vLLM)
+        api_key: API key (for vLLM/OpenAI)
         only_missing: If True, only embed documents without embeddings
         batch_size: Batch size for embedding requests
         schema_name: Optional schema name for schema isolation
@@ -188,8 +188,8 @@ async def embed_documents(
         ValueError: If provider is invalid
     """
     # Validate provider
-    if provider not in ("ollama", "vllm"):
-        raise ValueError(f"Invalid provider: {provider}. Must be 'ollama' or 'vllm'")
+    if provider not in ("ollama", "vllm", "openai"):
+        raise ValueError(f"Invalid provider: {provider}. Must be 'ollama', 'vllm', or 'openai'")
 
     # Use config default if not specified
     if max_chunk_length is None:
@@ -268,7 +268,7 @@ async def embed_documents(
                     embedding_dim=settings.embeddings_dimension,
                     batch_size=1  # Ollama processes one at a time
                 )
-            else:  # vllm
+            else:  # vllm or openai (OpenAI-compatible API)
                 batch_embeddings = await vllm_embed(
                     batch_texts,
                     model=model,
@@ -458,8 +458,8 @@ async def embed_summaries(
     Returns:
         Statistics dict with counts
     """
-    if provider not in ("ollama", "vllm"):
-        raise ValueError(f"Invalid provider: {provider}. Must be 'ollama' or 'vllm'")
+    if provider not in ("ollama", "vllm", "openai"):
+        raise ValueError(f"Invalid provider: {provider}. Must be 'ollama', 'vllm', or 'openai'")
 
     if max_chunk_length is None:
         max_chunk_length = settings.max_chunk_length
@@ -503,7 +503,7 @@ async def embed_summaries(
                 batch_texts = texts[i:i + batch_size]
                 if provider == "ollama":
                     embeddings = await ollama_embed(batch_texts, model=model, base_url=base_url)
-                else:
+                else:  # vllm or openai (OpenAI-compatible API)
                     embeddings = await vllm_embed(batch_texts, model=model, base_url=base_url, api_key=api_key)
 
                 for fid, emb in zip(batch_ids, embeddings):
@@ -545,7 +545,7 @@ async def embed_summaries(
                 batch_texts = texts[i:i + batch_size]
                 if provider == "ollama":
                     embeddings = await ollama_embed(batch_texts, model=model, base_url=base_url)
-                else:
+                else:  # vllm or openai (OpenAI-compatible API)
                     embeddings = await vllm_embed(batch_texts, model=model, base_url=base_url, api_key=api_key)
 
                 for sid, emb in zip(batch_ids, embeddings):
@@ -585,7 +585,7 @@ async def embed_summaries(
                 batch_texts = texts[i:i + batch_size]
                 if provider == "ollama":
                     embeddings = await ollama_embed(batch_texts, model=model, base_url=base_url)
-                else:
+                else:  # vllm or openai (OpenAI-compatible API)
                     embeddings = await vllm_embed(batch_texts, model=model, base_url=base_url, api_key=api_key)
 
                 for row, emb in zip(batch_rows, embeddings):

@@ -4,7 +4,23 @@
 
 {% block content %}
 <div class="space-y-6">
-    <h2 class="text-2xl font-bold text-gray-900">System Statistics</h2>
+    <div class="flex justify-between items-center">
+        <h2 class="text-2xl font-bold text-slate-100">System Statistics</h2>
+        <div class="flex items-center gap-3 text-sm">
+            <span id="last-updated" class="text-slate-500"></span>
+            <button id="refresh-toggle" onclick="toggleAutoRefresh()" class="px-2 py-1 bg-emerald-900/50 text-emerald-400 rounded text-xs border border-emerald-700">
+                Auto-refresh: ON
+            </button>
+        </div>
+    </div>
+
+    <!-- Daemon Status -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" id="daemon-section">
+        <h3 class="text-lg font-semibold text-slate-100 mb-4">Daemon Status</h3>
+        <div id="daemon-content">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+    </div>
 
     <!-- Overview Stats -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6" id="overview-stats">
@@ -12,10 +28,91 @@
     </div>
 
     <!-- Job Queue Stats -->
-    <div class="bg-white shadow rounded-lg p-6" id="job-stats">
-        <h3 class="text-lg font-semibold mb-4">Job Queue</h3>
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" id="job-stats">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-slate-100">Job Queue</h3>
+            <div class="flex gap-2">
+                <button id="trigger-job-btn" onclick="showTriggerJobModal()" class="px-3 py-1 text-sm bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 rounded border border-blue-700">
+                    + Trigger Job
+                </button>
+                <button id="cleanup-btn" onclick="cleanupOldJobs()" class="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600">
+                    Clear Old Jobs (>7 days)
+                </button>
+            </div>
+        </div>
         <div id="job-content">
             <!-- Populated by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Registered Repos -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" id="repos-section">
+        <h3 class="text-lg font-semibold text-slate-100 mb-4">Registered Repositories</h3>
+        <div id="repos-content">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Job Details Modal -->
+<div id="job-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-hidden">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Job Details</h3>
+            <button onclick="closeJobModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div id="job-modal-content" class="p-4 overflow-y-auto max-h-[70vh]">
+            <!-- Populated by JavaScript -->
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button id="cancel-job-modal-btn" onclick="cancelJobFromModal()" class="px-4 py-2 bg-red-900/50 hover:bg-red-800/50 text-red-400 rounded border border-red-700 hidden">
+                Cancel Job
+            </button>
+            <button onclick="closeJobModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Trigger Job Modal -->
+<div id="trigger-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Trigger New Job</h3>
+            <button onclick="closeTriggerModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div class="p-4 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Repository</label>
+                <select id="trigger-repo" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+                    <option value="">Select a repository...</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Job Type</label>
+                <select id="trigger-type" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+                    <option value="FULL_INDEX">FULL_INDEX - Full repository re-index</option>
+                    <option value="EMBED_MISSING">EMBED_MISSING - Generate missing embeddings</option>
+                    <option value="SUMMARIZE_MISSING">SUMMARIZE_MISSING - Generate missing summaries</option>
+                    <option value="SUMMARIZE_FILES">SUMMARIZE_FILES - Summarize all files</option>
+                    <option value="SUMMARIZE_SYMBOLS">SUMMARIZE_SYMBOLS - Summarize all symbols</option>
+                    <option value="DOCS_SCAN">DOCS_SCAN - Scan documentation</option>
+                    <option value="TAG_RULES_SYNC">TAG_RULES_SYNC - Sync tag rules</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Priority (1-10)</label>
+                <input type="number" id="trigger-priority" value="5" min="1" max="10" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+            </div>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeTriggerModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="submitTriggerJob()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+                Trigger Job
+            </button>
         </div>
     </div>
 </div>
@@ -23,66 +120,551 @@
 
 {% block scripts %}
 <script>
+let refreshInterval = null;
+const REFRESH_INTERVAL_MS = 5000;
+let currentJobId = null;
+let reposList = [];
+
 document.addEventListener('DOMContentLoaded', async () => {
-    await loadStats();
+    await loadAllData();
+    startAutoRefresh();
 });
 
+function startAutoRefresh() {
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(loadAllData, REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh() {
+    if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+}
+
+function toggleAutoRefresh() {
+    const btn = document.getElementById('refresh-toggle');
+    if (refreshInterval) {
+        stopAutoRefresh();
+        btn.textContent = 'Auto-refresh: OFF';
+        btn.className = 'px-2 py-1 bg-slate-700 text-slate-400 rounded text-xs border border-slate-600';
+    } else {
+        startAutoRefresh();
+        btn.textContent = 'Auto-refresh: ON';
+        btn.className = 'px-2 py-1 bg-emerald-900/50 text-emerald-400 rounded text-xs border border-emerald-700';
+    }
+}
+
+function updateLastRefreshed() {
+    const el = document.getElementById('last-updated');
+    const now = new Date();
+    el.textContent = 'Updated: ' + now.toLocaleTimeString();
+}
+
+const formatRelative = (isoDate) => {
+    if (!isoDate) return 'N/A';
+    const date = new Date(isoDate);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+};
+
+async function loadAllData() {
+    await Promise.all([
+        loadDaemonStatus(),
+        loadStats(),
+        loadRepos()
+    ]);
+    updateLastRefreshed();
+}
+
+async function loadDaemonStatus() {
+    try {
+        const response = await fetch('/api/stats/daemon');
+        const daemon = await response.json();
+
+        const content = document.getElementById('daemon-content');
+
+        if (!daemon.enabled) {
+            content.innerHTML = '<p class="text-slate-400">Daemon tracking not configured</p>';
+            return;
+        }
+
+        const statusColor = daemon.daemon_running ? 'emerald' : 'red';
+        const statusText = daemon.daemon_running ? 'Running' : 'Stopped';
+
+        content.innerHTML = `
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full bg-${statusColor}-500"></span>
+                    <span class="font-medium text-${statusColor}-400">${statusText}</span>
+                </div>
+                <span class="text-slate-400 text-sm">${daemon.active_count} active instance(s)</span>
+            </div>
+
+            ${daemon.active_instances && daemon.active_instances.length > 0 ? `
+                <div class="mt-4">
+                    <h4 class="text-sm font-medium text-slate-300 mb-2">Active Instances</h4>
+                    <div class="space-y-2">
+                        ${daemon.active_instances.map(inst => `
+                            <div class="bg-emerald-900/30 border border-emerald-700 rounded p-3 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="font-mono text-xs text-slate-300">${inst.instance_id}</span>
+                                    <span class="text-slate-400">Last heartbeat: ${formatRelative(inst.last_heartbeat)}</span>
+                                </div>
+                                <div class="text-slate-400 mt-1">Started: ${inst.started_at ? new Date(inst.started_at).toLocaleString() : 'N/A'}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+
+            ${daemon.stale_instances && daemon.stale_instances.length > 0 ? `
+                <div class="mt-4">
+                    <h4 class="text-sm font-medium text-slate-500 mb-2">Stale Instances (no recent heartbeat)</h4>
+                    <div class="space-y-2">
+                        ${daemon.stale_instances.slice(0, 3).map(inst => `
+                            <div class="bg-slate-700/50 border border-slate-600 rounded p-2 text-xs text-slate-400">
+                                <span class="font-mono">${inst.instance_id}</span> -
+                                Last seen: ${formatRelative(inst.last_heartbeat)}
+                            </div>
+                        `).join('')}
+                        ${daemon.stale_instances.length > 3 ? `<p class="text-xs text-slate-500">...and ${daemon.stale_instances.length - 3} more</p>` : ''}
+                    </div>
+                </div>
+            ` : ''}
+        `;
+    } catch (error) {
+        document.getElementById('daemon-content').innerHTML = `<p class="text-red-400">Error loading daemon status: ${error.message}</p>`;
+    }
+}
+
 async function loadStats() {
-    // Load overview stats
-    const overviewResponse = await fetch('/api/stats/overview');
-    const overview = await overviewResponse.json();
+    try {
+        // Load overview stats
+        const overviewResponse = await fetch('/api/stats/overview');
+        const overview = await overviewResponse.json();
 
-    const overviewDiv = document.getElementById('overview-stats');
-    overviewDiv.innerHTML = Object.entries(overview).map(([key, value]) => `
-        <div class="bg-white shadow rounded-lg p-6">
-            <p class="text-sm text-gray-500 capitalize">${key}</p>
-            <p class="text-3xl font-bold text-gray-900">${value.toLocaleString()}</p>
-        </div>
-    `).join('');
+        const overviewDiv = document.getElementById('overview-stats');
+        overviewDiv.innerHTML = Object.entries(overview).map(([key, value]) => `
+            <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+                <p class="text-sm text-slate-400 capitalize">${key}</p>
+                <p class="text-3xl font-bold text-slate-100">${value.toLocaleString()}</p>
+            </div>
+        `).join('');
 
-    // Load job stats
-    const jobResponse = await fetch('/api/stats/jobs');
-    const jobs = await jobResponse.json();
+        // Load job stats
+        const jobResponse = await fetch('/api/stats/jobs');
+        const jobs = await jobResponse.json();
 
-    const jobContent = document.getElementById('job-content');
-    if (!jobs.enabled) {
-        jobContent.innerHTML = '<p class="text-gray-500">Job queue not configured</p>';
+        const jobContent = document.getElementById('job-content');
+        if (!jobs.enabled) {
+            jobContent.innerHTML = '<p class="text-slate-400">Job queue not configured</p>';
+            return;
+        }
+
+        jobContent.innerHTML = `
+            <div class="grid grid-cols-4 gap-4 mb-6">
+                <div class="text-center p-3 bg-amber-900/30 border border-amber-700 rounded">
+                    <p class="text-sm text-slate-400">Pending</p>
+                    <p class="text-2xl font-bold text-amber-400">${jobs.pending}</p>
+                </div>
+                <div class="text-center p-3 bg-blue-900/30 border border-blue-700 rounded">
+                    <p class="text-sm text-slate-400">Running</p>
+                    <p class="text-2xl font-bold text-blue-400">${jobs.claimed}</p>
+                </div>
+                <div class="text-center p-3 bg-emerald-900/30 border border-emerald-700 rounded">
+                    <p class="text-sm text-slate-400">Done</p>
+                    <p class="text-2xl font-bold text-emerald-400">${jobs.done}</p>
+                </div>
+                <div class="text-center p-3 bg-red-900/30 border border-red-700 rounded">
+                    <p class="text-sm text-slate-400">Failed</p>
+                    <p class="text-2xl font-bold text-red-400">${jobs.failed}</p>
+                </div>
+            </div>
+
+            ${jobs.oldest_completed ? `
+                <p class="text-xs text-slate-500 mb-4">Oldest completed job: ${new Date(jobs.oldest_completed).toLocaleDateString()}</p>
+            ` : ''}
+
+            ${jobs.running_jobs && jobs.running_jobs.length > 0 ? `
+                <h4 class="font-semibold mt-4 mb-2 text-blue-400">Running Jobs</h4>
+                <div class="overflow-x-auto mb-4">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-700">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-slate-300">Repository</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Job Type</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Worker</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Started</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Attempt</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700">
+                            ${jobs.running_jobs.map(job => `
+                                <tr class="hover:bg-slate-700/50">
+                                    <td class="px-3 py-2 font-medium text-slate-100">${job.repo}</td>
+                                    <td class="px-3 py-2"><span class="px-2 py-0.5 bg-blue-900/50 text-blue-400 border border-blue-700 rounded text-xs">${job.job_type}</span></td>
+                                    <td class="px-3 py-2 text-slate-400 text-xs">${job.worker || 'unknown'}</td>
+                                    <td class="px-3 py-2 text-slate-400">${formatRelative(job.claimed_at)}</td>
+                                    <td class="px-3 py-2 text-slate-300">${job.attempts}</td>
+                                    <td class="px-3 py-2">
+                                        <button onclick="showJobDetails('${job.id}')" class="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded mr-1">Details</button>
+                                        <button onclick="cancelJob('${job.id}')" class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded">Cancel</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            ` : ''}
+
+            ${jobs.pending_jobs && jobs.pending_jobs.length > 0 ? `
+                <h4 class="font-semibold mt-4 mb-2 text-amber-400">Pending Jobs</h4>
+                <div class="overflow-x-auto mb-4">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-700">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-slate-300">Repository</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Job Type</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Priority</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Created</th>
+                                <th class="px-3 py-2 text-left text-slate-300">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700">
+                            ${jobs.pending_jobs.map(job => `
+                                <tr class="hover:bg-slate-700/50">
+                                    <td class="px-3 py-2 font-medium text-slate-100">${job.repo}</td>
+                                    <td class="px-3 py-2"><span class="px-2 py-0.5 bg-amber-900/50 text-amber-400 border border-amber-700 rounded text-xs">${job.job_type}</span></td>
+                                    <td class="px-3 py-2 text-slate-300">${job.priority}</td>
+                                    <td class="px-3 py-2 text-slate-400">${formatRelative(job.created_at)}</td>
+                                    <td class="px-3 py-2">
+                                        <button onclick="showJobDetails('${job.id}')" class="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded mr-1">Details</button>
+                                        <button onclick="cancelJob('${job.id}')" class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded">Cancel</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            ` : ''}
+
+            ${jobs.recent_failures && jobs.recent_failures.length > 0 ? `
+                <h4 class="font-semibold mt-4 mb-2 text-red-400">Recent Failures</h4>
+                <div class="space-y-2">
+                    ${jobs.recent_failures.map(job => `
+                        <div class="bg-red-900/30 border border-red-700 rounded p-3 cursor-pointer hover:bg-red-900/40" onclick="showJobDetails('${job.id}')">
+                            <div class="flex justify-between items-start">
+                                <p class="text-sm font-medium text-slate-100">${job.repo} - <span class="px-2 py-0.5 bg-red-900/50 text-red-400 border border-red-700 rounded text-xs">${job.job_type}</span></p>
+                                <span class="text-xs text-slate-400">${formatRelative(job.created_at)}</span>
+                            </div>
+                            <p class="text-xs text-red-400 mt-1 font-mono truncate">${job.error || 'No error message'}</p>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+        `;
+    } catch (error) {
+        document.getElementById('job-content').innerHTML = `<p class="text-red-400">Error loading stats: ${error.message}</p>`;
+    }
+}
+
+async function loadRepos() {
+    try {
+        const response = await fetch('/api/stats/repos');
+        const data = await response.json();
+
+        const content = document.getElementById('repos-content');
+
+        if (!data.enabled) {
+            content.innerHTML = '<p class="text-slate-400">Repository registry not configured</p>';
+            return;
+        }
+
+        reposList = data.repos || [];
+
+        if (reposList.length === 0) {
+            content.innerHTML = '<p class="text-slate-400">No repositories registered yet</p>';
+            return;
+        }
+
+        content.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-slate-300">Name</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Path</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Status</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Auto</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${reposList.map(repo => `
+                            <tr class="hover:bg-slate-700/50">
+                                <td class="px-3 py-2 font-medium text-slate-100">${repo.name}</td>
+                                <td class="px-3 py-2 text-slate-400 text-xs font-mono truncate max-w-xs" title="${repo.root_path}">${repo.root_path}</td>
+                                <td class="px-3 py-2">
+                                    ${repo.enabled
+                                        ? '<span class="px-2 py-0.5 bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded text-xs">Enabled</span>'
+                                        : '<span class="px-2 py-0.5 bg-slate-700 text-slate-400 border border-slate-600 rounded text-xs">Disabled</span>'
+                                    }
+                                </td>
+                                <td class="px-3 py-2 text-xs">
+                                    ${repo.auto_index ? '<span class="text-emerald-400" title="Auto-index">I</span>' : '<span class="text-slate-600">I</span>'}
+                                    ${repo.auto_embed ? '<span class="text-emerald-400" title="Auto-embed">E</span>' : '<span class="text-slate-600">E</span>'}
+                                    ${repo.auto_watch ? '<span class="text-emerald-400" title="Auto-watch">W</span>' : '<span class="text-slate-600">W</span>'}
+                                    ${repo.auto_summaries ? '<span class="text-emerald-400" title="Auto-summaries">S</span>' : '<span class="text-slate-600">S</span>'}
+                                </td>
+                                <td class="px-3 py-2 text-slate-400 text-xs">${formatRelative(repo.last_seen_at)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-slate-500 mt-2">Auto: I=Index, E=Embed, W=Watch, S=Summaries</p>
+        `;
+    } catch (error) {
+        document.getElementById('repos-content').innerHTML = `<p class="text-red-400">Error loading repos: ${error.message}</p>`;
+    }
+}
+
+async function showJobDetails(jobId) {
+    currentJobId = jobId;
+    const modal = document.getElementById('job-modal');
+    const content = document.getElementById('job-modal-content');
+    const cancelBtn = document.getElementById('cancel-job-modal-btn');
+
+    content.innerHTML = '<p class="text-slate-400">Loading...</p>';
+    modal.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/api/stats/jobs/${jobId}`);
+        if (!response.ok) {
+            throw new Error(`Job not found: ${jobId}`);
+        }
+        const job = await response.json();
+
+        // Show cancel button for pending/claimed jobs
+        if (job.status === 'PENDING' || job.status === 'CLAIMED') {
+            cancelBtn.classList.remove('hidden');
+        } else {
+            cancelBtn.classList.add('hidden');
+        }
+
+        const statusColors = {
+            'PENDING': { bg: 'amber-900/50', text: 'amber-400', border: 'amber-700' },
+            'CLAIMED': { bg: 'blue-900/50', text: 'blue-400', border: 'blue-700' },
+            'DONE': { bg: 'emerald-900/50', text: 'emerald-400', border: 'emerald-700' },
+            'FAILED': { bg: 'red-900/50', text: 'red-400', border: 'red-700' }
+        };
+        const colors = statusColors[job.status] || { bg: 'slate-700', text: 'slate-300', border: 'slate-600' };
+
+        content.innerHTML = `
+            <div class="space-y-4">
+                <div class="flex items-center gap-3">
+                    <span class="px-3 py-1 bg-${colors.bg} text-${colors.text} border border-${colors.border} rounded font-medium">${job.status}</span>
+                    <span class="text-slate-400 text-sm">ID: ${job.id}</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <p class="text-slate-400">Repository</p>
+                        <p class="font-medium text-slate-100">${job.repo_name}</p>
+                    </div>
+                    <div>
+                        <p class="text-slate-400">Job Type</p>
+                        <p class="font-medium text-slate-100">${job.job_type}</p>
+                    </div>
+                    <div>
+                        <p class="text-slate-400">Priority</p>
+                        <p class="font-medium text-slate-100">${job.priority}</p>
+                    </div>
+                    <div>
+                        <p class="text-slate-400">Attempts</p>
+                        <p class="font-medium text-slate-100">${job.attempts} / ${job.max_attempts}</p>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-700 pt-4">
+                    <p class="text-slate-400 text-sm mb-2">Timestamps</p>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div><span class="text-slate-500">Created:</span> <span class="text-slate-300">${job.created_at ? new Date(job.created_at).toLocaleString() : 'N/A'}</span></div>
+                        <div><span class="text-slate-500">Updated:</span> <span class="text-slate-300">${job.updated_at ? new Date(job.updated_at).toLocaleString() : 'N/A'}</span></div>
+                        <div><span class="text-slate-500">Claimed:</span> <span class="text-slate-300">${job.claimed_at ? new Date(job.claimed_at).toLocaleString() : 'N/A'}</span></div>
+                        <div><span class="text-slate-500">Started:</span> <span class="text-slate-300">${job.started_at ? new Date(job.started_at).toLocaleString() : 'N/A'}</span></div>
+                        <div><span class="text-slate-500">Completed:</span> <span class="text-slate-300">${job.completed_at ? new Date(job.completed_at).toLocaleString() : 'N/A'}</span></div>
+                        <div><span class="text-slate-500">Run After:</span> <span class="text-slate-300">${job.run_after ? new Date(job.run_after).toLocaleString() : 'N/A'}</span></div>
+                    </div>
+                </div>
+
+                ${job.claimed_by ? `
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-slate-400 text-sm mb-1">Worker</p>
+                        <p class="font-mono text-xs text-slate-300">${job.claimed_by}</p>
+                    </div>
+                ` : ''}
+
+                ${job.payload && Object.keys(job.payload).length > 0 ? `
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-slate-400 text-sm mb-2">Payload</p>
+                        <pre class="json-view text-xs overflow-x-auto">${JSON.stringify(job.payload, null, 2)}</pre>
+                    </div>
+                ` : ''}
+
+                ${job.error ? `
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-red-400 text-sm mb-2">Error</p>
+                        <div class="bg-red-900/30 border border-red-700 rounded p-3">
+                            <p class="text-red-400 font-mono text-sm">${job.error}</p>
+                        </div>
+                    </div>
+                ` : ''}
+
+                ${job.error_detail && Object.keys(job.error_detail).length > 0 ? `
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-red-400 text-sm mb-2">Error Details</p>
+                        <pre class="json-view text-xs overflow-x-auto">${JSON.stringify(job.error_detail, null, 2)}</pre>
+                    </div>
+                ` : ''}
+
+                ${job.dedup_key ? `
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-slate-400 text-sm mb-1">Dedup Key</p>
+                        <p class="font-mono text-xs text-slate-500">${job.dedup_key}</p>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<p class="text-red-400">Error loading job details: ${error.message}</p>`;
+        cancelBtn.classList.add('hidden');
+    }
+}
+
+function closeJobModal() {
+    document.getElementById('job-modal').classList.add('hidden');
+    currentJobId = null;
+}
+
+async function cancelJob(jobId) {
+    if (!confirm(`Cancel job ${jobId}?`)) return;
+
+    try {
+        const response = await fetch('/api/stats/jobs/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: jobId })
+        });
+        const result = await response.json();
+
+        if (result.status === 'cancelled') {
+            alert('Job cancelled successfully');
+            await loadStats();
+        } else {
+            alert(result.message || 'Could not cancel job');
+        }
+    } catch (error) {
+        alert('Error cancelling job: ' + error.message);
+    }
+}
+
+async function cancelJobFromModal() {
+    if (currentJobId) {
+        await cancelJob(currentJobId);
+        closeJobModal();
+    }
+}
+
+function showTriggerJobModal() {
+    const modal = document.getElementById('trigger-modal');
+    const repoSelect = document.getElementById('trigger-repo');
+
+    // Populate repos dropdown
+    repoSelect.innerHTML = '<option value="">Select a repository...</option>';
+    reposList.forEach(repo => {
+        if (repo.enabled) {
+            repoSelect.innerHTML += `<option value="${repo.name}">${repo.name}</option>`;
+        }
+    });
+
+    modal.classList.remove('hidden');
+}
+
+function closeTriggerModal() {
+    document.getElementById('trigger-modal').classList.add('hidden');
+}
+
+async function submitTriggerJob() {
+    const repoName = document.getElementById('trigger-repo').value;
+    const jobType = document.getElementById('trigger-type').value;
+    const priority = parseInt(document.getElementById('trigger-priority').value) || 5;
+
+    if (!repoName) {
+        alert('Please select a repository');
         return;
     }
 
-    jobContent.innerHTML = `
-        <div class="grid grid-cols-4 gap-4 mb-4">
-            <div class="text-center">
-                <p class="text-sm text-gray-500">Pending</p>
-                <p class="text-2xl font-bold text-yellow-600">${jobs.pending}</p>
-            </div>
-            <div class="text-center">
-                <p class="text-sm text-gray-500">Claimed</p>
-                <p class="text-2xl font-bold text-blue-600">${jobs.claimed}</p>
-            </div>
-            <div class="text-center">
-                <p class="text-sm text-gray-500">Done</p>
-                <p class="text-2xl font-bold text-green-600">${jobs.done}</p>
-            </div>
-            <div class="text-center">
-                <p class="text-sm text-gray-500">Failed</p>
-                <p class="text-2xl font-bold text-red-600">${jobs.failed}</p>
-            </div>
-        </div>
+    try {
+        const response = await fetch('/api/stats/jobs/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                repo_name: repoName,
+                job_type: jobType,
+                priority: priority,
+                payload: {}
+            })
+        });
+        const result = await response.json();
 
-        ${jobs.recent_failures.length > 0 ? `
-            <h4 class="font-semibold mt-6 mb-2">Recent Failures</h4>
-            <div class="space-y-2">
-                ${jobs.recent_failures.map(job => `
-                    <div class="bg-red-50 border border-red-200 rounded p-3">
-                        <p class="text-sm font-medium">${job.repo} - ${job.job_type}</p>
-                        <p class="text-xs text-red-700">${job.error}</p>
-                        <p class="text-xs text-gray-500 mt-1">${new Date(job.created_at).toLocaleString()}</p>
-                    </div>
-                `).join('')}
-            </div>
-        ` : ''}
-    `;
+        if (result.status === 'queued') {
+            alert(`Job queued: ${result.message}`);
+            closeTriggerModal();
+            await loadStats();
+        } else {
+            alert(result.detail || result.message || 'Could not trigger job');
+        }
+    } catch (error) {
+        alert('Error triggering job: ' + error.message);
+    }
+}
+
+async function cleanupOldJobs() {
+    const btn = document.getElementById('cleanup-btn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Cleaning...';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch('/api/maintenance/job-cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ retention_days: 7 })
+        });
+        const result = await response.json();
+
+        if (result.status === 'cleaned') {
+            alert(`Cleaned ${result.deleted_count} old jobs`);
+            await loadStats();
+        } else {
+            alert(result.message || 'Cleanup completed');
+        }
+    } catch (error) {
+        alert('Error cleaning up jobs: ' + error.message);
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
 }
 </script>
 {% endblock %}

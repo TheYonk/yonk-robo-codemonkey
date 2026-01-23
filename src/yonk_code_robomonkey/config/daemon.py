@@ -36,6 +36,12 @@ class VLLMConfig(BaseModel):
     api_key: str = Field("local-key", description="API key for vLLM")
 
 
+class OpenAIConfig(BaseModel):
+    """OpenAI-compatible API configuration (includes local embedding service)."""
+    base_url: str = Field("http://localhost:8082", description="OpenAI-compatible API URL")
+    api_key: str = Field("", description="API key (empty for local services)")
+
+
 class LLMModelConfig(BaseModel):
     """Configuration for a single LLM model."""
     provider: Literal["ollama", "vllm", "openai"] = Field("ollama", description="LLM provider: ollama, vllm, or openai")
@@ -98,6 +104,14 @@ class EmbeddingsConfig(BaseModel):
     batch_size: int = Field(100, description="Batch size for processing")
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     vllm: VLLMConfig = Field(default_factory=VLLMConfig)
+    openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
+
+    # Index rebuild settings
+    auto_rebuild_indexes: bool = Field(True, description="Auto-rebuild vector indexes after embedding jobs")
+    rebuild_change_threshold: float = Field(0.20, ge=0.0, le=1.0, description="Min change rate (0-1) to trigger rebuild")
+    rebuild_index_type: Literal["ivfflat", "hnsw"] = Field("ivfflat", description="Index type to use on rebuild")
+    rebuild_hnsw_m: int = Field(16, ge=4, le=64, description="HNSW m parameter (connections per layer)")
+    rebuild_hnsw_ef_construction: int = Field(64, ge=16, le=512, description="HNSW ef_construction parameter")
     
     @field_validator("dimension")
     @classmethod
@@ -114,28 +128,74 @@ class EmbeddingsConfig(BaseModel):
                 raise ValueError("ollama.base_url required when provider=ollama")
             if self.provider == "vllm" and not self.vllm.base_url:
                 raise ValueError("vllm.base_url required when provider=vllm")
+            if self.provider == "openai" and not self.openai.base_url:
+                raise ValueError("openai.base_url required when provider=openai")
+
+
+class JobTypeLimits(BaseModel):
+    """Per job-type concurrency limits."""
+    FULL_INDEX: int = Field(2, ge=1, le=8, description="Max concurrent indexing jobs")
+    EMBED_MISSING: int = Field(3, ge=1, le=8, description="Max concurrent embedding jobs")
+    SUMMARIZE_MISSING: int = Field(2, ge=1, le=8, description="Max concurrent summary jobs")
+    SUMMARIZE_FILES: int = Field(2, ge=1, le=8, description="Max concurrent file summary jobs")
+    SUMMARIZE_SYMBOLS: int = Field(2, ge=1, le=8, description="Max concurrent symbol summary jobs")
+    DOCS_SCAN: int = Field(1, ge=1, le=4, description="Max concurrent docs scan jobs")
+
+    def get_limit(self, job_type: str) -> int:
+        """Get limit for a job type, defaulting to 2 for unknown types."""
+        return getattr(self, job_type, 2)
 
 
 class WorkersConfig(BaseModel):
-    """Job workers configuration."""
+    """Job workers configuration.
+
+    Supports three processing modes:
+    - single: One worker processes all jobs sequentially (low resource usage)
+    - per_repo: Dedicated worker per active repo, up to max_workers
+    - pool: Thread pool claims jobs from queue (default, most flexible)
+    """
+    # Processing mode
+    mode: Literal["single", "per_repo", "pool"] = Field(
+        "pool",
+        description="Processing mode: single, per_repo, or pool"
+    )
+
     # Global concurrency limits
-    global_max_concurrent: int = Field(4, ge=1, le=32, description="Global max concurrent jobs")
+    max_workers: int = Field(4, ge=1, le=32, description="Maximum concurrent job workers")
     max_concurrent_per_repo: int = Field(2, ge=1, le=8, description="Max concurrent jobs per repo")
 
-    # Worker counts by type
-    reindex_workers: int = Field(2, ge=1, le=16, description="Number of reindex workers")
-    embed_workers: int = Field(2, ge=1, le=16, description="Number of embedding workers")
-    docs_workers: int = Field(1, ge=1, le=8, description="Number of docs workers")
+    # Per job-type limits (only used in pool mode)
+    job_type_limits: JobTypeLimits = Field(
+        default_factory=JobTypeLimits,
+        description="Per job-type concurrency limits"
+    )
 
     # Polling configuration
     poll_interval_sec: int = Field(5, ge=1, le=60, description="Job polling interval (seconds)")
 
+    # Job timeout
+    job_timeout_sec: int = Field(3600, ge=60, le=86400, description="Job timeout in seconds (1 min to 24 hours)")
+
+    # Retry settings
+    max_retries: int = Field(3, ge=0, le=10, description="Max retry attempts for failed jobs")
+    retry_backoff_multiplier: int = Field(2, ge=1, le=10, description="Exponential backoff multiplier")
+
     # Legacy fields (for backward compatibility)
+    global_max_concurrent: int = Field(4, ge=1, le=32, description="Global max concurrent jobs (deprecated, use max_workers)")
+    reindex_workers: int = Field(2, ge=1, le=16, description="Number of reindex workers (deprecated)")
+    embed_workers: int = Field(2, ge=1, le=16, description="Number of embedding workers (deprecated)")
+    docs_workers: int = Field(1, ge=1, le=8, description="Number of docs workers (deprecated)")
     count: int = Field(2, ge=1, le=16, description="Number of worker processes (deprecated)")
     enabled_job_types: list[str] = Field(
         default_factory=lambda: ["EMBED_REPO", "EMBED_MISSING", "INDEX_REPO", "WATCH_REPO"],
-        description="Job types to process"
+        description="Job types to process (deprecated)"
     )
+
+    def model_post_init(self, __context) -> None:
+        """Ensure backward compatibility - sync legacy fields with new fields."""
+        # If legacy global_max_concurrent was explicitly set higher than max_workers, use it
+        if self.global_max_concurrent > self.max_workers:
+            object.__setattr__(self, 'max_workers', self.global_max_concurrent)
 
 
 class WatchingConfig(BaseModel):

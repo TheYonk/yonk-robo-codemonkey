@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from yonk_code_robomonkey.config import Settings
 
 # Import routes
-from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats, maintenance
+from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats, maintenance, sources
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -45,12 +45,19 @@ app.include_router(tables.router, prefix="/api", tags=["database"])
 app.include_router(mcp_tools.router, prefix="/api/mcp", tags=["mcp-tools"])
 app.include_router(stats.router, prefix="/api/stats", tags=["statistics"])
 app.include_router(maintenance.router, prefix="/api/maintenance", tags=["maintenance"])
+app.include_router(sources.router, prefix="/api", tags=["sources"])
 
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     """Repository dashboard homepage."""
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/repos", response_class=HTMLResponse)
+async def repos_management(request: Request):
+    """Repository management page."""
+    return templates.TemplateResponse("repos.html", {"request": request})
 
 
 @app.get("/explorer", response_class=HTMLResponse)
@@ -69,6 +76,12 @@ async def mcp_tool_tester(request: Request):
 async def performance_stats(request: Request):
     """Performance monitoring page."""
     return templates.TemplateResponse("stats.html", {"request": request})
+
+
+@app.get("/sources", response_class=HTMLResponse)
+async def source_mounts_page(request: Request):
+    """Source mounts management page."""
+    return templates.TemplateResponse("sources.html", {"request": request})
 
 
 @app.get("/health")

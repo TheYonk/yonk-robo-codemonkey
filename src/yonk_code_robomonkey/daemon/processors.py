@@ -9,6 +9,11 @@ import asyncio
 
 from yonk_code_robomonkey.daemon.queue import Job
 from yonk_code_robomonkey.config.daemon import DaemonConfig
+from yonk_code_robomonkey.db.vector_indexes import (
+    get_embedding_counts,
+    rebuild_schema_indexes,
+    should_rebuild_indexes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +237,13 @@ class EmbedMissingProcessor(JobProcessor):
 
         schema_name = repo["schema_name"]
 
+        # Get embedding counts BEFORE processing (for auto-rebuild decision)
+        before_counts = {}
+        if self.config.embeddings.auto_rebuild_indexes:
+            async with self.control_pool.acquire() as conn:
+                before_counts = await get_embedding_counts(conn, schema_name)
+            logger.debug(f"Embedding counts before: {before_counts}")
+
         # Count missing embeddings
         async with self.control_pool.acquire() as conn:
             await conn.execute(f'SET search_path TO "{schema_name}", public')
@@ -265,6 +277,17 @@ class EmbedMissingProcessor(JobProcessor):
         # Import embedder
         from yonk_code_robomonkey.embeddings.embedder import embed_repo
 
+        # Determine base_url and api_key based on provider
+        if self.config.embeddings.provider == "ollama":
+            base_url = self.config.embeddings.ollama.base_url
+            api_key = ""
+        elif self.config.embeddings.provider == "vllm":
+            base_url = self.config.embeddings.vllm.base_url
+            api_key = self.config.embeddings.vllm.api_key
+        else:  # openai (includes local embedding service)
+            base_url = self.config.embeddings.openai.base_url
+            api_key = self.config.embeddings.openai.api_key
+
         # Generate embeddings
         stats = await embed_repo(
             repo_id=None,  # Will be looked up by name
@@ -273,22 +296,42 @@ class EmbedMissingProcessor(JobProcessor):
             schema_name=schema_name,
             embeddings_provider=self.config.embeddings.provider,
             embeddings_model=self.config.embeddings.model,
-            embeddings_base_url=(
-                self.config.embeddings.ollama.base_url
-                if self.config.embeddings.provider == "ollama"
-                else self.config.embeddings.vllm.base_url
-            ),
-            embeddings_api_key=(
-                self.config.embeddings.vllm.api_key
-                if self.config.embeddings.provider == "vllm"
-                else ""
-            ),
+            embeddings_base_url=base_url,
+            embeddings_api_key=api_key,
             only_missing=True,
             batch_size=self.config.embeddings.batch_size,
             max_chunk_length=self.config.embeddings.max_chunk_length
         )
 
         logger.info(f"EMBED_MISSING complete for {job.repo_name}: {stats}")
+
+        # Auto-rebuild vector indexes if enabled and threshold exceeded
+        if self.config.embeddings.auto_rebuild_indexes:
+            async with self.control_pool.acquire() as conn:
+                after_counts = await get_embedding_counts(conn, schema_name)
+            logger.debug(f"Embedding counts after: {after_counts}")
+
+            should_rebuild, reason = await should_rebuild_indexes(
+                before_counts,
+                after_counts,
+                self.config.embeddings.rebuild_change_threshold
+            )
+
+            if should_rebuild:
+                logger.info(f"Auto-rebuilding vector indexes for {schema_name}: {reason}")
+                async with self.control_pool.acquire() as conn:
+                    rebuild_results = await rebuild_schema_indexes(
+                        conn=conn,
+                        schema_name=schema_name,
+                        index_type=self.config.embeddings.rebuild_index_type,
+                        lists=None,  # Auto-calculate based on row count
+                        m=self.config.embeddings.rebuild_hnsw_m,
+                        ef_construction=self.config.embeddings.rebuild_hnsw_ef_construction
+                    )
+                rebuilt_count = sum(1 for r in rebuild_results if r.get("status") == "rebuilt")
+                logger.info(f"Auto-rebuild complete: {rebuilt_count} indexes rebuilt")
+            else:
+                logger.debug(f"Skipping index rebuild: {reason}")
 
 
 class DocsScanProcessor(JobProcessor):

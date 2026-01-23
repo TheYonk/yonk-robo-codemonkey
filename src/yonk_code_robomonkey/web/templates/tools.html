@@ -6,14 +6,14 @@
 <div class="grid grid-cols-12 gap-6">
     <!-- Tool List Sidebar -->
     <div class="col-span-3">
-        <div class="bg-white shadow rounded-lg p-4">
-            <h2 class="text-lg font-semibold mb-4">MCP Tools</h2>
+        <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-4">
+            <h2 class="text-lg font-semibold text-slate-100 mb-4">MCP Tools</h2>
             <div class="mb-4">
                 <input
                     type="text"
                     id="tool-search"
                     placeholder="Search tools..."
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-sm text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
                     oninput="filterTools(this.value)"
                 >
             </div>
@@ -26,30 +26,30 @@
     <!-- Tool Form and Results -->
     <div class="col-span-9">
         <!-- Tool Info -->
-        <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
             <div id="tool-header">
-                <h2 class="text-2xl font-bold text-gray-500">Select a tool from the sidebar</h2>
-                <p class="text-gray-600 mt-2">Choose an MCP tool to test it with custom parameters</p>
+                <h2 class="text-2xl font-bold text-slate-400">Select a tool from the sidebar</h2>
+                <p class="text-slate-500 mt-2">Choose an MCP tool to test it with custom parameters</p>
             </div>
         </div>
 
         <!-- Tool Form -->
-        <div id="tool-form-container" class="bg-white shadow rounded-lg p-6 mb-6" style="display: none;">
-            <h3 class="text-lg font-semibold mb-4">Parameters</h3>
+        <div id="tool-form-container" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6" style="display: none;">
+            <h3 class="text-lg font-semibold text-slate-100 mb-4">Parameters</h3>
             <form id="tool-form" class="space-y-4">
                 <!-- Dynamically populated -->
             </form>
             <div class="mt-6 flex gap-3">
                 <button
                     onclick="executeTool()"
-                    class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                 >
                     Run Tool
                 </button>
                 <button
                     onclick="clearForm()"
                     type="button"
-                    class="bg-gray-200 text-gray-700 px-6 py-2 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    class="bg-slate-700 text-slate-300 px-6 py-2 rounded-md hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500/50"
                 >
                     Clear
                 </button>
@@ -57,12 +57,12 @@
         </div>
 
         <!-- Results -->
-        <div id="results-container" class="bg-white shadow rounded-lg p-6" style="display: none;">
+        <div id="results-container" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">Results</h3>
+                <h3 class="text-lg font-semibold text-slate-100">Results</h3>
                 <div class="flex gap-2">
-                    <span id="execution-time" class="text-sm text-gray-600"></span>
-                    <button onclick="copyResults()" class="text-sm text-blue-600 hover:text-blue-700">
+                    <span id="execution-time" class="text-sm text-slate-400"></span>
+                    <button onclick="copyResults()" class="text-sm text-blue-400 hover:text-blue-300">
                         Copy JSON
                     </button>
                 </div>
@@ -70,19 +70,19 @@
             <div id="results-status" class="mb-3"></div>
 
             <!-- View Tabs -->
-            <div class="border-b border-gray-200 mb-4">
+            <div class="border-b border-slate-700 mb-4">
                 <nav class="flex -mb-px">
                     <button
                         id="tab-formatted"
                         onclick="switchTab('formatted')"
-                        class="tab-button border-b-2 border-blue-500 text-blue-600 px-4 py-2 font-medium text-sm"
+                        class="tab-button border-b-2 border-blue-500 text-blue-400 px-4 py-2 font-medium text-sm"
                     >
-                        📄 Formatted
+                        Formatted
                     </button>
                     <button
                         id="tab-json"
                         onclick="switchTab('json')"
-                        class="tab-button border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 px-4 py-2 font-medium text-sm"
+                        class="tab-button border-b-2 border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500 px-4 py-2 font-medium text-sm"
                     >
                         { } Raw JSON
                     </button>
@@ -99,9 +99,9 @@
         </div>
 
         <!-- Loading Indicator -->
-        <div id="loading" class="hidden bg-white shadow rounded-lg p-6 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <p class="mt-2 text-gray-600">Executing tool...</p>
+        <div id="loading" class="hidden bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <p class="mt-2 text-slate-400">Executing tool...</p>
         </div>
     </div>
 </div>
@@ -137,12 +137,12 @@ function renderToolCategories(categorized) {
     for (const [category, tools] of Object.entries(categorized)) {
         const categoryDiv = document.createElement('div');
         categoryDiv.innerHTML = `
-            <h3 class="text-sm font-semibold text-gray-700 mb-2">${category}</h3>
+            <h3 class="text-sm font-semibold text-slate-300 mb-2">${category}</h3>
             <div class="space-y-1">
                 ${tools.map(tool => `
                     <button
                         onclick="selectTool('${tool.name}')"
-                        class="tool-item w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 transition"
+                        class="tool-item w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-700 text-slate-300 transition"
                         data-tool="${tool.name}"
                         data-description="${tool.description.toLowerCase()}"
                     >
@@ -172,9 +172,9 @@ async function selectTool(toolName) {
 
     // Highlight selected tool
     document.querySelectorAll('.tool-item').forEach(item => {
-        item.classList.remove('bg-blue-100', 'text-blue-700');
+        item.classList.remove('bg-blue-900/50', 'text-blue-400', 'border', 'border-blue-700');
         if (item.getAttribute('data-tool') === toolName) {
-            item.classList.add('bg-blue-100', 'text-blue-700');
+            item.classList.add('bg-blue-900/50', 'text-blue-400', 'border', 'border-blue-700');
         }
     });
 
@@ -193,8 +193,8 @@ async function selectTool(toolName) {
 function renderToolForm(schema) {
     // Update header
     document.getElementById('tool-header').innerHTML = `
-        <h2 class="text-2xl font-bold text-gray-900">${schema.name}</h2>
-        <p class="text-gray-600 mt-2">${schema.description}</p>
+        <h2 class="text-2xl font-bold text-slate-100">${schema.name}</h2>
+        <p class="text-slate-400 mt-2">${schema.description}</p>
     `;
 
     // Build form
@@ -213,7 +213,7 @@ function renderToolForm(schema) {
                     id="${inputId}"
                     name="${param.name}"
                     ${param.default ? 'checked' : ''}
-                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50"
                 >
             `;
         } else if (param.type === 'int' || param.type === 'integer') {
@@ -224,7 +224,7 @@ function renderToolForm(schema) {
                     name="${param.name}"
                     ${param.default !== null ? `value="${param.default}"` : ''}
                     ${param.required ? 'required' : ''}
-                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    class="mt-1 block w-full rounded-md bg-slate-700 border-slate-600 text-slate-100 shadow-sm focus:border-blue-500 focus:ring-blue-500/50 sm:text-sm"
                 >
             `;
         } else {
@@ -236,20 +236,20 @@ function renderToolForm(schema) {
                     name="${param.name}"
                     ${param.default !== null ? `value="${param.default}"` : ''}
                     ${param.required ? 'required' : ''}
-                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    class="mt-1 block w-full rounded-md bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-500 shadow-sm focus:border-blue-500 focus:ring-blue-500/50 sm:text-sm"
                     placeholder="${param.description || ''}"
                 >
             `;
         }
 
         fieldDiv.innerHTML = `
-            <label for="${inputId}" class="block text-sm font-medium text-gray-700">
+            <label for="${inputId}" class="block text-sm font-medium text-slate-300">
                 ${param.name}
-                ${param.required ? '<span class="text-red-500">*</span>' : '<span class="text-gray-400">(optional)</span>'}
-                <span class="text-gray-500 font-normal">${param.type}</span>
+                ${param.required ? '<span class="text-red-400">*</span>' : '<span class="text-slate-500">(optional)</span>'}
+                <span class="text-slate-500 font-normal">${param.type}</span>
             </label>
             ${inputHtml}
-            ${param.description ? `<p class="mt-1 text-xs text-gray-500">${param.description}</p>` : ''}
+            ${param.description ? `<p class="mt-1 text-xs text-slate-500">${param.description}</p>` : ''}
         `;
 
         form.appendChild(fieldDiv);
@@ -309,12 +309,12 @@ async function executeTool() {
 function switchTab(tab) {
     // Update tab buttons
     document.getElementById('tab-formatted').className = tab === 'formatted'
-        ? 'tab-button border-b-2 border-blue-500 text-blue-600 px-4 py-2 font-medium text-sm'
-        : 'tab-button border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 px-4 py-2 font-medium text-sm';
+        ? 'tab-button border-b-2 border-blue-500 text-blue-400 px-4 py-2 font-medium text-sm'
+        : 'tab-button border-b-2 border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500 px-4 py-2 font-medium text-sm';
 
     document.getElementById('tab-json').className = tab === 'json'
-        ? 'tab-button border-b-2 border-blue-500 text-blue-600 px-4 py-2 font-medium text-sm'
-        : 'tab-button border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 px-4 py-2 font-medium text-sm';
+        ? 'tab-button border-b-2 border-blue-500 text-blue-400 px-4 py-2 font-medium text-sm'
+        : 'tab-button border-b-2 border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500 px-4 py-2 font-medium text-sm';
 
     // Show/hide views
     document.getElementById('view-formatted').style.display = tab === 'formatted' ? 'block' : 'none';
@@ -326,15 +326,15 @@ function displayResults(result) {
 
     // Show execution time
     if (result.execution_time_ms) {
-        document.getElementById('execution-time').textContent = `⏱️ ${result.execution_time_ms}ms`;
+        document.getElementById('execution-time').textContent = `${result.execution_time_ms}ms`;
     }
 
     // Show status
     const statusDiv = document.getElementById('results-status');
     if (result.success) {
-        statusDiv.innerHTML = '<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-2 rounded">✓ Success</div>';
+        statusDiv.innerHTML = '<div class="bg-emerald-900/30 border border-emerald-700 text-emerald-400 px-4 py-2 rounded">Success</div>';
     } else {
-        statusDiv.innerHTML = '<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">✗ Error</div>';
+        statusDiv.innerHTML = '<div class="bg-red-900/30 border border-red-700 text-red-400 px-4 py-2 rounded">Error</div>';
     }
 
     // Format and display JSON
@@ -353,10 +353,10 @@ function formatToolResult(toolName, result) {
     // Handle errors
     if (!result.success || result.error) {
         return `
-            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
-                <h4 class="font-semibold text-red-800 mb-2">Error</h4>
-                <p class="text-red-700">${result.error || 'Unknown error'}</p>
-                ${result.error_type ? `<p class="text-sm text-red-600 mt-2">Type: ${result.error_type}</p>` : ''}
+            <div class="bg-red-900/30 border border-red-700 rounded-lg p-4">
+                <h4 class="font-semibold text-red-400 mb-2">Error</h4>
+                <p class="text-red-400">${result.error || 'Unknown error'}</p>
+                ${result.error_type ? `<p class="text-sm text-red-500 mt-2">Type: ${result.error_type}</p>` : ''}
             </div>
         `;
     }
@@ -376,13 +376,13 @@ function formatAskCodebaseResult(data) {
     // Header
     html += `
         <div class="mb-6">
-            <h2 class="text-2xl font-bold text-gray-900 mb-2">${escapeHtml(data.question || 'Question')}</h2>
-            <div class="flex gap-4 text-sm text-gray-600">
-                <span>📁 <strong>Repository:</strong> ${escapeHtml(data.repo_name || 'N/A')}</span>
-                <span>📊 <strong>Total Results:</strong> ${data.total_results_found || 0}</span>
+            <h2 class="text-2xl font-bold text-slate-100 mb-2">${escapeHtml(data.question || 'Question')}</h2>
+            <div class="flex gap-4 text-sm text-slate-400">
+                <span><strong class="text-slate-300">Repository:</strong> ${escapeHtml(data.repo_name || 'N/A')}</span>
+                <span><strong class="text-slate-300">Total Results:</strong> ${data.total_results_found || 0}</span>
             </div>
             ${data.search_strategies_used && data.search_strategies_used.length > 0
-                ? `<div class="mt-2 text-sm text-gray-600">🔍 <strong>Strategies:</strong> ${data.search_strategies_used.join(', ')}</div>`
+                ? `<div class="mt-2 text-sm text-slate-400"><strong class="text-slate-300">Strategies:</strong> ${data.search_strategies_used.join(', ')}</div>`
                 : ''}
         </div>
     `;
@@ -390,16 +390,16 @@ function formatAskCodebaseResult(data) {
     // Summary
     if (data.summary) {
         html += `
-            <div class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 class="text-lg font-semibold text-blue-900 mb-2">💡 Summary</h3>
-                <p class="text-blue-800">${escapeHtml(data.summary)}</p>
+            <div class="mb-6 bg-blue-900/30 border border-blue-700 rounded-lg p-4">
+                <h3 class="text-lg font-semibold text-blue-400 mb-2">Summary</h3>
+                <p class="text-slate-300">${escapeHtml(data.summary)}</p>
             </div>
         `;
     }
 
     // Documentation
     if (data.documentation && data.documentation.length > 0) {
-        html += formatSection('📚 Documentation', data.documentation, (doc, i) => {
+        html += formatSection('Documentation', data.documentation, (doc, i) => {
             const docId = `doc-${i}`;
             const content = doc.summary || doc.content || '';
             const isLong = content.length > 300;
@@ -410,26 +410,26 @@ function formatAskCodebaseResult(data) {
             const relevance = doc.relevance ?? doc.relevance_score ?? 0;
 
             return `
-                <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-300">
+                <div class="mb-4 p-4 bg-slate-700/50 rounded-lg border border-slate-600">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
-                            <h4 class="font-semibold text-lg text-gray-900">${escapeHtml(doc.title || 'Untitled')}</h4>
-                            <div class="text-sm text-gray-600 mt-1">
-                                <span class="font-mono bg-gray-200 px-2 py-0.5 rounded">📄 ${escapeHtml(filePath)}</span>
-                                <span class="ml-3 font-semibold">⭐ ${relevance.toFixed(3)}</span>
+                            <h4 class="font-semibold text-lg text-slate-100">${escapeHtml(doc.title || 'Untitled')}</h4>
+                            <div class="text-sm text-slate-400 mt-1">
+                                <span class="font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-300">${escapeHtml(filePath)}</span>
+                                <span class="ml-3 font-semibold text-amber-400">${relevance.toFixed(3)}</span>
                             </div>
                         </div>
                         ${isLong ? `
                             <button
                                 onclick="toggleExpand('${docId}')"
-                                class="ml-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                class="ml-2 text-blue-400 hover:text-blue-300 text-sm font-medium"
                                 id="${docId}-btn"
                             >
-                                ▼ Expand
+                                Expand
                             </button>
                         ` : ''}
                     </div>
-                    <div class="mt-3 text-gray-700 prose prose-sm max-w-none">
+                    <div class="mt-3 text-slate-300">
                         <div id="${docId}-preview" ${!isLong ? '' : ''}>
                             ${escapeHtml(preview)}
                         </div>
@@ -446,7 +446,7 @@ function formatAskCodebaseResult(data) {
 
     // Code Files
     if (data.code_files && data.code_files.length > 0) {
-        html += formatSection('💻 Code Files', data.code_files, (code, i) => {
+        html += formatSection('Code Files', data.code_files, (code, i) => {
             const codeId = `code-${i}`;
             const snippet = code.snippet || '';
             const isLong = snippet.split('\n').length > 15;
@@ -458,38 +458,38 @@ function formatAskCodebaseResult(data) {
             const relevance = code.relevance ?? code.relevance_score ?? 0;
 
             return `
-                <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-300">
+                <div class="mb-4 p-4 bg-slate-700/50 rounded-lg border border-slate-600">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
-                            <h4 class="font-semibold text-lg text-gray-900">
-                                <span class="font-mono bg-blue-100 px-2 py-0.5 rounded text-blue-900">
+                            <h4 class="font-semibold text-lg text-slate-100">
+                                <span class="font-mono bg-blue-900/50 px-2 py-0.5 rounded text-blue-400">
                                     ${escapeHtml(filePath)}
                                 </span>
                             </h4>
-                            <div class="text-sm text-gray-600 mt-2">
-                                <span class="bg-gray-200 px-2 py-0.5 rounded">📍 Lines ${escapeHtml(lines)}</span>
-                                <span class="ml-2 bg-gray-200 px-2 py-0.5 rounded">🔤 ${escapeHtml(code.language || 'unknown')}</span>
-                                <span class="ml-2 font-semibold">⭐ ${relevance.toFixed(3)}</span>
+                            <div class="text-sm text-slate-400 mt-2">
+                                <span class="bg-slate-800 px-2 py-0.5 rounded text-slate-300">Lines ${escapeHtml(lines)}</span>
+                                <span class="ml-2 bg-slate-800 px-2 py-0.5 rounded text-slate-300">${escapeHtml(code.language || 'unknown')}</span>
+                                <span class="ml-2 font-semibold text-amber-400">${relevance.toFixed(3)}</span>
                             </div>
-                            ${code.context ? `<p class="text-sm text-gray-700 mt-2 italic">${escapeHtml(code.context)}</p>` : ''}
+                            ${code.context ? `<p class="text-sm text-slate-400 mt-2 italic">${escapeHtml(code.context)}</p>` : ''}
                         </div>
                         ${isLong && snippet ? `
                             <button
                                 onclick="toggleExpand('${codeId}')"
-                                class="ml-2 text-blue-600 hover:text-blue-800 text-sm font-medium whitespace-nowrap"
+                                class="ml-2 text-blue-400 hover:text-blue-300 text-sm font-medium whitespace-nowrap"
                                 id="${codeId}-btn"
                             >
-                                ▼ Expand
+                                Expand
                             </button>
                         ` : ''}
                     </div>
                     ${snippet ? `
                         <div id="${codeId}-preview" class="mt-3">
-                            <pre class="p-3 bg-gray-900 text-gray-100 rounded overflow-x-auto text-xs"><code>${escapeHtml(previewLines)}</code></pre>
+                            <pre class="p-3 bg-slate-900 text-slate-300 rounded overflow-x-auto text-xs"><code>${escapeHtml(previewLines)}</code></pre>
                         </div>
                         ${isLong ? `
                             <div id="${codeId}-full" style="display: none;" class="mt-3">
-                                <pre class="p-3 bg-gray-900 text-gray-100 rounded overflow-x-auto text-xs"><code>${escapeHtml(snippet)}</code></pre>
+                                <pre class="p-3 bg-slate-900 text-slate-300 rounded overflow-x-auto text-xs"><code>${escapeHtml(snippet)}</code></pre>
                             </div>
                         ` : ''}
                     ` : ''}
@@ -500,21 +500,21 @@ function formatAskCodebaseResult(data) {
 
     // Symbols
     if (data.symbols && data.symbols.length > 0) {
-        html += formatSection('🔧 Key Symbols', data.symbols, sym => {
+        html += formatSection('Key Symbols', data.symbols, sym => {
             // Handle both API field names and legacy names
             const filePath = sym.file || sym.file_path || 'N/A';
             const relevance = sym.relevance ?? sym.relevance_score ?? 0;
 
             return `
-                <div class="mb-3 p-3 bg-gray-50 rounded-lg">
-                    <h4 class="font-semibold">${escapeHtml(sym.name || 'Unknown')}</h4>
-                    <div class="text-sm text-gray-600 mt-1">
-                        <span>🏷️ ${escapeHtml(sym.kind || 'symbol')}</span>
-                        <span class="ml-3">📍 ${escapeHtml(filePath)}:${sym.line || '?'}</span>
-                        <span class="ml-3">⭐ ${relevance.toFixed(2)}</span>
+                <div class="mb-3 p-3 bg-slate-700/50 rounded-lg">
+                    <h4 class="font-semibold text-slate-100">${escapeHtml(sym.name || 'Unknown')}</h4>
+                    <div class="text-sm text-slate-400 mt-1">
+                        <span>${escapeHtml(sym.kind || 'symbol')}</span>
+                        <span class="ml-3">${escapeHtml(filePath)}:${sym.line || '?'}</span>
+                        <span class="ml-3 text-amber-400">${relevance.toFixed(2)}</span>
                     </div>
-                    ${sym.signature ? `<code class="text-sm text-gray-700 mt-1 block">${escapeHtml(sym.signature)}</code>` : ''}
-                    ${sym.description ? `<p class="text-sm text-gray-700 mt-1">${escapeHtml(sym.description)}</p>` : ''}
+                    ${sym.signature ? `<code class="text-sm text-slate-300 mt-1 block">${escapeHtml(sym.signature)}</code>` : ''}
+                    ${sym.description ? `<p class="text-sm text-slate-400 mt-1">${escapeHtml(sym.description)}</p>` : ''}
                 </div>
             `;
         });
@@ -522,7 +522,7 @@ function formatAskCodebaseResult(data) {
 
     // File Summaries
     if (data.file_summaries && data.file_summaries.length > 0) {
-        html += formatSection('📄 File Summaries', data.file_summaries, (fs, i) => {
+        html += formatSection('File Summaries', data.file_summaries, (fs, i) => {
             const fsId = `fs-${i}`;
             const summary = fs.summary || '';
             const isLong = summary.length > 200;
@@ -533,31 +533,31 @@ function formatAskCodebaseResult(data) {
             const relevance = fs.relevance ?? fs.relevance_score ?? 0;
 
             return `
-                <div class="mb-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                <div class="mb-4 p-4 bg-emerald-900/30 rounded-lg border border-emerald-700">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
-                            <h4 class="font-semibold text-green-900">
-                                <span class="font-mono bg-green-100 px-2 py-0.5 rounded">
-                                    📄 ${escapeHtml(name)}
+                            <h4 class="font-semibold text-emerald-400">
+                                <span class="font-mono bg-emerald-900/50 px-2 py-0.5 rounded">
+                                    ${escapeHtml(name)}
                                 </span>
                             </h4>
-                            <div class="text-sm text-green-700 mt-1 font-semibold">⭐ ${relevance.toFixed(3)}</div>
+                            <div class="text-sm text-emerald-400 mt-1 font-semibold">${relevance.toFixed(3)}</div>
                         </div>
                         ${isLong ? `
                             <button
                                 onclick="toggleExpand('${fsId}')"
-                                class="ml-2 text-green-700 hover:text-green-900 text-sm font-medium"
+                                class="ml-2 text-emerald-400 hover:text-emerald-300 text-sm font-medium"
                                 id="${fsId}-btn"
                             >
-                                ▼ Expand
+                                Expand
                             </button>
                         ` : ''}
                     </div>
-                    <div id="${fsId}-preview" class="mt-2 text-green-800">
+                    <div id="${fsId}-preview" class="mt-2 text-slate-300">
                         ${escapeHtml(preview)}
                     </div>
                     ${isLong ? `
-                        <div id="${fsId}-full" style="display: none;" class="mt-2 text-green-800">
+                        <div id="${fsId}-full" style="display: none;" class="mt-2 text-slate-300">
                             ${escapeHtml(summary)}
                         </div>
                     ` : ''}
@@ -568,7 +568,7 @@ function formatAskCodebaseResult(data) {
 
     // Module Summaries
     if (data.module_summaries && data.module_summaries.length > 0) {
-        html += formatSection('📁 Module Summaries', data.module_summaries, (ms, i) => {
+        html += formatSection('Module Summaries', data.module_summaries, (ms, i) => {
             const msId = `ms-${i}`;
             const summary = ms.summary || '';
             const isLong = summary.length > 200;
@@ -579,31 +579,31 @@ function formatAskCodebaseResult(data) {
             const relevance = ms.relevance ?? ms.relevance_score ?? 0;
 
             return `
-                <div class="mb-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                <div class="mb-4 p-4 bg-purple-900/30 rounded-lg border border-purple-700">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
-                            <h4 class="font-semibold text-purple-900">
-                                <span class="font-mono bg-purple-100 px-2 py-0.5 rounded">
-                                    📁 ${escapeHtml(name)}
+                            <h4 class="font-semibold text-purple-400">
+                                <span class="font-mono bg-purple-900/50 px-2 py-0.5 rounded">
+                                    ${escapeHtml(name)}
                                 </span>
                             </h4>
-                            <div class="text-sm text-purple-700 mt-1 font-semibold">⭐ ${relevance.toFixed(3)}</div>
+                            <div class="text-sm text-purple-400 mt-1 font-semibold">${relevance.toFixed(3)}</div>
                         </div>
                         ${isLong ? `
                             <button
                                 onclick="toggleExpand('${msId}')"
-                                class="ml-2 text-purple-700 hover:text-purple-900 text-sm font-medium"
+                                class="ml-2 text-purple-400 hover:text-purple-300 text-sm font-medium"
                                 id="${msId}-btn"
                             >
-                                ▼ Expand
+                                Expand
                             </button>
                         ` : ''}
                     </div>
-                    <div id="${msId}-preview" class="mt-2 text-purple-800">
+                    <div id="${msId}-preview" class="mt-2 text-slate-300">
                         ${escapeHtml(preview)}
                     </div>
                     ${isLong ? `
-                        <div id="${msId}-full" style="display: none;" class="mt-2 text-purple-800">
+                        <div id="${msId}-full" style="display: none;" class="mt-2 text-slate-300">
                             ${escapeHtml(summary)}
                         </div>
                     ` : ''}
@@ -614,7 +614,7 @@ function formatAskCodebaseResult(data) {
 
     // Symbol Summaries
     if (data.symbol_summaries && data.symbol_summaries.length > 0) {
-        html += formatSection('🔍 Symbol Summaries', data.symbol_summaries, (ss, i) => {
+        html += formatSection('Symbol Summaries', data.symbol_summaries, (ss, i) => {
             const ssId = `ss-${i}`;
             const summary = ss.summary || '';
             const isLong = summary.length > 200;
@@ -626,35 +626,35 @@ function formatAskCodebaseResult(data) {
             const relevance = ss.relevance ?? ss.relevance_score ?? 0;
 
             return `
-                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                <div class="mb-4 p-4 bg-amber-900/30 rounded-lg border border-amber-700">
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
-                            <h4 class="font-semibold text-yellow-900">
-                                <span class="font-mono bg-yellow-100 px-2 py-0.5 rounded">
-                                    🔍 ${escapeHtml(name)}
+                            <h4 class="font-semibold text-amber-400">
+                                <span class="font-mono bg-amber-900/50 px-2 py-0.5 rounded">
+                                    ${escapeHtml(name)}
                                 </span>
                             </h4>
-                            <div class="text-sm text-yellow-700 mt-1">
-                                ${filePath ? `<span class="font-mono bg-yellow-100 px-2 py-0.5 rounded">📍 ${escapeHtml(filePath)}</span>` : ''}
-                                ${ss.summary_type ? `<span class="ml-2 bg-yellow-100 px-2 py-0.5 rounded">🏷️ ${escapeHtml(ss.summary_type)}</span>` : ''}
-                                <span class="ml-2 font-semibold">⭐ ${relevance.toFixed(3)}</span>
+                            <div class="text-sm text-amber-400 mt-1">
+                                ${filePath ? `<span class="font-mono bg-amber-900/50 px-2 py-0.5 rounded">${escapeHtml(filePath)}</span>` : ''}
+                                ${ss.summary_type ? `<span class="ml-2 bg-amber-900/50 px-2 py-0.5 rounded">${escapeHtml(ss.summary_type)}</span>` : ''}
+                                <span class="ml-2 font-semibold">${relevance.toFixed(3)}</span>
                             </div>
                         </div>
                         ${isLong ? `
                             <button
                                 onclick="toggleExpand('${ssId}')"
-                                class="ml-2 text-yellow-700 hover:text-yellow-900 text-sm font-medium"
+                                class="ml-2 text-amber-400 hover:text-amber-300 text-sm font-medium"
                                 id="${ssId}-btn"
                             >
-                                ▼ Expand
+                                Expand
                             </button>
                         ` : ''}
                     </div>
-                    <div id="${ssId}-preview" class="mt-2 text-yellow-800">
+                    <div id="${ssId}-preview" class="mt-2 text-slate-300">
                         ${escapeHtml(preview)}
                     </div>
                     ${isLong ? `
-                        <div id="${ssId}-full" style="display: none;" class="mt-2 text-yellow-800">
+                        <div id="${ssId}-full" style="display: none;" class="mt-2 text-slate-300">
                             ${escapeHtml(summary)}
                         </div>
                     ` : ''}
@@ -667,9 +667,9 @@ function formatAskCodebaseResult(data) {
     if (data.key_files && data.key_files.length > 0) {
         html += `
             <div class="mb-6">
-                <h3 class="text-lg font-semibold mb-3">📁 Key Files to Examine</h3>
-                <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
-                    ${data.key_files.map(file => `<li><code class="bg-gray-100 px-1 rounded">${escapeHtml(file)}</code></li>`).join('')}
+                <h3 class="text-lg font-semibold text-slate-100 mb-3">Key Files to Examine</h3>
+                <ul class="list-disc list-inside space-y-1 text-sm text-slate-300">
+                    ${data.key_files.map(file => `<li><code class="bg-slate-800 px-1 rounded">${escapeHtml(file)}</code></li>`).join('')}
                 </ul>
             </div>
         `;
@@ -679,36 +679,36 @@ function formatAskCodebaseResult(data) {
     if (data.suggested_actions && data.suggested_actions.length > 0) {
         html += `
             <div class="mb-6">
-                <h3 class="text-lg font-semibold mb-3">🎯 Suggested Next Steps</h3>
-                <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+                <h3 class="text-lg font-semibold text-slate-100 mb-3">Suggested Next Steps</h3>
+                <ul class="list-disc list-inside space-y-1 text-sm text-slate-300">
                     ${data.suggested_actions.map(action => `<li>${escapeHtml(action)}</li>`).join('')}
                 </ul>
             </div>
         `;
     }
 
-    return html || '<p class="text-gray-500">No results to display</p>';
+    return html || '<p class="text-slate-400">No results to display</p>';
 }
 
 function formatSection(title, items, formatter) {
     if (!items || items.length === 0) return '';
     return `
         <div class="mb-6">
-            <h3 class="text-lg font-semibold mb-3">${title}</h3>
+            <h3 class="text-lg font-semibold text-slate-100 mb-3">${title}</h3>
             ${items.map((item, i) => formatter(item, i)).join('')}
         </div>
     `;
 }
 
 function formatGenericResult(data) {
-    if (!data) return '<p class="text-gray-500">No data returned</p>';
+    if (!data) return '<p class="text-slate-400">No data returned</p>';
 
     // Pretty print object/array
     if (typeof data === 'object') {
-        return `<pre class="bg-gray-50 p-4 rounded-lg overflow-x-auto text-sm">${JSON.stringify(data, null, 2)}</pre>`;
+        return `<pre class="bg-slate-900 p-4 rounded-lg overflow-x-auto text-sm text-slate-300">${JSON.stringify(data, null, 2)}</pre>`;
     }
 
-    return `<div class="bg-gray-50 p-4 rounded-lg">${escapeHtml(String(data))}</div>`;
+    return `<div class="bg-slate-900 p-4 rounded-lg text-slate-300">${escapeHtml(String(data))}</div>`;
 }
 
 function escapeHtml(unsafe) {
@@ -734,12 +734,12 @@ function toggleExpand(id) {
         // Collapse
         preview.style.display = 'block';
         full.style.display = 'none';
-        btn.innerHTML = '▼ Expand';
+        btn.innerHTML = 'Expand';
     } else {
         // Expand
         preview.style.display = 'none';
         full.style.display = 'block';
-        btn.innerHTML = '▲ Collapse';
+        btn.innerHTML = 'Collapse';
     }
 }
 

@@ -104,24 +104,57 @@ class JobQueue:
     async def claim_jobs(
         self,
         worker_types: Optional[list[str]] = None,
-        limit: int = 10
+        limit: int = 10,
+        repo_name: Optional[str] = None
     ) -> list[Job]:
         """Claim next available jobs atomically.
 
         Args:
             worker_types: Job types this worker can handle (None = all)
             limit: Max jobs to claim
+            repo_name: Optional repo filter (for per-repo mode)
 
         Returns:
             List of claimed jobs
         """
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT * FROM robomonkey_control.claim_jobs($1, $2, $3)",
-                self.worker_id,
-                worker_types,
-                limit
-            )
+            if repo_name:
+                # Per-repo mode: claim jobs for specific repo only
+                # Use a transaction to atomically claim jobs
+                rows = await conn.fetch(
+                    """
+                    WITH claimable AS (
+                        SELECT id
+                        FROM robomonkey_control.job_queue
+                        WHERE status = 'PENDING'
+                          AND repo_name = $4
+                          AND ($2::text[] IS NULL OR job_type = ANY($2))
+                        ORDER BY priority DESC, created_at ASC
+                        LIMIT $3
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    UPDATE robomonkey_control.job_queue q
+                    SET status = 'CLAIMED',
+                        claimed_at = now(),
+                        claimed_by = $1,
+                        attempts = attempts + 1
+                    FROM claimable
+                    WHERE q.id = claimable.id
+                    RETURNING q.*
+                    """,
+                    self.worker_id,
+                    worker_types,
+                    limit,
+                    repo_name
+                )
+            else:
+                # Use the stored function for general job claiming
+                rows = await conn.fetch(
+                    "SELECT * FROM robomonkey_control.claim_jobs($1, $2, $3)",
+                    self.worker_id,
+                    worker_types,
+                    limit
+                )
 
             jobs = [
                 Job(
@@ -142,7 +175,7 @@ class JobQueue:
             ]
 
             if jobs:
-                logger.info(f"Claimed {len(jobs)} jobs")
+                logger.info(f"Claimed {len(jobs)} jobs" + (f" for {repo_name}" if repo_name else ""))
 
             return jobs
 

@@ -124,18 +124,29 @@ database:
 embeddings:
   enabled: true
   backfill_on_startup: true
-  provider: "ollama"
+  provider: "ollama"  # Options: ollama, vllm, openai
   model: "snowflake-arctic-embed2:latest"
   dimension: 1024
   max_chunk_length: 8192
   batch_size: 100
 
+  # Provider-specific settings
   ollama:
     base_url: "http://localhost:11434"
 
   vllm:
     base_url: "http://localhost:8000"
     api_key: "local-key"
+
+  # OpenAI-compatible API (local embedding service or cloud)
+  openai:
+    base_url: "http://localhost:8082"  # Local embedding service
+    api_key: ""  # Empty for local, set for cloud OpenAI
+
+  # Auto-rebuild vector indexes after embedding jobs
+  auto_rebuild_indexes: true
+  rebuild_change_threshold: 0.20  # Rebuild if 20%+ changed
+  rebuild_index_type: "ivfflat"   # Options: ivfflat, hnsw
 
 # Auto-summary generation
 summaries:
@@ -155,14 +166,30 @@ summaries:
     module_summaries: false # Skip module summary generation only
     embeddings: false       # Skip embedding regeneration
 
-# Worker configuration
+# Worker configuration - controls parallel processing
 workers:
-  global_max_concurrent: 4
-  max_concurrent_per_repo: 2
-  reindex_workers: 2
-  embed_workers: 2
-  docs_workers: 1
+  # Processing mode: "single", "per_repo", or "pool"
+  # - single: One worker, sequential processing (low resource usage)
+  # - per_repo: Dedicated worker per active repo, up to max_workers
+  # - pool: Thread pool with job-type limits (default, most flexible)
+  mode: "pool"
+
+  # Global concurrency limits
+  max_workers: 4              # Maximum concurrent job workers
+  max_concurrent_per_repo: 2  # Prevent one repo from hogging all workers
+
+  # Per job-type limits (only in "pool" mode)
+  job_type_limits:
+    FULL_INDEX: 2
+    EMBED_MISSING: 3
+    SUMMARIZE_FILES: 2
+    SUMMARIZE_SYMBOLS: 2
+    DOCS_SCAN: 1
+
   poll_interval_sec: 5
+  job_timeout_sec: 3600  # 1 hour timeout
+  max_retries: 3
+  retry_backoff_multiplier: 2
 
 # File watching
 watching:
@@ -190,9 +217,72 @@ logging:
 ### When to Edit YAML
 - Configuring daemon behavior
 - Enabling/disabling automatic embeddings
-- Tuning worker concurrency
+- Tuning worker concurrency and parallelism mode
 - Enabling file watching
 - Adjusting daemon logging
+- Configuring job timeouts and retry behavior
+
+### Worker Configuration via API
+
+You can also view and update worker configuration via the Web UI API:
+
+```bash
+# Get current config
+curl http://localhost:9832/api/maintenance/config/workers
+
+# Update to single-threaded mode
+curl -X PUT http://localhost:9832/api/maintenance/config/workers \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "single"}'
+
+# Update for high parallelism
+curl -X PUT http://localhost:9832/api/maintenance/config/workers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "pool",
+    "max_workers": 8,
+    "job_type_limits": {"FULL_INDEX": 4, "EMBED_MISSING": 6}
+  }'
+```
+
+**Note:** API updates modify the YAML file. Daemon restart is required for changes to take effect.
+
+---
+
+## Source Mounts (Docker Mode)
+
+When running RoboMonkey in Docker, you can mount host directories into the container for indexing via the Web UI or API.
+
+### Managing via Web UI
+
+1. Go to `http://localhost:9832/sources`
+2. Click "Add Source Mount"
+3. Enter mount name (e.g., `my-project`) and host path
+4. Click "Apply Changes" to restart containers with new mounts
+
+### Managing via API
+
+```bash
+# List mounts
+curl http://localhost:9832/api/sources
+
+# Add a mount
+curl -X POST http://localhost:9832/api/sources \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mount_name": "my-project",
+    "host_path": "/Users/me/projects/my-project",
+    "read_only": true
+  }'
+
+# Apply changes (restarts containers)
+curl -X POST http://localhost:9832/api/sources/apply
+
+# Check sync status
+curl http://localhost:9832/api/sources/status
+```
+
+Source mounts are stored in the `robomonkey_control.source_mounts` table and regenerate the `docker-compose.yml` when applied.
 
 ---
 

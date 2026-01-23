@@ -1,0 +1,584 @@
+{% extends "base.html" %}
+
+{% block title %}Repository Management - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h2 class="text-2xl font-bold text-slate-100">Repository Management</h2>
+        <div class="flex gap-2">
+            <button onclick="showAddRepoModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">
+                + Add Repository
+            </button>
+            <button onclick="loadRepos()" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Repos List -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg" id="repos-section">
+        <div class="p-6">
+            <div id="repos-content">
+                <p class="text-slate-400">Loading...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Repo Modal -->
+<div id="repo-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-hidden">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 id="repo-modal-title" class="text-lg font-semibold text-slate-100">Add Repository</h3>
+            <button onclick="closeRepoModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <form id="repo-form" onsubmit="submitRepoForm(event)" class="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
+            <input type="hidden" id="repo-edit-mode" value="create">
+            <input type="hidden" id="repo-original-name" value="">
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Repository Name *</label>
+                <input type="text" id="repo-name" required
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="my-project">
+                <p class="text-xs text-slate-500 mt-1">Alphanumeric, dash, underscore, or dot. Cannot change after creation.</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Root Path *</label>
+                <input type="text" id="repo-path" required
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="/path/to/repository">
+                <p class="text-xs text-slate-500 mt-1">Absolute path to the repository root directory.</p>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="repo-enabled" checked class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                <label for="repo-enabled" class="text-sm font-medium text-slate-300">Enabled</label>
+            </div>
+
+            <div class="border-t border-slate-700 pt-4">
+                <p class="text-sm font-medium text-slate-300 mb-3">Auto-Processing Options</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="repo-auto-index" checked class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                        <label for="repo-auto-index" class="text-sm text-slate-300">Auto Index</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="repo-auto-embed" checked class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                        <label for="repo-auto-embed" class="text-sm text-slate-300">Auto Embed</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="repo-auto-watch" class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                        <label for="repo-auto-watch" class="text-sm text-slate-300">Auto Watch</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="repo-auto-summaries" checked class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                        <label for="repo-auto-summaries" class="text-sm text-slate-300">Auto Summaries</label>
+                    </div>
+                </div>
+            </div>
+        </form>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeRepoModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="document.getElementById('repo-form').requestSubmit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+                Save
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Repo Details Modal -->
+<div id="details-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Repository Details</h3>
+            <button onclick="closeDetailsModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div id="details-content" class="p-4 overflow-y-auto max-h-[70vh]">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeDetailsModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="delete-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div class="p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-red-400">Delete Repository</h3>
+        </div>
+        <div class="p-4">
+            <p class="text-slate-300 mb-4">Are you sure you want to delete <strong id="delete-repo-name" class="text-slate-100"></strong>?</p>
+            <div class="flex items-center gap-2 p-3 bg-red-900/30 border border-red-700 rounded">
+                <input type="checkbox" id="delete-schema" class="rounded bg-slate-700 border-red-600 text-red-600 focus:ring-red-500/50">
+                <label for="delete-schema" class="text-sm text-red-400">Also delete database schema (all indexed data will be lost!)</label>
+            </div>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeDeleteModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="confirmDelete()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded">
+                Delete
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Trigger Job Modal -->
+<div id="job-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Trigger Job</h3>
+            <button onclick="closeJobModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div class="p-4 space-y-4">
+            <input type="hidden" id="job-repo-name" value="">
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Repository</label>
+                <p id="job-repo-display" class="font-medium text-slate-100"></p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Job Type</label>
+                <select id="job-type" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+                    <option value="FULL_INDEX">FULL_INDEX - Full repository re-index</option>
+                    <option value="EMBED_MISSING">EMBED_MISSING - Generate missing embeddings</option>
+                    <option value="SUMMARIZE_MISSING">SUMMARIZE_MISSING - Generate missing summaries</option>
+                    <option value="SUMMARIZE_FILES">SUMMARIZE_FILES - Summarize all files</option>
+                    <option value="SUMMARIZE_SYMBOLS">SUMMARIZE_SYMBOLS - Summarize all symbols</option>
+                    <option value="DOCS_SCAN">DOCS_SCAN - Scan documentation</option>
+                    <option value="TAG_RULES_SYNC">TAG_RULES_SYNC - Sync tag rules</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Priority (1-10)</label>
+                <input type="number" id="job-priority" value="5" min="1" max="10"
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+            </div>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeJobModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="submitJob()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+                Queue Job
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let reposList = [];
+let deleteTarget = null;
+
+document.addEventListener('DOMContentLoaded', loadRepos);
+
+async function loadRepos() {
+    const content = document.getElementById('repos-content');
+    content.innerHTML = '<p class="text-slate-400">Loading...</p>';
+
+    try {
+        const response = await fetch('/api/registry');
+        const data = await response.json();
+
+        if (!data.enabled) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <p class="text-slate-400 mb-4">${data.message || 'Registry not configured'}</p>
+                    <p class="text-sm text-slate-500">Run <code class="bg-slate-700 border border-slate-600 px-2 py-1 rounded text-slate-300">robomonkey daemon init</code> to set up the control schema.</p>
+                </div>
+            `;
+            return;
+        }
+
+        reposList = data.repos || [];
+
+        if (reposList.length === 0) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <p class="text-slate-400 mb-4">No repositories registered</p>
+                    <button onclick="showAddRepoModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+                        + Add Your First Repository
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        content.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Path</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Status</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Auto</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Last Updated</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${reposList.map(repo => `
+                            <tr class="hover:bg-slate-700/50">
+                                <td class="px-4 py-3">
+                                    <button onclick="showDetails('${repo.name}')" class="font-medium text-blue-400 hover:text-blue-300">
+                                        ${repo.name}
+                                    </button>
+                                </td>
+                                <td class="px-4 py-3 text-sm text-slate-400 font-mono truncate max-w-xs" title="${repo.root_path}">
+                                    ${repo.root_path}
+                                </td>
+                                <td class="px-4 py-3">
+                                    ${repo.enabled
+                                        ? '<span class="px-2 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded text-xs font-medium">Enabled</span>'
+                                        : '<span class="px-2 py-1 bg-slate-700 text-slate-400 border border-slate-600 rounded text-xs font-medium">Disabled</span>'
+                                    }
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="${repo.auto_index ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Index">I</span>
+                                    <span class="${repo.auto_embed ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Embed">E</span>
+                                    <span class="${repo.auto_watch ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Watch">W</span>
+                                    <span class="${repo.auto_summaries ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Summaries">S</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm text-slate-400">
+                                    ${repo.updated_at ? formatRelative(repo.updated_at) : 'Never'}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="flex gap-1">
+                                        <button onclick="showJobModal('${repo.name}')" class="px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded" title="Trigger Job">
+                                            Run
+                                        </button>
+                                        <button onclick="showEditModal('${repo.name}')" class="px-2 py-1 text-xs bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded" title="Edit">
+                                            Edit
+                                        </button>
+                                        <button onclick="showDeleteModal('${repo.name}')" class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded" title="Delete">
+                                            Del
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-slate-500 mt-3">Auto: I=Index, E=Embed, W=Watch, S=Summaries</p>
+        `;
+    } catch (error) {
+        content.innerHTML = `<p class="text-red-400">Error loading repositories: ${error.message}</p>`;
+    }
+}
+
+function formatRelative(isoDate) {
+    if (!isoDate) return 'N/A';
+    const date = new Date(isoDate);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+}
+
+// Add/Edit Modal Functions
+function showAddRepoModal() {
+    document.getElementById('repo-modal-title').textContent = 'Add Repository';
+    document.getElementById('repo-edit-mode').value = 'create';
+    document.getElementById('repo-original-name').value = '';
+    document.getElementById('repo-name').value = '';
+    document.getElementById('repo-name').disabled = false;
+    document.getElementById('repo-path').value = '';
+    document.getElementById('repo-enabled').checked = true;
+    document.getElementById('repo-auto-index').checked = true;
+    document.getElementById('repo-auto-embed').checked = true;
+    document.getElementById('repo-auto-watch').checked = false;
+    document.getElementById('repo-auto-summaries').checked = true;
+    document.getElementById('repo-modal').classList.remove('hidden');
+}
+
+function showEditModal(repoName) {
+    const repo = reposList.find(r => r.name === repoName);
+    if (!repo) return;
+
+    document.getElementById('repo-modal-title').textContent = 'Edit Repository';
+    document.getElementById('repo-edit-mode').value = 'edit';
+    document.getElementById('repo-original-name').value = repoName;
+    document.getElementById('repo-name').value = repo.name;
+    document.getElementById('repo-name').disabled = true;
+    document.getElementById('repo-path').value = repo.root_path;
+    document.getElementById('repo-enabled').checked = repo.enabled;
+    document.getElementById('repo-auto-index').checked = repo.auto_index;
+    document.getElementById('repo-auto-embed').checked = repo.auto_embed;
+    document.getElementById('repo-auto-watch').checked = repo.auto_watch;
+    document.getElementById('repo-auto-summaries').checked = repo.auto_summaries;
+    document.getElementById('repo-modal').classList.remove('hidden');
+}
+
+function closeRepoModal() {
+    document.getElementById('repo-modal').classList.add('hidden');
+}
+
+async function submitRepoForm(event) {
+    event.preventDefault();
+
+    const mode = document.getElementById('repo-edit-mode').value;
+    const name = document.getElementById('repo-name').value;
+    const path = document.getElementById('repo-path').value;
+
+    const data = {
+        root_path: path,
+        enabled: document.getElementById('repo-enabled').checked,
+        auto_index: document.getElementById('repo-auto-index').checked,
+        auto_embed: document.getElementById('repo-auto-embed').checked,
+        auto_watch: document.getElementById('repo-auto-watch').checked,
+        auto_summaries: document.getElementById('repo-auto-summaries').checked
+    };
+
+    try {
+        let response;
+        if (mode === 'create') {
+            data.name = name;
+            response = await fetch('/api/registry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        } else {
+            const originalName = document.getElementById('repo-original-name').value;
+            response = await fetch(`/api/registry/${originalName}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        }
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Operation failed');
+        }
+
+        alert(result.message || 'Success');
+        closeRepoModal();
+        await loadRepos();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Details Modal
+async function showDetails(repoName) {
+    const modal = document.getElementById('details-modal');
+    const content = document.getElementById('details-content');
+
+    content.innerHTML = '<p class="text-slate-400">Loading...</p>';
+    modal.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/api/registry/${repoName}`);
+        if (!response.ok) throw new Error('Failed to load details');
+        const repo = await response.json();
+
+        content.innerHTML = `
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-sm text-slate-400">Name</p>
+                        <p class="font-medium text-slate-100">${repo.name}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-slate-400">Schema</p>
+                        <p class="font-mono text-sm text-slate-300">${repo.schema_name}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <p class="text-sm text-slate-400">Root Path</p>
+                    <p class="font-mono text-sm text-slate-300 break-all">${repo.root_path}</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-sm text-slate-400">Status</p>
+                        <p>${repo.enabled
+                            ? '<span class="px-2 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded text-xs">Enabled</span>'
+                            : '<span class="px-2 py-1 bg-slate-700 text-slate-400 border border-slate-600 rounded text-xs">Disabled</span>'
+                        }</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-slate-400">Schema Exists</p>
+                        <p>${repo.schema_exists
+                            ? '<span class="text-emerald-400">Yes</span>'
+                            : '<span class="text-amber-400">No (not indexed yet)</span>'
+                        }</p>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-700 pt-4">
+                    <p class="text-sm font-medium text-slate-300 mb-2">Auto-Processing</p>
+                    <div class="flex gap-4 text-sm">
+                        <span class="${repo.auto_index ? 'text-emerald-400' : 'text-slate-500'}">
+                            ${repo.auto_index ? '✓' : '✗'} Index
+                        </span>
+                        <span class="${repo.auto_embed ? 'text-emerald-400' : 'text-slate-500'}">
+                            ${repo.auto_embed ? '✓' : '✗'} Embed
+                        </span>
+                        <span class="${repo.auto_watch ? 'text-emerald-400' : 'text-slate-500'}">
+                            ${repo.auto_watch ? '✓' : '✗'} Watch
+                        </span>
+                        <span class="${repo.auto_summaries ? 'text-emerald-400' : 'text-slate-500'}">
+                            ${repo.auto_summaries ? '✓' : '✗'} Summaries
+                        </span>
+                    </div>
+                </div>
+
+                ${repo.stats ? `
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-sm font-medium text-slate-300 mb-2">Indexed Data</p>
+                        <div class="grid grid-cols-5 gap-2 text-center">
+                            <div class="p-2 bg-slate-700 rounded">
+                                <p class="text-lg font-bold text-slate-100">${repo.stats.files}</p>
+                                <p class="text-xs text-slate-400">Files</p>
+                            </div>
+                            <div class="p-2 bg-slate-700 rounded">
+                                <p class="text-lg font-bold text-slate-100">${repo.stats.symbols}</p>
+                                <p class="text-xs text-slate-400">Symbols</p>
+                            </div>
+                            <div class="p-2 bg-slate-700 rounded">
+                                <p class="text-lg font-bold text-slate-100">${repo.stats.chunks}</p>
+                                <p class="text-xs text-slate-400">Chunks</p>
+                            </div>
+                            <div class="p-2 bg-slate-700 rounded">
+                                <p class="text-lg font-bold text-slate-100">${repo.stats.embeddings}</p>
+                                <p class="text-xs text-slate-400">Embeddings</p>
+                            </div>
+                            <div class="p-2 bg-slate-700 rounded">
+                                <p class="text-lg font-bold text-slate-100">${repo.stats.documents}</p>
+                                <p class="text-xs text-slate-400">Docs</p>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                <div class="border-t border-slate-700 pt-4 text-xs text-slate-500">
+                    <p>Created: ${repo.created_at ? new Date(repo.created_at).toLocaleString() : 'N/A'}</p>
+                    <p>Updated: ${repo.updated_at ? new Date(repo.updated_at).toLocaleString() : 'N/A'}</p>
+                    <p>Last Seen: ${repo.last_seen_at ? new Date(repo.last_seen_at).toLocaleString() : 'Never'}</p>
+                </div>
+
+                <div class="border-t border-slate-700 pt-4 flex gap-2">
+                    <button onclick="closeDetailsModal(); showJobModal('${repo.name}')" class="px-3 py-2 bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded text-sm">
+                        Trigger Job
+                    </button>
+                    <button onclick="closeDetailsModal(); showEditModal('${repo.name}')" class="px-3 py-2 bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded text-sm">
+                        Edit
+                    </button>
+                    <button onclick="closeDetailsModal(); showDeleteModal('${repo.name}')" class="px-3 py-2 bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded text-sm">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+    }
+}
+
+function closeDetailsModal() {
+    document.getElementById('details-modal').classList.add('hidden');
+}
+
+// Delete Modal
+function showDeleteModal(repoName) {
+    deleteTarget = repoName;
+    document.getElementById('delete-repo-name').textContent = repoName;
+    document.getElementById('delete-schema').checked = false;
+    document.getElementById('delete-modal').classList.remove('hidden');
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.add('hidden');
+    deleteTarget = null;
+}
+
+async function confirmDelete() {
+    if (!deleteTarget) return;
+
+    const deleteSchema = document.getElementById('delete-schema').checked;
+
+    try {
+        const response = await fetch(`/api/registry/${deleteTarget}?delete_schema=${deleteSchema}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Delete failed');
+        }
+
+        alert(result.message || 'Deleted successfully');
+        closeDeleteModal();
+        await loadRepos();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Job Modal
+function showJobModal(repoName) {
+    document.getElementById('job-repo-name').value = repoName;
+    document.getElementById('job-repo-display').textContent = repoName;
+    document.getElementById('job-type').value = 'FULL_INDEX';
+    document.getElementById('job-priority').value = '5';
+    document.getElementById('job-modal').classList.remove('hidden');
+}
+
+function closeJobModal() {
+    document.getElementById('job-modal').classList.add('hidden');
+}
+
+async function submitJob() {
+    const repoName = document.getElementById('job-repo-name').value;
+    const jobType = document.getElementById('job-type').value;
+    const priority = parseInt(document.getElementById('job-priority').value) || 5;
+
+    try {
+        const response = await fetch(`/api/registry/${repoName}/jobs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                job_type: jobType,
+                priority: priority,
+                payload: {}
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Failed to queue job');
+        }
+
+        alert(result.message || 'Job queued');
+        closeJobModal();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+</script>
+{% endblock %}

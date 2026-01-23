@@ -1,15 +1,231 @@
-"""Maintenance API routes for index management."""
+"""Maintenance API routes for index management and daemon configuration."""
 from __future__ import annotations
 
 import asyncpg
 import math
+from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from yonk_code_robomonkey.config import Settings
 
 router = APIRouter()
+
+
+# =============================================================================
+# Worker/Daemon Configuration Models
+# =============================================================================
+
+class WorkerConfigResponse(BaseModel):
+    """Current worker/daemon configuration."""
+    mode: str  # single, per_repo, pool
+    max_workers: int
+    max_concurrent_per_repo: int
+    poll_interval_sec: int
+    job_timeout_sec: int
+    max_retries: int
+    retry_backoff_multiplier: int
+    job_type_limits: dict[str, int]
+
+
+class UpdateWorkerConfigRequest(BaseModel):
+    """Request to update worker configuration."""
+    mode: Optional[Literal["single", "per_repo", "pool"]] = None
+    max_workers: Optional[int] = None
+    max_concurrent_per_repo: Optional[int] = None
+    poll_interval_sec: Optional[int] = None
+    job_timeout_sec: Optional[int] = None
+    max_retries: Optional[int] = None
+    job_type_limits: Optional[dict[str, int]] = None
+
+
+# =============================================================================
+# Worker Configuration Endpoints
+# =============================================================================
+
+@router.get("/config/workers")
+async def get_worker_config() -> dict[str, Any]:
+    """Get current worker/daemon configuration.
+
+    Returns the current parallelism settings including:
+    - Processing mode (single, per_repo, pool)
+    - Max workers and concurrency limits
+    - Job type limits
+    - Timeout and retry settings
+    """
+    try:
+        # Try to load from daemon config file
+        from yonk_code_robomonkey.config.daemon import DaemonConfig
+        import os
+
+        config_path = os.environ.get("ROBOMONKEY_CONFIG")
+        if not config_path:
+            config_path = Path(__file__).resolve().parents[4] / "config" / "robomonkey-daemon.yaml"
+        else:
+            config_path = Path(config_path)
+
+        if config_path.exists():
+            config = DaemonConfig.from_yaml(config_path)
+            workers = config.workers
+
+            return {
+                "source": "config_file",
+                "config_path": str(config_path),
+                "workers": {
+                    "mode": workers.mode,
+                    "max_workers": workers.max_workers,
+                    "max_concurrent_per_repo": workers.max_concurrent_per_repo,
+                    "poll_interval_sec": workers.poll_interval_sec,
+                    "job_timeout_sec": workers.job_timeout_sec,
+                    "max_retries": workers.max_retries,
+                    "retry_backoff_multiplier": workers.retry_backoff_multiplier,
+                    "job_type_limits": {
+                        "FULL_INDEX": workers.job_type_limits.FULL_INDEX,
+                        "EMBED_MISSING": workers.job_type_limits.EMBED_MISSING,
+                        "SUMMARIZE_MISSING": workers.job_type_limits.SUMMARIZE_MISSING,
+                        "SUMMARIZE_FILES": workers.job_type_limits.SUMMARIZE_FILES,
+                        "SUMMARIZE_SYMBOLS": workers.job_type_limits.SUMMARIZE_SYMBOLS,
+                        "DOCS_SCAN": workers.job_type_limits.DOCS_SCAN,
+                    }
+                },
+                "mode_descriptions": {
+                    "single": "One worker processes all jobs sequentially (low resource usage)",
+                    "per_repo": "Dedicated worker per active repo, up to max_workers",
+                    "pool": "Thread pool claims jobs from queue (default, most flexible)"
+                }
+            }
+        else:
+            # Return defaults
+            return {
+                "source": "defaults",
+                "config_path": None,
+                "workers": {
+                    "mode": "pool",
+                    "max_workers": 4,
+                    "max_concurrent_per_repo": 2,
+                    "poll_interval_sec": 5,
+                    "job_timeout_sec": 3600,
+                    "max_retries": 3,
+                    "retry_backoff_multiplier": 2,
+                    "job_type_limits": {
+                        "FULL_INDEX": 2,
+                        "EMBED_MISSING": 3,
+                        "SUMMARIZE_MISSING": 2,
+                        "SUMMARIZE_FILES": 2,
+                        "SUMMARIZE_SYMBOLS": 2,
+                        "DOCS_SCAN": 1,
+                    }
+                },
+                "mode_descriptions": {
+                    "single": "One worker processes all jobs sequentially (low resource usage)",
+                    "per_repo": "Dedicated worker per active repo, up to max_workers",
+                    "pool": "Thread pool claims jobs from queue (default, most flexible)"
+                }
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load config: {str(e)}")
+
+
+@router.put("/config/workers")
+async def update_worker_config(request: UpdateWorkerConfigRequest) -> dict[str, Any]:
+    """Update worker/daemon configuration.
+
+    Updates the daemon YAML config file with new worker settings.
+    A daemon restart is required for changes to take effect.
+
+    **Note:** This modifies the config file on disk. The running daemon
+    will continue with its current settings until restarted.
+    """
+    import os
+    import yaml
+
+    config_path = os.environ.get("ROBOMONKEY_CONFIG")
+    if not config_path:
+        config_path = Path(__file__).resolve().parents[4] / "config" / "robomonkey-daemon.yaml"
+    else:
+        config_path = Path(config_path)
+
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="Config file not found. Create robomonkey-daemon.yaml first.")
+
+    try:
+        # Load existing config
+        with open(config_path, 'r') as f:
+            config_data = yaml.safe_load(f)
+
+        if 'workers' not in config_data:
+            config_data['workers'] = {}
+
+        workers = config_data['workers']
+        updates_made = []
+
+        # Apply updates
+        if request.mode is not None:
+            workers['mode'] = request.mode
+            updates_made.append(f"mode={request.mode}")
+
+        if request.max_workers is not None:
+            if request.max_workers < 1 or request.max_workers > 32:
+                raise HTTPException(status_code=400, detail="max_workers must be between 1 and 32")
+            workers['max_workers'] = request.max_workers
+            updates_made.append(f"max_workers={request.max_workers}")
+
+        if request.max_concurrent_per_repo is not None:
+            if request.max_concurrent_per_repo < 1 or request.max_concurrent_per_repo > 8:
+                raise HTTPException(status_code=400, detail="max_concurrent_per_repo must be between 1 and 8")
+            workers['max_concurrent_per_repo'] = request.max_concurrent_per_repo
+            updates_made.append(f"max_concurrent_per_repo={request.max_concurrent_per_repo}")
+
+        if request.poll_interval_sec is not None:
+            if request.poll_interval_sec < 1 or request.poll_interval_sec > 60:
+                raise HTTPException(status_code=400, detail="poll_interval_sec must be between 1 and 60")
+            workers['poll_interval_sec'] = request.poll_interval_sec
+            updates_made.append(f"poll_interval_sec={request.poll_interval_sec}")
+
+        if request.job_timeout_sec is not None:
+            if request.job_timeout_sec < 60 or request.job_timeout_sec > 86400:
+                raise HTTPException(status_code=400, detail="job_timeout_sec must be between 60 and 86400")
+            workers['job_timeout_sec'] = request.job_timeout_sec
+            updates_made.append(f"job_timeout_sec={request.job_timeout_sec}")
+
+        if request.max_retries is not None:
+            if request.max_retries < 0 or request.max_retries > 10:
+                raise HTTPException(status_code=400, detail="max_retries must be between 0 and 10")
+            workers['max_retries'] = request.max_retries
+            updates_made.append(f"max_retries={request.max_retries}")
+
+        if request.job_type_limits is not None:
+            if 'job_type_limits' not in workers:
+                workers['job_type_limits'] = {}
+            for job_type, limit in request.job_type_limits.items():
+                if limit < 1 or limit > 8:
+                    raise HTTPException(status_code=400, detail=f"Job type limit for {job_type} must be between 1 and 8")
+                workers['job_type_limits'][job_type] = limit
+                updates_made.append(f"job_type_limits.{job_type}={limit}")
+
+        if not updates_made:
+            return {
+                "status": "unchanged",
+                "message": "No changes provided"
+            }
+
+        # Write back to config file
+        with open(config_path, 'w') as f:
+            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+        return {
+            "status": "updated",
+            "config_path": str(config_path),
+            "updates": updates_made,
+            "message": "Configuration updated. Restart daemon for changes to take effect.",
+            "restart_required": True
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update config: {str(e)}")
 
 
 class VectorIndexInfo(BaseModel):
@@ -396,6 +612,362 @@ async def get_index_recommendations() -> dict[str, Any]:
                 "needs_index": sum(1 for r in recommendations if r["recommended_type"] != "none"),
                 "needs_action": sum(1 for r in recommendations if r["needs_action"])
             }
+        }
+
+    finally:
+        await conn.close()
+
+
+class JobCleanupRequest(BaseModel):
+    """Request to clean up old job queue entries."""
+    retention_days: int = 7  # Delete jobs older than this
+
+
+class EmbedMissingRequest(BaseModel):
+    """Request to trigger embedding generation for missing embeddings."""
+    repo_name: str
+    priority: int = 5  # 1-10, lower = higher priority
+
+
+class ReembedTableRequest(BaseModel):
+    """Request to regenerate embeddings for a specific table."""
+    schema_name: str
+    table_name: Literal[
+        "chunk_embedding",
+        "document_embedding",
+        "file_summary_embedding",
+        "symbol_summary_embedding",
+        "module_summary_embedding"
+    ]
+    rebuild_index: bool = True  # Rebuild the vector index after regeneration
+
+
+@router.post("/embed-missing")
+async def trigger_embed_missing(request: EmbedMissingRequest) -> dict[str, Any]:
+    """Enqueue an EMBED_MISSING job for a repository.
+
+    This triggers the daemon to generate embeddings for any chunks/documents
+    that don't have embeddings yet. The job runs in the background.
+
+    If you truncate an embedding table, the daemon will automatically detect
+    the missing embeddings on its next cycle and regenerate them.
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Verify repo exists
+        repo = await conn.fetchrow("""
+            SELECT name, schema_name
+            FROM robomonkey_control.repo_registry
+            WHERE name = $1
+        """, request.repo_name)
+
+        if not repo:
+            raise HTTPException(status_code=404, detail=f"Repository not found: {request.repo_name}")
+
+        schema_name = repo["schema_name"]
+
+        # Get current missing counts
+        await conn.execute(f'SET search_path TO "{schema_name}", public')
+
+        missing_chunks = await conn.fetchval("""
+            SELECT COUNT(*)
+            FROM chunk c
+            LEFT JOIN chunk_embedding ce ON c.id = ce.chunk_id
+            WHERE ce.chunk_id IS NULL
+        """)
+
+        missing_docs = await conn.fetchval("""
+            SELECT COUNT(*)
+            FROM document d
+            LEFT JOIN document_embedding de ON d.id = de.document_id
+            WHERE de.document_id IS NULL
+        """)
+
+        # Enqueue the job
+        job_id = await conn.fetchval("""
+            INSERT INTO robomonkey_control.job_queue
+                (repo_name, schema_name, job_type, priority, status, payload)
+            VALUES ($1, $2, 'EMBED_MISSING', $3, 'PENDING', '{}')
+            RETURNING id
+        """, request.repo_name, schema_name, request.priority)
+
+        return {
+            "status": "queued",
+            "job_id": str(job_id),
+            "repo_name": request.repo_name,
+            "schema_name": schema_name,
+            "missing_chunks": missing_chunks,
+            "missing_docs": missing_docs,
+            "message": f"EMBED_MISSING job queued. {missing_chunks} chunks and {missing_docs} docs will be processed."
+        }
+
+    finally:
+        await conn.close()
+
+
+@router.post("/reembed-table")
+async def reembed_table(request: ReembedTableRequest) -> dict[str, Any]:
+    """Truncate an embedding table and enqueue job to regenerate.
+
+    This is useful when:
+    - Switching embedding models (different dimensions/characteristics)
+    - Fixing corrupted embeddings
+    - Reprocessing after algorithm changes
+
+    The table is truncated immediately, and an EMBED_MISSING job is queued
+    to regenerate the embeddings in the background.
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Verify schema exists
+        schema_exists = await conn.fetchval("""
+            SELECT EXISTS(
+                SELECT 1 FROM information_schema.schemata
+                WHERE schema_name = $1
+            )
+        """, request.schema_name)
+
+        if not schema_exists:
+            raise HTTPException(status_code=404, detail=f"Schema not found: {request.schema_name}")
+
+        # Get repo name from schema
+        repo = await conn.fetchrow("""
+            SELECT name FROM robomonkey_control.repo_registry
+            WHERE schema_name = $1
+        """, request.schema_name)
+
+        if not repo:
+            raise HTTPException(status_code=404, detail=f"No repository found for schema: {request.schema_name}")
+
+        repo_name = repo["name"]
+
+        # Get current count before truncate
+        try:
+            count_before = await conn.fetchval(
+                f'SELECT COUNT(*) FROM "{request.schema_name}"."{request.table_name}"'
+            )
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"Table not found: {request.table_name}")
+
+        # Truncate the embedding table
+        await conn.execute(f'TRUNCATE "{request.schema_name}"."{request.table_name}"')
+
+        # Drop and recreate index if requested (avoids stale index issues)
+        index_result = None
+        if request.rebuild_index:
+            # Find the vector index on this table
+            idx_row = await conn.fetchrow("""
+                SELECT i.relname as index_name, am.amname as index_type,
+                       a.attname as column_name
+                FROM pg_index x
+                JOIN pg_class i ON i.oid = x.indexrelid
+                JOIN pg_class t ON t.oid = x.indrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                JOIN pg_am am ON am.oid = i.relam
+                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(x.indkey)
+                WHERE n.nspname = $1 AND t.relname = $2
+                  AND am.amname IN ('ivfflat', 'hnsw')
+            """, request.schema_name, request.table_name)
+
+            if idx_row:
+                # Drop the index (will be rebuilt after embeddings are regenerated)
+                await conn.execute(
+                    f'DROP INDEX IF EXISTS "{request.schema_name}"."{idx_row["index_name"]}"'
+                )
+                index_result = {
+                    "dropped": idx_row["index_name"],
+                    "type": idx_row["index_type"],
+                    "note": "Index will be auto-rebuilt after embeddings are generated"
+                }
+
+        # Enqueue EMBED_MISSING job
+        job_id = await conn.fetchval("""
+            INSERT INTO robomonkey_control.job_queue
+                (repo_name, schema_name, job_type, priority, status, payload)
+            VALUES ($1, $2, 'EMBED_MISSING', 1, 'PENDING', $3)
+            RETURNING id
+        """, repo_name, request.schema_name, f'{{"reembed_table": "{request.table_name}"}}')
+
+        return {
+            "status": "truncated_and_queued",
+            "job_id": str(job_id),
+            "repo_name": repo_name,
+            "schema_name": request.schema_name,
+            "table_name": request.table_name,
+            "rows_removed": count_before,
+            "index": index_result,
+            "message": f"Truncated {count_before} rows from {request.table_name}. EMBED_MISSING job queued with high priority."
+        }
+
+    finally:
+        await conn.close()
+
+
+@router.get("/embedding-status")
+async def get_embedding_status(schema_name: str | None = None) -> dict[str, Any]:
+    """Get embedding completion status for all or specific schema.
+
+    Shows how many entities have embeddings vs how many are missing.
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Get target schemas
+        if schema_name:
+            schemas = [schema_name]
+        else:
+            rows = await conn.fetch("""
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name LIKE $1
+            """, f"{settings.schema_prefix}%")
+            schemas = [r["schema_name"] for r in rows]
+
+        results = []
+
+        for schema in schemas:
+            try:
+                await conn.execute(f'SET search_path TO "{schema}", public')
+
+                # Chunks
+                chunk_total = await conn.fetchval("SELECT COUNT(*) FROM chunk")
+                chunk_embedded = await conn.fetchval("SELECT COUNT(*) FROM chunk_embedding")
+
+                # Documents
+                doc_total = await conn.fetchval("SELECT COUNT(*) FROM document")
+                doc_embedded = await conn.fetchval("SELECT COUNT(*) FROM document_embedding")
+
+                # File summaries
+                file_summary_total = await conn.fetchval("SELECT COUNT(*) FROM file_summary")
+                file_summary_embedded = await conn.fetchval("SELECT COUNT(*) FROM file_summary_embedding")
+
+                # Symbol summaries
+                symbol_summary_total = await conn.fetchval("SELECT COUNT(*) FROM symbol_summary")
+                symbol_summary_embedded = await conn.fetchval("SELECT COUNT(*) FROM symbol_summary_embedding")
+
+                # Module summaries
+                module_summary_total = await conn.fetchval("SELECT COUNT(*) FROM module_summary")
+                module_summary_embedded = await conn.fetchval("SELECT COUNT(*) FROM module_summary_embedding")
+
+                results.append({
+                    "schema": schema,
+                    "chunks": {
+                        "total": chunk_total,
+                        "embedded": chunk_embedded,
+                        "missing": chunk_total - chunk_embedded,
+                        "percent": round(chunk_embedded / max(chunk_total, 1) * 100, 1)
+                    },
+                    "documents": {
+                        "total": doc_total,
+                        "embedded": doc_embedded,
+                        "missing": doc_total - doc_embedded,
+                        "percent": round(doc_embedded / max(doc_total, 1) * 100, 1)
+                    },
+                    "file_summaries": {
+                        "total": file_summary_total,
+                        "embedded": file_summary_embedded,
+                        "missing": file_summary_total - file_summary_embedded,
+                        "percent": round(file_summary_embedded / max(file_summary_total, 1) * 100, 1)
+                    },
+                    "symbol_summaries": {
+                        "total": symbol_summary_total,
+                        "embedded": symbol_summary_embedded,
+                        "missing": symbol_summary_total - symbol_summary_embedded,
+                        "percent": round(symbol_summary_embedded / max(symbol_summary_total, 1) * 100, 1)
+                    },
+                    "module_summaries": {
+                        "total": module_summary_total,
+                        "embedded": module_summary_embedded,
+                        "missing": module_summary_total - module_summary_embedded,
+                        "percent": round(module_summary_embedded / max(module_summary_total, 1) * 100, 1)
+                    }
+                })
+            except Exception as e:
+                results.append({
+                    "schema": schema,
+                    "error": str(e)
+                })
+
+        # Calculate totals
+        total_missing = sum(
+            r.get("chunks", {}).get("missing", 0) +
+            r.get("documents", {}).get("missing", 0) +
+            r.get("file_summaries", {}).get("missing", 0) +
+            r.get("symbol_summaries", {}).get("missing", 0) +
+            r.get("module_summaries", {}).get("missing", 0)
+            for r in results if "error" not in r
+        )
+
+        return {
+            "schemas": results,
+            "total_missing": total_missing,
+            "auto_catchup": "EMBED_MISSING jobs run automatically via daemon when embeddings are missing"
+        }
+
+    finally:
+        await conn.close()
+
+
+@router.post("/job-cleanup")
+async def cleanup_old_jobs(request: JobCleanupRequest) -> dict[str, Any]:
+    """Clean up old completed and failed jobs from the job queue.
+
+    Deletes jobs with status DONE or FAILED that are older than retention_days.
+    This helps keep the job queue table from growing unbounded.
+
+    Default retention is 7 days.
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Check if job queue table exists
+        has_jobs = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'robomonkey_control'
+                  AND table_name = 'job_queue'
+            )
+        """)
+
+        if not has_jobs:
+            return {
+                "status": "skipped",
+                "message": "Job queue not configured"
+            }
+
+        # Get counts before cleanup
+        before_stats = await conn.fetchrow("""
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'DONE') as done,
+                COUNT(*) FILTER (WHERE status = 'FAILED') as failed,
+                COUNT(*) FILTER (WHERE status = 'DONE' AND completed_at < NOW() - INTERVAL '1 day' * $1) as done_to_delete,
+                COUNT(*) FILTER (WHERE status = 'FAILED' AND completed_at < NOW() - INTERVAL '1 day' * $1) as failed_to_delete
+            FROM robomonkey_control.job_queue
+        """, request.retention_days)
+
+        # Call the cleanup function
+        deleted = await conn.fetchval(
+            "SELECT robomonkey_control.cleanup_old_jobs($1)",
+            request.retention_days
+        )
+
+        return {
+            "status": "cleaned",
+            "retention_days": request.retention_days,
+            "deleted_count": deleted or 0,
+            "before": {
+                "done": before_stats["done"],
+                "failed": before_stats["failed"],
+                "done_older_than_retention": before_stats["done_to_delete"],
+                "failed_older_than_retention": before_stats["failed_to_delete"]
+            },
+            "message": f"Deleted {deleted or 0} jobs older than {request.retention_days} days"
         }
 
     finally:

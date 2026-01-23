@@ -192,8 +192,11 @@ remove_docker_volumes() {
     log_step "Removing Docker volumes"
 
     local volumes=(
+        "robomonkey_pgdata"
         "robomonkey_postgres_data"
+        "robomonkey_ollama"
         "robomonkey_ollama_data"
+        "robomonkey_source"
         "yonk-robo-codemonkey_postgres_data"
         "yonk-robo-codemonkey_ollama_data"
     )
@@ -213,6 +216,7 @@ remove_docker_network() {
     log_step "Removing Docker networks"
 
     local networks=(
+        "robomonkey_network"
         "robomonkey_default"
         "yonk-robo-codemonkey_default"
     )
