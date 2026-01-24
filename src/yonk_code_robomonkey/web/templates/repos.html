@@ -371,12 +371,7 @@ async function submitRepoForm(event) {
         const result = await response.json();
 
         if (!response.ok) {
-            // Handle both string and object error details
-            let errorMsg = result.detail;
-            if (typeof errorMsg === 'object') {
-                errorMsg = errorMsg.msg || errorMsg.message || JSON.stringify(errorMsg);
-            }
-            throw new Error(errorMsg || 'Operation failed');
+            throw new Error(formatError(result.detail) || 'Operation failed');
         }
 
         alert(result.message || 'Success');
@@ -534,11 +529,7 @@ async function confirmDelete() {
         const result = await response.json();
 
         if (!response.ok) {
-            let errorMsg = result.detail;
-            if (typeof errorMsg === 'object') {
-                errorMsg = errorMsg.msg || errorMsg.message || JSON.stringify(errorMsg);
-            }
-            throw new Error(errorMsg || 'Delete failed');
+            throw new Error(formatError(result.detail) || 'Delete failed');
         }
 
         alert(result.message || 'Deleted successfully');
@@ -580,11 +571,7 @@ async function submitJob() {
         const result = await response.json();
 
         if (!response.ok) {
-            let errorMsg = result.detail;
-            if (typeof errorMsg === 'object') {
-                errorMsg = errorMsg.msg || errorMsg.message || JSON.stringify(errorMsg);
-            }
-            throw new Error(errorMsg || 'Failed to queue job');
+            throw new Error(formatError(result.detail) || 'Failed to queue job');
         }
 
         alert(result.message || 'Job queued');
@@ -594,16 +581,26 @@ async function submitJob() {
     }
 }
 
-// Helper to format error messages
-function formatError(error) {
-    if (typeof error === 'string') return error;
-    if (error.message) return error.message;
-    if (error.detail) {
-        if (typeof error.detail === 'string') return error.detail;
-        if (error.detail.msg) return error.detail.msg;
-        return JSON.stringify(error.detail);
+// Helper to format error messages (handles Pydantic validation errors)
+function formatError(detail) {
+    if (typeof detail === 'string') return detail;
+
+    // Handle Pydantic validation error array format
+    if (Array.isArray(detail)) {
+        return detail.map(err => {
+            const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
+            const msg = err.msg || 'Invalid value';
+            // Clean up the message
+            const cleanMsg = msg.replace('Value error, ', '');
+            return `${field}: ${cleanMsg}`;
+        }).join('\n');
     }
-    return JSON.stringify(error);
+
+    // Handle object with msg property
+    if (detail.msg) return detail.msg;
+    if (detail.message) return detail.message;
+
+    return JSON.stringify(detail);
 }
 </script>
 {% endblock %}
