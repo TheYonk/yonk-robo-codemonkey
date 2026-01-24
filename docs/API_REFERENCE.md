@@ -228,8 +228,33 @@ Queue a background job for the repository.
 | `FULL_INDEX` | Complete re-index of repository |
 | `REINDEX_FILE` | Re-index a specific file |
 | `REINDEX_MANY` | Re-index multiple files |
-| `EMBED_MISSING` | Generate embeddings for chunks without them |
+| `EMBED_MISSING` | Generate embeddings for chunks without them (supports model override) |
 | `EMBED_CHUNK` | Embed a specific chunk |
+
+**EMBED_MISSING Payload Options:**
+
+The `EMBED_MISSING` job supports payload options to override the default embedding configuration:
+
+```json
+{
+  "job_type": "EMBED_MISSING",
+  "payload": {
+    "model": "all-MiniLM-L6-v2",
+    "provider": "openai",
+    "base_url": "http://localhost:8082",
+    "batch_size": 32
+  }
+}
+```
+
+| Payload Field | Type | Default | Description |
+|---------------|------|---------|-------------|
+| `model` | string | (global default) | Embedding model to use |
+| `provider` | string | (global default) | Provider: `ollama`, `vllm`, `openai` |
+| `base_url` | string | (global default) | Embedding service URL |
+| `batch_size` | integer | 32 | Batch size for embedding requests |
+
+If not specified, uses global defaults from `/api/stats/capabilities`.
 | `DOCS_SCAN` | Scan for documentation files |
 | `SUMMARIZE_MISSING` | Generate missing summaries |
 | `SUMMARIZE_FILES` | Summarize all files |
@@ -369,6 +394,63 @@ Get detailed statistics for a repository including language breakdown.
 ## Statistics & Monitoring
 
 System-wide statistics and monitoring endpoints.
+
+### Get System Capabilities (Discovery Endpoint)
+
+```
+GET /api/stats/capabilities
+```
+
+**Primary endpoint for external tools** to discover RoboMonkey's capabilities, status, and available options. Call this first to understand what's available before submitting jobs.
+
+**Response:**
+```json
+{
+  "status": {
+    "database": "healthy",
+    "embeddings": "healthy",
+    "daemon": {
+      "running": true,
+      "active_instances": 1
+    }
+  },
+  "embeddings": {
+    "default_provider": "openai",
+    "default_model": "all-mpnet-base-v2",
+    "default_dimension": 768,
+    "service_url": "http://localhost:8082",
+    "available_models": [
+      {"id": "all-MiniLM-L6-v2", "dimension": 384, "owned_by": "local"},
+      {"id": "all-mpnet-base-v2", "dimension": 768, "owned_by": "local"}
+    ],
+    "model_selection": "Jobs can override the default model via payload.model"
+  },
+  "job_types": {
+    "FULL_INDEX": {
+      "description": "Full repository indexing",
+      "payload_options": {...}
+    },
+    "EMBED_MISSING": {
+      "description": "Generate embeddings for chunks/docs",
+      "payload_options": {
+        "model": {"type": "string", "description": "Override embedding model"},
+        "provider": {"type": "string", "description": "Override provider"},
+        "base_url": {"type": "string", "description": "Override service URL"},
+        "batch_size": {"type": "integer", "default": 32}
+      }
+    }
+  },
+  "api_endpoints": {...},
+  "workflow": {
+    "1_register": "POST /api/registry with {name, root_path}",
+    "2_index": "POST /api/registry/{name}/jobs with {job_type: 'FULL_INDEX'}",
+    "3_embed": "POST /api/registry/{name}/jobs with {job_type: 'EMBED_MISSING'}",
+    "4_check": "GET /api/registry/{name}/jobs to monitor progress",
+    "5_ready": "When EMBED_MISSING job status is DONE, repo is searchable",
+    "6_search": "Use MCP tools or /api/mcp/hybrid_search"
+  }
+}
+```
 
 ### Get Overview Statistics
 

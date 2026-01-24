@@ -56,6 +56,9 @@ Thumbs.db
 *.log
 *.pid
 
+# Embedding service model cache (large binary files)
+embedding-service/models/
+
 # Session notes (temporary working docs)
 *_COMPLETE.md
 *_FIX.md

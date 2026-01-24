@@ -69,7 +69,10 @@ class HealthResponse(BaseModel):
 def load_models():
     """Pre-load all models into memory"""
     global MODELS_LOADED
-    cache_dir = os.environ.get("TRANSFORMERS_CACHE", "/models")
+    # Use standard HuggingFace cache or local ./models directory
+    default_cache = os.path.join(os.path.dirname(__file__), "models")
+    cache_dir = os.environ.get("TRANSFORMERS_CACHE", default_cache)
+    os.makedirs(cache_dir, exist_ok=True)
 
     logger.info(f"Loading models from cache: {cache_dir}")
 

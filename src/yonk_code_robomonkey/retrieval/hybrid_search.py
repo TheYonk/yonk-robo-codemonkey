@@ -83,7 +83,8 @@ async def hybrid_search(
     # 1. Embed query
     if embeddings_provider == "ollama":
         embeddings = await ollama_embed([query], embeddings_model, embeddings_base_url)
-    elif embeddings_provider == "vllm":
+    elif embeddings_provider in ("vllm", "openai"):
+        # Both vLLM and OpenAI (including local embedding service) use OpenAI-compatible API
         embeddings = await vllm_embed([query], embeddings_model, embeddings_base_url, embeddings_api_key)
     else:
         raise ValueError(f"Invalid embeddings provider: {embeddings_provider}")

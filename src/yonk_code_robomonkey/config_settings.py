@@ -28,7 +28,8 @@ class Settings:
         self.use_schemas = os.getenv("USE_SCHEMAS", "true").lower() == "true"
 
         # Embeddings
-        self.embeddings_provider: Literal["ollama", "vllm"] = os.getenv(
+        # Provider: "ollama", "vllm", or "openai" (for OpenAI-compatible APIs including local embedding service)
+        self.embeddings_provider: Literal["ollama", "vllm", "openai"] = os.getenv(
             "EMBEDDINGS_PROVIDER", "ollama"
         )
         self.embeddings_model = os.getenv("EMBEDDINGS_MODEL", "snowflake-arctic-embed2:latest")

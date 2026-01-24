@@ -211,7 +211,16 @@ class ReindexManyProcessor(JobProcessor):
 
 
 class EmbedMissingProcessor(JobProcessor):
-    """Processor for EMBED_MISSING jobs."""
+    """Processor for EMBED_MISSING jobs.
+
+    Supports payload overrides for embedding configuration:
+        - model: Override the embedding model (e.g., "all-MiniLM-L6-v2")
+        - provider: Override the provider ("ollama", "vllm", "openai")
+        - base_url: Override the embedding service URL
+        - batch_size: Override batch size for embedding requests
+
+    If not specified in payload, falls back to global config defaults.
+    """
 
     async def process(self, job: Job) -> None:
         """Generate embeddings for chunks/docs missing them."""
@@ -220,6 +229,37 @@ class EmbedMissingProcessor(JobProcessor):
         if not self.config.embeddings.enabled:
             logger.warning("Embeddings disabled, skipping EMBED_MISSING job")
             return
+
+        # Parse payload for optional overrides
+        import json
+        payload = job.payload if isinstance(job.payload, dict) else json.loads(job.payload) if job.payload else {}
+
+        # Get embedding settings from payload or fall back to config defaults
+        use_provider = payload.get("provider", self.config.embeddings.provider)
+        use_model = payload.get("model", self.config.embeddings.model)
+        use_batch_size = payload.get("batch_size", self.config.embeddings.batch_size)
+
+        # Determine base_url and api_key based on provider (payload can override base_url)
+        if use_provider == "ollama":
+            default_base_url = self.config.embeddings.ollama.base_url
+            api_key = ""
+        elif use_provider == "vllm":
+            default_base_url = self.config.embeddings.vllm.base_url
+            api_key = self.config.embeddings.vllm.api_key
+        else:  # openai (includes local embedding service)
+            default_base_url = self.config.embeddings.openai.base_url
+            api_key = self.config.embeddings.openai.api_key
+
+        use_base_url = payload.get("base_url", default_base_url)
+
+        # Log effective settings (helpful for debugging)
+        if payload.get("model") or payload.get("provider"):
+            logger.info(
+                f"Using payload overrides - provider: {use_provider}, model: {use_model}, "
+                f"base_url: {use_base_url}"
+            )
+        else:
+            logger.debug(f"Using default config - provider: {use_provider}, model: {use_model}")
 
         # Get repo info
         async with self.control_pool.acquire() as conn:
@@ -277,33 +317,22 @@ class EmbedMissingProcessor(JobProcessor):
         # Import embedder
         from yonk_code_robomonkey.embeddings.embedder import embed_repo
 
-        # Determine base_url and api_key based on provider
-        if self.config.embeddings.provider == "ollama":
-            base_url = self.config.embeddings.ollama.base_url
-            api_key = ""
-        elif self.config.embeddings.provider == "vllm":
-            base_url = self.config.embeddings.vllm.base_url
-            api_key = self.config.embeddings.vllm.api_key
-        else:  # openai (includes local embedding service)
-            base_url = self.config.embeddings.openai.base_url
-            api_key = self.config.embeddings.openai.api_key
-
-        # Generate embeddings
+        # Generate embeddings with effective settings
         stats = await embed_repo(
             repo_id=None,  # Will be looked up by name
             repo_name=job.repo_name,
             database_url=self.config.database.control_dsn,
             schema_name=schema_name,
-            embeddings_provider=self.config.embeddings.provider,
-            embeddings_model=self.config.embeddings.model,
-            embeddings_base_url=base_url,
+            embeddings_provider=use_provider,
+            embeddings_model=use_model,
+            embeddings_base_url=use_base_url,
             embeddings_api_key=api_key,
             only_missing=True,
-            batch_size=self.config.embeddings.batch_size,
+            batch_size=use_batch_size,
             max_chunk_length=self.config.embeddings.max_chunk_length
         )
 
-        logger.info(f"EMBED_MISSING complete for {job.repo_name}: {stats}")
+        logger.info(f"EMBED_MISSING complete for {job.repo_name} (model={use_model}): {stats}")
 
         # Auto-rebuild vector indexes if enabled and threshold exceeded
         if self.config.embeddings.auto_rebuild_indexes:

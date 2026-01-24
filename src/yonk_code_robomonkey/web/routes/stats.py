@@ -34,8 +34,11 @@ class TriggerJobRequest(BaseModel):
 @router.get("/embeddings")
 async def get_embeddings_config() -> dict[str, Any]:
     """Get embedding service configuration and supported models."""
-    settings = Settings()
+    return await _get_embeddings_info()
 
+
+async def _get_embeddings_info() -> dict[str, Any]:
+    """Internal helper to get embeddings info (reused by /capabilities)."""
     # Get configured values from environment
     configured = {
         "provider": os.environ.get("EMBEDDINGS_PROVIDER", "unknown"),
@@ -89,6 +92,237 @@ async def get_embeddings_config() -> dict[str, Any]:
         "configured": configured,
         "service_status": service_status,
         "available_models": available_models
+    }
+
+
+@router.get("/capabilities")
+async def get_system_capabilities() -> dict[str, Any]:
+    """Get unified system capabilities and status.
+
+    This endpoint provides everything an external tool needs to know about
+    RoboMonkey's capabilities, including:
+    - Service status (database, embeddings, daemon)
+    - Available embedding models and default configuration
+    - Supported job types and their payload options
+    - API endpoints for common operations
+
+    External tools should call this endpoint to discover what's available
+    before submitting jobs.
+    """
+    settings = Settings()
+
+    # Get embeddings info
+    embeddings_info = await _get_embeddings_info()
+
+    # Check database connection
+    db_status = "unknown"
+    try:
+        conn = await asyncpg.connect(dsn=settings.database_url, timeout=5.0)
+        await conn.fetchval("SELECT 1")
+        await conn.close()
+        db_status = "healthy"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    # Check daemon status
+    daemon_info = {"running": False, "active_instances": 0}
+    try:
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            has_daemon = await conn.fetchval("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'robomonkey_control'
+                      AND table_name = 'daemon_instance'
+                )
+            """)
+            if has_daemon:
+                from datetime import datetime, timezone, timedelta
+                now = datetime.now(timezone.utc)
+                instances = await conn.fetch("""
+                    SELECT instance_id, status, last_heartbeat
+                    FROM robomonkey_control.daemon_instance
+                    WHERE last_heartbeat > $1
+                """, now - timedelta(seconds=60))
+                daemon_info["running"] = len(instances) > 0
+                daemon_info["active_instances"] = len(instances)
+        finally:
+            await conn.close()
+    except Exception:
+        pass
+
+    # Define supported job types with their payload options
+    job_types = {
+        "FULL_INDEX": {
+            "description": "Full repository indexing (code parsing, symbols, chunks)",
+            "payload_options": {
+                "force": {"type": "boolean", "default": False, "description": "Force reindex even if up-to-date"}
+            }
+        },
+        "EMBED_MISSING": {
+            "description": "Generate embeddings for chunks/docs that don't have them",
+            "payload_options": {
+                "model": {
+                    "type": "string",
+                    "default": embeddings_info["configured"]["model"],
+                    "description": "Embedding model to use (overrides default)"
+                },
+                "provider": {
+                    "type": "string",
+                    "default": embeddings_info["configured"]["provider"],
+                    "description": "Embedding provider: ollama, vllm, openai"
+                },
+                "base_url": {
+                    "type": "string",
+                    "default": embeddings_info["configured"]["base_url"],
+                    "description": "Embedding service URL (overrides default)"
+                },
+                "batch_size": {
+                    "type": "integer",
+                    "default": 32,
+                    "description": "Batch size for embedding requests"
+                }
+            }
+        },
+        "REINDEX_FILE": {
+            "description": "Reindex a single file",
+            "payload_options": {
+                "path": {"type": "string", "required": True, "description": "Relative path to file"},
+                "op": {"type": "string", "default": "UPSERT", "description": "Operation: UPSERT or DELETE"}
+            }
+        },
+        "REINDEX_MANY": {
+            "description": "Reindex multiple files in batch",
+            "payload_options": {
+                "paths": {
+                    "type": "array",
+                    "required": True,
+                    "description": "Array of {path, op} objects"
+                }
+            }
+        },
+        "DOCS_SCAN": {
+            "description": "Scan and ingest documentation files (README, docs/)",
+            "payload_options": {}
+        },
+        "TAG_RULES_SYNC": {
+            "description": "Apply tag rules to entities",
+            "payload_options": {}
+        },
+        "SUMMARIZE_FILES": {
+            "description": "Generate LLM summaries for files without them",
+            "payload_options": {}
+        },
+        "SUMMARIZE_SYMBOLS": {
+            "description": "Generate LLM summaries for symbols without them",
+            "payload_options": {}
+        },
+        "REGENERATE_SUMMARY": {
+            "description": "Regenerate comprehensive repository summary",
+            "payload_options": {}
+        }
+    }
+
+    # API endpoints reference
+    api_endpoints = {
+        "capabilities": {
+            "method": "GET",
+            "path": "/api/stats/capabilities",
+            "description": "This endpoint - get system capabilities"
+        },
+        "embeddings_status": {
+            "method": "GET",
+            "path": "/api/stats/embeddings",
+            "description": "Get embedding service status and available models"
+        },
+        "list_repos": {
+            "method": "GET",
+            "path": "/api/repos",
+            "description": "List all indexed repositories with stats"
+        },
+        "list_registry": {
+            "method": "GET",
+            "path": "/api/registry",
+            "description": "List all registered repositories (from repo_registry)"
+        },
+        "register_repo": {
+            "method": "POST",
+            "path": "/api/registry",
+            "description": "Register a new repository for indexing",
+            "body": {
+                "name": "string (required) - unique repo identifier",
+                "root_path": "string (required) - absolute path to repo",
+                "auto_index": "boolean (default: true)",
+                "auto_embed": "boolean (default: true)",
+                "auto_summaries": "boolean (default: true)"
+            }
+        },
+        "repo_details": {
+            "method": "GET",
+            "path": "/api/registry/{repo_name}",
+            "description": "Get repository config and stats"
+        },
+        "trigger_job": {
+            "method": "POST",
+            "path": "/api/registry/{repo_name}/jobs",
+            "description": "Trigger a job for a repository",
+            "body": {
+                "job_type": "string (required) - see job_types",
+                "priority": "integer (default: 5, higher = sooner)",
+                "payload": "object (job-specific options)"
+            }
+        },
+        "repo_jobs": {
+            "method": "GET",
+            "path": "/api/registry/{repo_name}/jobs",
+            "description": "List jobs for a repository (add ?status=PENDING to filter)"
+        },
+        "job_queue": {
+            "method": "GET",
+            "path": "/api/stats/jobs",
+            "description": "Get global job queue statistics"
+        },
+        "job_status": {
+            "method": "GET",
+            "path": "/api/stats/jobs/{job_id}",
+            "description": "Get detailed status of a specific job"
+        },
+        "repo_stats": {
+            "method": "GET",
+            "path": "/api/repos/{name}/stats",
+            "description": "Get detailed statistics for a repository"
+        },
+        "daemon_status": {
+            "method": "GET",
+            "path": "/api/stats/daemon",
+            "description": "Check if daemon is running"
+        }
+    }
+
+    return {
+        "status": {
+            "database": db_status,
+            "embeddings": embeddings_info["service_status"],
+            "daemon": daemon_info
+        },
+        "embeddings": {
+            "default_provider": embeddings_info["configured"]["provider"],
+            "default_model": embeddings_info["configured"]["model"],
+            "default_dimension": embeddings_info["configured"]["dimension"],
+            "service_url": embeddings_info["configured"]["base_url"],
+            "available_models": embeddings_info["available_models"],
+            "model_selection": "Jobs can override the default model via payload.model"
+        },
+        "job_types": job_types,
+        "api_endpoints": api_endpoints,
+        "workflow": {
+            "1_register": "POST /api/registry with {name, root_path}",
+            "2_index": "POST /api/registry/{name}/jobs with {job_type: 'FULL_INDEX'}",
+            "3_embed": "POST /api/registry/{name}/jobs with {job_type: 'EMBED_MISSING'}",
+            "4_check": "GET /api/registry/{name}/jobs to monitor progress",
+            "5_ready": "When EMBED_MISSING job status is DONE, repo is searchable",
+            "6_search": "Use MCP tools or /api/mcp/hybrid_search"
+        }
     }
 
 

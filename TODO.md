@@ -193,3 +193,69 @@ Implemented schema-per-repo isolation for testing migration assessment with mult
   - [x] Same-schema searches work correctly ✓
 - [x] Validation report (SCHEMA_ISOLATION_VALIDATION.md)
 - [ ] Full end-to-end MCP server test with updated tools
+
+## Phase 10 — Knowledge Base (Docs-Only RAG)
+Standalone documentation knowledge bases for RAG-style searchable content. Unlike code repos, knowledge bases accept file uploads (PDF, Markdown, HTML, text) and web scraping.
+
+### Database Schema
+- [ ] Add `repo_type` column to `repo_registry` ('code' | 'knowledge_base')
+- [ ] Update `job_queue` constraint for KB job types (KB_CHUNK, KB_EMBED, KB_SCRAPE, KB_REFRESH)
+- [ ] Create `kb_source` table (source documents with status tracking)
+- [ ] Create `kb_chunk` table (semantic chunks with hierarchy/breadcrumbs)
+- [ ] Create `kb_chunk_embedding` table (vector embeddings)
+- [ ] Create `kb_cross_reference` table (internal/external links)
+- [ ] Add helper functions (kb_hybrid_search, get_chunk_with_context)
+
+### Knowledge Base Module (`src/.../knowledge_base/`)
+- [ ] models.py: Pydantic models (KBSource, KBChunk, ChunkResult, etc.)
+- [ ] chunker.py: Smart section-based chunking with hierarchy
+- [ ] extractors/markdown.py: Markdown → sections with headings
+- [ ] extractors/html.py: HTML → clean content + structure (trafilatura)
+- [ ] extractors/pdf.py: PDF → text via pdfplumber
+- [ ] extractors/plain.py: Plain text → paragraphs
+- [ ] metadata.py: Topic/entity extraction (keyword + optional LLM)
+- [ ] web_scraper.py: URL fetching with httpx
+- [ ] ingester.py: Main ingestion pipeline
+- [ ] search.py: KB-specific hybrid search
+
+### API Endpoints (`/api/kb/`)
+- [ ] POST /api/kb/ - Create new knowledge base
+- [ ] GET /api/kb/ - List all knowledge bases
+- [ ] GET /api/kb/{name} - Get KB details
+- [ ] DELETE /api/kb/{name} - Delete KB
+- [ ] POST /api/kb/{name}/upload - Upload file(s) (multipart/form-data)
+- [ ] POST /api/kb/{name}/scrape - Add URL(s) to scrape
+- [ ] GET /api/kb/{name}/sources - List sources
+- [ ] DELETE /api/kb/{name}/sources/{id} - Delete source
+- [ ] POST /api/kb/{name}/sources/{id}/reprocess - Re-chunk source
+- [ ] GET /api/kb/{name}/chunks - Browse/search chunks
+- [ ] GET /api/kb/{name}/chunks/{id} - Get chunk with context
+- [ ] POST /api/kb/{name}/search - Hybrid search in KB
+- [ ] POST /api/kb/search - Cross-KB search (all KBs)
+
+### Daemon Processors
+- [ ] KB_CHUNK job: Extract content, run chunker, store kb_chunk records
+- [ ] KB_EMBED job: Batch embed chunks, store in kb_chunk_embedding
+- [ ] KB_SCRAPE job: Fetch URLs, extract content, enqueue KB_CHUNK
+
+### Web UI
+- [ ] knowledge_base.html template: KB management page
+- [ ] File upload with drag-drop
+- [ ] URL scraping form
+- [ ] Chunk browser with hierarchy view
+- [ ] Search interface
+
+### MCP Tool
+- [ ] kb_search(query, kb, top_k) - Search knowledge bases
+
+### Dependencies
+- [ ] pdfplumber >= 0.10.0 (PDF extraction)
+- [ ] beautifulsoup4 >= 4.12.0 (HTML parsing)
+- [ ] trafilatura >= 1.6.0 (Article extraction)
+- [ ] markdown-it-py >= 3.0.0 (Markdown with structure)
+- [ ] httpx >= 0.25.0 (Async HTTP)
+
+### Design Documents
+- [x] docs/knowledge-base-implementation.md - Full implementation plan
+- [x] docs/kb-schema-draft.sql - Database schema draft
+- [x] docs/kb-models-draft.py - Pydantic models draft
