@@ -1,9 +1,155 @@
 {% extends "base.html" %}
 
-{% block title %}Database Explorer - RoboMonkey{% endblock %}
+{% block title %}Code Explorer - RoboMonkey{% endblock %}
 
 {% block content %}
-<div class="grid grid-cols-12 gap-6">
+<!-- View Mode Tabs -->
+<div class="mb-6 border-b border-slate-700">
+    <nav class="flex space-x-4">
+        <button
+            id="tab-repo-view"
+            onclick="switchExplorerView('repo')"
+            class="px-4 py-3 text-sm font-medium border-b-2 border-blue-500 text-blue-400"
+        >
+            Repository Explorer
+        </button>
+        <button
+            id="tab-table-view"
+            onclick="switchExplorerView('table')"
+            class="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200"
+        >
+            Database Tables
+        </button>
+    </nav>
+</div>
+
+<!-- Repository Explorer View -->
+<div id="view-repo" class="grid grid-cols-12 gap-6">
+    <!-- Sidebar: Repo Selection + File Tree -->
+    <div class="col-span-3">
+        <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-4 mb-4">
+            <label class="block text-sm font-medium text-slate-300 mb-2">Repository</label>
+            <select
+                id="repo-select"
+                class="w-full rounded-md bg-slate-700 border-slate-600 text-slate-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                onchange="loadRepoOverview(this.value)"
+            >
+                <option value="">Select repository...</option>
+            </select>
+        </div>
+
+        <!-- Repo Stats Card -->
+        <div id="repo-stats-card" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-4 mb-4" style="display: none;">
+            <h3 class="text-lg font-semibold text-slate-100 mb-3">Statistics</h3>
+            <div id="repo-stats-content" class="space-y-2 text-sm">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- File Tree -->
+        <div id="file-tree-card" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-4" style="display: none;">
+            <h3 class="text-lg font-semibold text-slate-100 mb-3">Files</h3>
+            <div id="file-tree" class="overflow-y-auto text-sm" style="max-height: calc(100vh - 500px);">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="col-span-9">
+        <!-- Empty State -->
+        <div id="repo-empty-state" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-12 text-center">
+            <h3 class="text-lg font-medium text-slate-100 mb-2">Select a Repository</h3>
+            <p class="text-slate-400">Choose a repository from the dropdown to explore its contents, symbols, and relationships</p>
+        </div>
+
+        <!-- Repo Overview -->
+        <div id="repo-overview" style="display: none;">
+            <!-- Languages -->
+            <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">Languages</h3>
+                <div id="languages-chart" class="flex flex-wrap gap-2">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Symbol Types -->
+            <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">Symbol Types</h3>
+                <div id="symbol-types-chart" class="grid grid-cols-4 gap-4">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Recent Symbols with Relationships -->
+            <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">Key Symbols</h3>
+                <div id="symbol-list" class="space-y-3">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Tags -->
+            <div id="tags-section" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
+                <h3 class="text-lg font-semibold text-slate-100 mb-4">Tags</h3>
+                <div id="tags-list" class="flex flex-wrap gap-2">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- File Detail View -->
+        <div id="file-detail" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h3 id="file-detail-title" class="text-lg font-semibold text-slate-100"></h3>
+                    <p id="file-detail-path" class="text-sm text-slate-400 font-mono"></p>
+                </div>
+                <button onclick="hideFileDetail()" class="text-slate-400 hover:text-slate-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div id="file-symbols" class="space-y-3">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- Symbol Detail View -->
+        <div id="symbol-detail" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h3 id="symbol-detail-name" class="text-xl font-semibold text-slate-100"></h3>
+                    <p id="symbol-detail-meta" class="text-sm text-slate-400"></p>
+                </div>
+                <button onclick="hideSymbolDetail()" class="text-slate-400 hover:text-slate-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <!-- Callers -->
+            <div id="symbol-callers" class="mb-4">
+                <h4 class="text-sm font-semibold text-slate-300 mb-2">Called By</h4>
+                <div id="symbol-callers-list" class="space-y-1"></div>
+            </div>
+            <!-- Callees -->
+            <div id="symbol-callees" class="mb-4">
+                <h4 class="text-sm font-semibold text-slate-300 mb-2">Calls</h4>
+                <div id="symbol-callees-list" class="space-y-1"></div>
+            </div>
+            <!-- Summary -->
+            <div id="symbol-summary-section" style="display: none;">
+                <h4 class="text-sm font-semibold text-slate-300 mb-2">Summary</h4>
+                <p id="symbol-summary-text" class="text-sm text-slate-400"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Database Table View (hidden by default) -->
+<div id="view-table" class="grid grid-cols-12 gap-6" style="display: none;">
     <!-- Sidebar -->
     <div class="col-span-3">
         <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-4">
@@ -26,12 +172,12 @@
 
     <!-- Main Content -->
     <div class="col-span-9">
-        <div id="empty-state" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-12 text-center">
+        <div id="table-empty-state" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-12 text-center">
             <h3 class="text-lg font-medium text-slate-100 mb-2">Select a Schema</h3>
             <p class="text-slate-400">Choose a schema from the dropdown to explore its tables</p>
         </div>
 
-        <div id="table-view" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
+        <div id="table-view-content" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
             <div class="flex justify-between items-center mb-6">
                 <div>
                     <h3 class="text-xl font-bold text-slate-100" id="table-title"></h3>
@@ -80,15 +226,371 @@
 
 {% block scripts %}
 <script>
+// State
+let currentRepoName = null;
 let currentSchema = null;
 let currentTable = null;
 let currentPage = 0;
 const pageSize = 50;
-let currentRows = []; // Store current page rows for detail view
+let currentRows = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
-    await loadSchemas();
+    await Promise.all([
+        loadRepoList(),
+        loadSchemas()
+    ]);
 });
+
+// View switching
+function switchExplorerView(view) {
+    const repoView = document.getElementById('view-repo');
+    const tableView = document.getElementById('view-table');
+    const tabRepo = document.getElementById('tab-repo-view');
+    const tabTable = document.getElementById('tab-table-view');
+
+    if (view === 'repo') {
+        repoView.style.display = 'grid';
+        tableView.style.display = 'none';
+        tabRepo.className = 'px-4 py-3 text-sm font-medium border-b-2 border-blue-500 text-blue-400';
+        tabTable.className = 'px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200';
+    } else {
+        repoView.style.display = 'none';
+        tableView.style.display = 'grid';
+        tabRepo.className = 'px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200';
+        tabTable.className = 'px-4 py-3 text-sm font-medium border-b-2 border-blue-500 text-blue-400';
+    }
+}
+
+// ========== Repository Explorer ==========
+
+async function loadRepoList() {
+    try {
+        const response = await fetch('/api/repos');
+        const data = await response.json();
+
+        const select = document.getElementById('repo-select');
+        data.repositories.forEach(repo => {
+            const option = document.createElement('option');
+            option.value = repo.name;
+            option.textContent = `${repo.name} (${repo.stats?.files || 0} files)`;
+            select.appendChild(option);
+        });
+
+        // Auto-select if only one
+        if (data.repositories.length === 1) {
+            select.value = data.repositories[0].name;
+            loadRepoOverview(data.repositories[0].name);
+        }
+    } catch (error) {
+        console.error('Error loading repos:', error);
+    }
+}
+
+async function loadRepoOverview(repoName) {
+    if (!repoName) {
+        document.getElementById('repo-empty-state').style.display = 'block';
+        document.getElementById('repo-overview').style.display = 'none';
+        document.getElementById('repo-stats-card').style.display = 'none';
+        document.getElementById('file-tree-card').style.display = 'none';
+        return;
+    }
+
+    currentRepoName = repoName;
+
+    try {
+        const response = await fetch(`/api/repos/${repoName}/stats`);
+        const data = await response.json();
+
+        // Show overview
+        document.getElementById('repo-empty-state').style.display = 'none';
+        document.getElementById('repo-overview').style.display = 'block';
+        document.getElementById('repo-stats-card').style.display = 'block';
+        document.getElementById('file-tree-card').style.display = 'block';
+        document.getElementById('file-detail').style.display = 'none';
+        document.getElementById('symbol-detail').style.display = 'none';
+
+        // Populate stats
+        const statsContent = document.getElementById('repo-stats-content');
+        statsContent.innerHTML = `
+            <div class="flex justify-between"><span class="text-slate-400">Files:</span><span class="text-slate-100">${data.stats.files}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Symbols:</span><span class="text-slate-100">${data.stats.symbols}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Chunks:</span><span class="text-slate-100">${data.stats.chunks}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Embeddings:</span><span class="text-slate-100">${data.stats.embeddings}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Edges:</span><span class="text-slate-100">${data.stats.edges}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Documents:</span><span class="text-slate-100">${data.stats.documents}</span></div>
+        `;
+
+        // Populate languages
+        const languagesChart = document.getElementById('languages-chart');
+        if (data.languages && data.languages.length > 0) {
+            languagesChart.innerHTML = data.languages.map(lang => `
+                <div class="px-3 py-2 bg-slate-700 rounded-lg">
+                    <span class="font-medium text-slate-100">${lang.language}</span>
+                    <span class="text-slate-400 ml-2">${lang.count} files</span>
+                </div>
+            `).join('');
+        } else {
+            languagesChart.innerHTML = '<p class="text-slate-500">No language data available</p>';
+        }
+
+        // Populate symbol types
+        const symbolTypesChart = document.getElementById('symbol-types-chart');
+        if (data.symbol_types && data.symbol_types.length > 0) {
+            symbolTypesChart.innerHTML = data.symbol_types.map(st => {
+                const icon = getSymbolIcon(st.type);
+                return `
+                    <div class="bg-slate-700 rounded-lg p-4 text-center">
+                        <div class="text-2xl mb-1">${icon}</div>
+                        <div class="text-lg font-bold text-slate-100">${st.count}</div>
+                        <div class="text-xs text-slate-400">${st.type}</div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            symbolTypesChart.innerHTML = '<p class="text-slate-500 col-span-4">No symbol data available</p>';
+        }
+
+        // Load files and symbols
+        await Promise.all([
+            loadFileTree(repoName),
+            loadKeySymbols(repoName),
+            loadRepoTags(repoName)
+        ]);
+
+    } catch (error) {
+        console.error('Error loading repo overview:', error);
+    }
+}
+
+function getSymbolIcon(kind) {
+    const icons = {
+        'function': '<svg class="w-6 h-6 inline text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>',
+        'class': '<svg class="w-6 h-6 inline text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>',
+        'method': '<svg class="w-6 h-6 inline text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>',
+        'interface': '<svg class="w-6 h-6 inline text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>',
+        'module': '<svg class="w-6 h-6 inline text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path></svg>'
+    };
+    return icons[kind] || '<span class="text-slate-400">?</span>';
+}
+
+async function loadFileTree(repoName) {
+    try {
+        // Use the list_files MCP tool
+        const response = await fetch('/api/mcp/tools/list_files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params: { repo: repoName, limit: 100 } })
+        });
+        const data = await response.json();
+
+        const fileTree = document.getElementById('file-tree');
+        if (data.result && data.result.files) {
+            // Group by directory
+            const dirs = {};
+            data.result.files.forEach(f => {
+                const parts = f.path.split('/');
+                const dir = parts.slice(0, -1).join('/') || '/';
+                if (!dirs[dir]) dirs[dir] = [];
+                dirs[dir].push(f);
+            });
+
+            let html = '';
+            for (const [dir, files] of Object.entries(dirs).slice(0, 10)) {
+                html += `
+                    <div class="mb-3">
+                        <div class="text-slate-400 text-xs font-mono mb-1">${dir || '/'}</div>
+                        ${files.slice(0, 5).map(f => `
+                            <button
+                                onclick="showFileDetail('${encodeURIComponent(f.path)}')"
+                                class="block w-full text-left px-2 py-1 text-sm text-slate-300 hover:bg-slate-700 rounded truncate"
+                                title="${f.path}"
+                            >
+                                ${f.path.split('/').pop()}
+                                <span class="text-slate-500 text-xs">(${f.symbols || 0})</span>
+                            </button>
+                        `).join('')}
+                        ${files.length > 5 ? `<span class="text-xs text-slate-500 pl-2">+${files.length - 5} more</span>` : ''}
+                    </div>
+                `;
+            }
+            fileTree.innerHTML = html || '<p class="text-slate-500">No files found</p>';
+        } else {
+            fileTree.innerHTML = '<p class="text-slate-500">No files indexed yet</p>';
+        }
+    } catch (error) {
+        console.error('Error loading file tree:', error);
+        document.getElementById('file-tree').innerHTML = '<p class="text-red-400">Error loading files</p>';
+    }
+}
+
+async function loadKeySymbols(repoName) {
+    try {
+        // Search for key symbols using hybrid_search
+        const response = await fetch('/api/mcp/tools/hybrid_search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                params: {
+                    query: 'main function class handler',
+                    repo: repoName,
+                    final_top_k: 10,
+                    entity_types: 'symbol'
+                }
+            })
+        });
+        const data = await response.json();
+
+        const symbolList = document.getElementById('symbol-list');
+        if (data.result && data.result.results && data.result.results.length > 0) {
+            symbolList.innerHTML = data.result.results.map(r => `
+                <div class="p-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition cursor-pointer" onclick="loadSymbolDetail('${r.symbol_id || ''}', '${escapeJs(r.name || r.title)}')">
+                    <div class="flex items-center gap-2">
+                        ${getSymbolIcon(r.kind || 'function')}
+                        <span class="font-medium text-slate-100">${escapeHtml(r.name || r.title || 'Unknown')}</span>
+                        <span class="text-xs text-slate-500">${r.kind || ''}</span>
+                    </div>
+                    <div class="text-xs text-slate-400 font-mono mt-1 truncate">${escapeHtml(r.file_path || '')}</div>
+                    ${r.signature ? `<code class="text-xs text-slate-500 block mt-1 truncate">${escapeHtml(r.signature)}</code>` : ''}
+                </div>
+            `).join('');
+        } else {
+            symbolList.innerHTML = '<p class="text-slate-500">No symbols found. Try indexing your repository first.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading symbols:', error);
+        document.getElementById('symbol-list').innerHTML = '<p class="text-red-400">Error loading symbols</p>';
+    }
+}
+
+async function loadRepoTags(repoName) {
+    try {
+        const response = await fetch('/api/mcp/tools/list_tags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params: {} })
+        });
+        const data = await response.json();
+
+        const tagsSection = document.getElementById('tags-section');
+        const tagsList = document.getElementById('tags-list');
+
+        if (data.result && data.result.tags && data.result.tags.length > 0) {
+            tagsSection.style.display = 'block';
+            tagsList.innerHTML = data.result.tags.map(tag => `
+                <span class="px-3 py-1 bg-slate-700 text-slate-300 rounded-full text-sm cursor-pointer hover:bg-slate-600" title="${escapeHtml(tag.description || '')}">
+                    ${escapeHtml(tag.name)}
+                </span>
+            `).join('');
+        } else {
+            tagsSection.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading tags:', error);
+    }
+}
+
+async function showFileDetail(encodedPath) {
+    const filePath = decodeURIComponent(encodedPath);
+
+    try {
+        const response = await fetch('/api/mcp/tools/read_file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                params: { repo: currentRepoName, path: filePath, start_line: 1, end_line: 100 }
+            })
+        });
+        const data = await response.json();
+
+        document.getElementById('repo-overview').style.display = 'none';
+        document.getElementById('file-detail').style.display = 'block';
+        document.getElementById('file-detail-title').textContent = filePath.split('/').pop();
+        document.getElementById('file-detail-path').textContent = filePath;
+
+        const symbolsDiv = document.getElementById('file-symbols');
+        if (data.result && data.result.content) {
+            symbolsDiv.innerHTML = `
+                <pre class="bg-slate-900 p-4 rounded-lg text-sm text-slate-300 overflow-x-auto"><code>${escapeHtml(data.result.content)}</code></pre>
+                <div class="mt-4 text-sm text-slate-400">
+                    Language: ${data.result.language || 'unknown'} |
+                    Lines: ${data.result.total_lines || 'unknown'}
+                </div>
+            `;
+        } else {
+            symbolsDiv.innerHTML = '<p class="text-slate-500">Could not load file content</p>';
+        }
+    } catch (error) {
+        console.error('Error loading file:', error);
+    }
+}
+
+function hideFileDetail() {
+    document.getElementById('file-detail').style.display = 'none';
+    document.getElementById('repo-overview').style.display = 'block';
+}
+
+async function loadSymbolDetail(symbolId, symbolName) {
+    if (!currentRepoName) return;
+
+    try {
+        // Get callers
+        const callersResp = await fetch('/api/mcp/tools/callers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params: { repo: currentRepoName, symbol_name: symbolName, max_depth: 1 } })
+        });
+        const callersData = await callersResp.json();
+
+        // Get callees
+        const calleesResp = await fetch('/api/mcp/tools/callees', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params: { repo: currentRepoName, symbol_name: symbolName, max_depth: 1 } })
+        });
+        const calleesData = await calleesResp.json();
+
+        document.getElementById('repo-overview').style.display = 'none';
+        document.getElementById('symbol-detail').style.display = 'block';
+        document.getElementById('symbol-detail-name').textContent = symbolName;
+        document.getElementById('symbol-detail-meta').textContent = `Repository: ${currentRepoName}`;
+
+        // Render callers
+        const callersList = document.getElementById('symbol-callers-list');
+        if (callersData.result && callersData.result.callers && callersData.result.callers.length > 0) {
+            callersList.innerHTML = callersData.result.callers.map(c => `
+                <div class="text-sm text-slate-300 px-2 py-1 bg-slate-700 rounded">
+                    <span class="text-blue-400">${escapeHtml(c.name || c.caller_name || 'Unknown')}</span>
+                    <span class="text-slate-500 text-xs ml-2">${escapeHtml(c.file_path || '')}</span>
+                </div>
+            `).join('');
+        } else {
+            callersList.innerHTML = '<p class="text-sm text-slate-500">No callers found</p>';
+        }
+
+        // Render callees
+        const calleesList = document.getElementById('symbol-callees-list');
+        if (calleesData.result && calleesData.result.callees && calleesData.result.callees.length > 0) {
+            calleesList.innerHTML = calleesData.result.callees.map(c => `
+                <div class="text-sm text-slate-300 px-2 py-1 bg-slate-700 rounded">
+                    <span class="text-green-400">${escapeHtml(c.name || c.callee_name || 'Unknown')}</span>
+                    <span class="text-slate-500 text-xs ml-2">${escapeHtml(c.file_path || '')}</span>
+                </div>
+            `).join('');
+        } else {
+            calleesList.innerHTML = '<p class="text-sm text-slate-500">No callees found</p>';
+        }
+
+    } catch (error) {
+        console.error('Error loading symbol detail:', error);
+    }
+}
+
+function hideSymbolDetail() {
+    document.getElementById('symbol-detail').style.display = 'none';
+    document.getElementById('repo-overview').style.display = 'block';
+}
+
+// ========== Database Table View ==========
 
 async function loadSchemas() {
     const response = await fetch('/api/schemas');
@@ -134,8 +636,8 @@ async function loadTableData(schema, table, page = 0) {
     const data = await response.json();
 
     // Update UI
-    document.getElementById('empty-state').style.display = 'none';
-    document.getElementById('table-view').style.display = 'block';
+    document.getElementById('table-empty-state').style.display = 'none';
+    document.getElementById('table-view-content').style.display = 'block';
     document.getElementById('table-title').textContent = table;
     document.getElementById('table-info').textContent = `${data.total} rows total`;
 
@@ -144,7 +646,7 @@ async function loadTableData(schema, table, page = 0) {
     const tbody = document.getElementById('table-body');
 
     if (data.rows.length > 0) {
-        currentRows = data.rows; // Store for detail view
+        currentRows = data.rows;
         const columns = Object.keys(data.rows[0]);
 
         thead.innerHTML = columns.map(col =>
@@ -157,7 +659,8 @@ async function loadTableData(schema, table, page = 0) {
                     let value = row[col];
                     if (value === null) value = '<span class="text-slate-500 italic">null</span>';
                     else if (typeof value === 'object') value = JSON.stringify(value);
-                    else if (typeof value === 'string' && value.length > 100) value = value.substring(0, 100) + '...';
+                    else if (typeof value === 'string' && value.length > 100) value = escapeHtml(value.substring(0, 100)) + '...';
+                    else value = escapeHtml(String(value));
 
                     return `<td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">${value}</td>`;
                 }).join('')}
@@ -202,7 +705,6 @@ function showRowDetail(rowIndex) {
 
     title.textContent = `${currentTable} - Row ${rowIndex + 1}`;
 
-    // Build detail view
     let html = '<div class="space-y-4">';
     for (const [key, value] of Object.entries(row)) {
         html += `
@@ -226,30 +728,34 @@ function formatDetailValue(value) {
         return '<span class="text-slate-500 italic">null</span>';
     }
     if (typeof value === 'object') {
-        // Pretty print JSON
         return `<pre class="bg-slate-900 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap text-slate-300">${JSON.stringify(value, null, 2)}</pre>`;
     }
     if (typeof value === 'string' && value.length > 200) {
-        // Long text - show in scrollable box
         return `<pre class="bg-slate-900 p-2 rounded text-sm max-h-64 overflow-y-auto whitespace-pre-wrap text-slate-300">${escapeHtml(value)}</pre>`;
     }
     if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-        // UUID - show with monospace
         return `<code class="bg-slate-900 px-1 rounded text-sm text-slate-300">${value}</code>`;
     }
     return escapeHtml(String(value));
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 function closeRowDetail() {
     const modal = document.getElementById('row-detail-modal');
     modal.classList.add('hidden');
     document.body.style.overflow = '';
+}
+
+// Utilities
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
+function escapeJs(text) {
+    if (text === null || text === undefined) return '';
+    return String(text).replace(/'/g, "\\'").replace(/"/g, '\\"');
 }
 
 // Close modal with Escape key
