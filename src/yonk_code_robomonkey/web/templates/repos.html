@@ -371,14 +371,19 @@ async function submitRepoForm(event) {
         const result = await response.json();
 
         if (!response.ok) {
-            throw new Error(result.detail || 'Operation failed');
+            // Handle both string and object error details
+            let errorMsg = result.detail;
+            if (typeof errorMsg === 'object') {
+                errorMsg = errorMsg.msg || errorMsg.message || JSON.stringify(errorMsg);
+            }
+            throw new Error(errorMsg || 'Operation failed');
         }
 
         alert(result.message || 'Success');
         closeRepoModal();
         await loadRepos();
     } catch (error) {
-        alert('Error: ' + error.message);
+        alert('Error: ' + (error.message || String(error)));
     }
 }
 
@@ -529,14 +534,18 @@ async function confirmDelete() {
         const result = await response.json();
 
         if (!response.ok) {
-            throw new Error(result.detail || 'Delete failed');
+            let errorMsg = result.detail;
+            if (typeof errorMsg === 'object') {
+                errorMsg = errorMsg.msg || errorMsg.message || JSON.stringify(errorMsg);
+            }
+            throw new Error(errorMsg || 'Delete failed');
         }
 
         alert(result.message || 'Deleted successfully');
         closeDeleteModal();
         await loadRepos();
     } catch (error) {
-        alert('Error: ' + error.message);
+        alert('Error: ' + (error.message || String(error)));
     }
 }
 
@@ -571,14 +580,30 @@ async function submitJob() {
         const result = await response.json();
 
         if (!response.ok) {
-            throw new Error(result.detail || 'Failed to queue job');
+            let errorMsg = result.detail;
+            if (typeof errorMsg === 'object') {
+                errorMsg = errorMsg.msg || errorMsg.message || JSON.stringify(errorMsg);
+            }
+            throw new Error(errorMsg || 'Failed to queue job');
         }
 
         alert(result.message || 'Job queued');
         closeJobModal();
     } catch (error) {
-        alert('Error: ' + error.message);
+        alert('Error: ' + (error.message || String(error)));
     }
+}
+
+// Helper to format error messages
+function formatError(error) {
+    if (typeof error === 'string') return error;
+    if (error.message) return error.message;
+    if (error.detail) {
+        if (typeof error.detail === 'string') return error.detail;
+        if (error.detail.msg) return error.detail.msg;
+        return JSON.stringify(error.detail);
+    }
+    return JSON.stringify(error);
 }
 </script>
 {% endblock %}
