@@ -188,9 +188,9 @@ async function executeQuickAsk() {
                 params: {
                     question: question,
                     repo: repo,
-                    include_docs: true,
-                    include_symbols: true,
-                    include_code: true
+                    top_docs: 5,
+                    top_code: 10,
+                    top_symbols: 10
                 }
             })
         });

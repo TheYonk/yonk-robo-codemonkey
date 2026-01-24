@@ -65,35 +65,83 @@
 
         <!-- Repo Overview -->
         <div id="repo-overview" style="display: none;">
-            <!-- Languages -->
-            <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
-                <h3 class="text-lg font-semibold text-slate-100 mb-4">Languages</h3>
-                <div id="languages-chart" class="flex flex-wrap gap-2">
-                    <!-- Populated by JS -->
+            <!-- Sub-navigation tabs -->
+            <div class="mb-4 border-b border-slate-700">
+                <nav class="flex space-x-4">
+                    <button onclick="switchRepoTab('overview')" id="repo-tab-overview" class="repo-tab px-3 py-2 text-sm font-medium border-b-2 border-blue-500 text-blue-400">Overview</button>
+                    <button onclick="switchRepoTab('symbols')" id="repo-tab-symbols" class="repo-tab px-3 py-2 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200">Browse Symbols</button>
+                    <button onclick="switchRepoTab('summaries')" id="repo-tab-summaries" class="repo-tab px-3 py-2 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200">File Summaries</button>
+                </nav>
+            </div>
+
+            <!-- Overview Tab Content -->
+            <div id="repo-tab-content-overview">
+                <!-- Languages -->
+                <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
+                    <h3 class="text-lg font-semibold text-slate-100 mb-4">Languages</h3>
+                    <div id="languages-chart" class="flex flex-wrap gap-2">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Symbol Types -->
+                <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
+                    <h3 class="text-lg font-semibold text-slate-100 mb-4">Symbol Types</h3>
+                    <div id="symbol-types-chart" class="grid grid-cols-4 gap-4">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Key Symbols -->
+                <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
+                    <h3 class="text-lg font-semibold text-slate-100 mb-4">Key Symbols</h3>
+                    <div id="symbol-list" class="space-y-3">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Tags -->
+                <div id="tags-section" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
+                    <h3 class="text-lg font-semibold text-slate-100 mb-4">Tags</h3>
+                    <div id="tags-list" class="flex flex-wrap gap-2">
+                        <!-- Populated by JS -->
+                    </div>
                 </div>
             </div>
 
-            <!-- Symbol Types -->
-            <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
-                <h3 class="text-lg font-semibold text-slate-100 mb-4">Symbol Types</h3>
-                <div id="symbol-types-chart" class="grid grid-cols-4 gap-4">
-                    <!-- Populated by JS -->
+            <!-- Symbols Browser Tab Content -->
+            <div id="repo-tab-content-symbols" style="display: none;">
+                <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold text-slate-100">Browse Symbols</h3>
+                        <div class="flex gap-2">
+                            <select id="symbol-filter-type" onchange="filterSymbols()" class="rounded-md bg-slate-700 border-slate-600 text-slate-100 text-sm">
+                                <option value="">All Types</option>
+                                <option value="function">Functions</option>
+                                <option value="class">Classes</option>
+                                <option value="method">Methods</option>
+                                <option value="interface">Interfaces</option>
+                            </select>
+                            <input type="text" id="symbol-search" placeholder="Search symbols..." oninput="filterSymbols()" class="rounded-md bg-slate-700 border-slate-600 text-slate-100 text-sm px-3 py-1 w-48">
+                        </div>
+                    </div>
+                    <div id="symbols-browser-list" class="space-y-2 max-h-96 overflow-y-auto">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div id="symbols-browser-pagination" class="mt-4 flex justify-between items-center text-sm text-slate-400">
+                        <!-- Pagination -->
+                    </div>
                 </div>
             </div>
 
-            <!-- Recent Symbols with Relationships -->
-            <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6 mb-6">
-                <h3 class="text-lg font-semibold text-slate-100 mb-4">Key Symbols</h3>
-                <div id="symbol-list" class="space-y-3">
-                    <!-- Populated by JS -->
-                </div>
-            </div>
-
-            <!-- Tags -->
-            <div id="tags-section" class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" style="display: none;">
-                <h3 class="text-lg font-semibold text-slate-100 mb-4">Tags</h3>
-                <div id="tags-list" class="flex flex-wrap gap-2">
-                    <!-- Populated by JS -->
+            <!-- File Summaries Tab Content -->
+            <div id="repo-tab-content-summaries" style="display: none;">
+                <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+                    <h3 class="text-lg font-semibold text-slate-100 mb-4">File Summaries</h3>
+                    <p class="text-sm text-slate-400 mb-4">AI-generated summaries of files in this repository</p>
+                    <div id="file-summaries-list" class="space-y-4">
+                        <!-- Populated by JS -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -263,6 +311,11 @@ function switchExplorerView(view) {
 
 // ========== Repository Explorer ==========
 
+let allSymbols = [];
+let filteredSymbols = [];
+let symbolsPage = 0;
+const symbolsPageSize = 50;
+
 async function loadRepoList() {
     try {
         const response = await fetch('/api/repos');
@@ -283,6 +336,28 @@ async function loadRepoList() {
         }
     } catch (error) {
         console.error('Error loading repos:', error);
+    }
+}
+
+// Repo sub-tab switching
+function switchRepoTab(tab) {
+    // Update tab buttons
+    document.querySelectorAll('.repo-tab').forEach(btn => {
+        btn.className = 'repo-tab px-3 py-2 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200';
+    });
+    document.getElementById(`repo-tab-${tab}`).className = 'repo-tab px-3 py-2 text-sm font-medium border-b-2 border-blue-500 text-blue-400';
+
+    // Show/hide content
+    document.getElementById('repo-tab-content-overview').style.display = tab === 'overview' ? 'block' : 'none';
+    document.getElementById('repo-tab-content-symbols').style.display = tab === 'symbols' ? 'block' : 'none';
+    document.getElementById('repo-tab-content-summaries').style.display = tab === 'summaries' ? 'block' : 'none';
+
+    // Load data if needed
+    if (tab === 'symbols' && allSymbols.length === 0) {
+        loadSymbolsBrowser();
+    }
+    if (tab === 'summaries') {
+        loadFileSummaries();
     }
 }
 
@@ -443,7 +518,7 @@ async function loadKeySymbols(repoName) {
         const symbolList = document.getElementById('symbol-list');
         if (data.result && data.result.results && data.result.results.length > 0) {
             symbolList.innerHTML = data.result.results.map(r => `
-                <div class="p-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition cursor-pointer" onclick="loadSymbolDetail('${r.symbol_id || ''}', '${escapeJs(r.name || r.title)}')">
+                <div class="p-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition cursor-pointer" onclick="loadSymbolDetail('${r.symbol_id || ''}', '${escapeJs(r.fqn || r.name || r.title)}')">
                     <div class="flex items-center gap-2">
                         ${getSymbolIcon(r.kind || 'function')}
                         <span class="font-medium text-slate-100">${escapeHtml(r.name || r.title || 'Unknown')}</span>
@@ -489,6 +564,152 @@ async function loadRepoTags(repoName) {
     }
 }
 
+// ========== Symbols Browser ==========
+
+async function loadSymbolsBrowser() {
+    if (!currentRepoName) return;
+
+    const list = document.getElementById('symbols-browser-list');
+    list.innerHTML = '<p class="text-slate-400">Loading symbols...</p>';
+
+    try {
+        // Use hybrid_search to get symbols
+        const response = await fetch('/api/mcp/tools/hybrid_search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                params: {
+                    query: '*',
+                    repo: currentRepoName,
+                    final_top_k: 200,
+                    entity_types: 'symbol'
+                }
+            })
+        });
+        const data = await response.json();
+
+        if (data.result && data.result.results) {
+            allSymbols = data.result.results;
+            filteredSymbols = [...allSymbols];
+            renderSymbolsBrowser();
+        } else {
+            list.innerHTML = '<p class="text-slate-500">No symbols found. Index your repository first.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading symbols:', error);
+        list.innerHTML = '<p class="text-red-400">Error loading symbols</p>';
+    }
+}
+
+function filterSymbols() {
+    const typeFilter = document.getElementById('symbol-filter-type').value;
+    const searchQuery = document.getElementById('symbol-search').value.toLowerCase();
+
+    filteredSymbols = allSymbols.filter(s => {
+        const matchesType = !typeFilter || s.kind === typeFilter;
+        const matchesSearch = !searchQuery ||
+            (s.name && s.name.toLowerCase().includes(searchQuery)) ||
+            (s.file_path && s.file_path.toLowerCase().includes(searchQuery));
+        return matchesType && matchesSearch;
+    });
+
+    symbolsPage = 0;
+    renderSymbolsBrowser();
+}
+
+function renderSymbolsBrowser() {
+    const list = document.getElementById('symbols-browser-list');
+    const pagination = document.getElementById('symbols-browser-pagination');
+
+    const start = symbolsPage * symbolsPageSize;
+    const pageSymbols = filteredSymbols.slice(start, start + symbolsPageSize);
+
+    if (pageSymbols.length === 0) {
+        list.innerHTML = '<p class="text-slate-500">No symbols match your filter</p>';
+        pagination.innerHTML = '';
+        return;
+    }
+
+    list.innerHTML = pageSymbols.map(s => `
+        <div class="p-3 bg-slate-700 rounded-lg hover:bg-slate-600 cursor-pointer flex justify-between items-start" onclick="loadSymbolDetail('${s.symbol_id || ''}', '${escapeJs(s.fqn || s.name)}')">
+            <div class="flex-1">
+                <div class="flex items-center gap-2">
+                    ${getSymbolIcon(s.kind || 'function')}
+                    <span class="font-medium text-slate-100">${escapeHtml(s.name || 'Unknown')}</span>
+                    <span class="text-xs px-2 py-0.5 bg-slate-600 rounded text-slate-300">${s.kind || 'symbol'}</span>
+                </div>
+                <div class="text-xs text-slate-400 font-mono mt-1">${escapeHtml(s.file_path || '')}</div>
+                ${s.signature ? `<code class="text-xs text-slate-500 block mt-1">${escapeHtml(s.signature)}</code>` : ''}
+            </div>
+            <div class="text-xs text-slate-500">
+                Line ${s.start_line || '?'}
+            </div>
+        </div>
+    `).join('');
+
+    // Pagination
+    const totalPages = Math.ceil(filteredSymbols.length / symbolsPageSize);
+    pagination.innerHTML = `
+        <span>Showing ${start + 1}-${Math.min(start + symbolsPageSize, filteredSymbols.length)} of ${filteredSymbols.length}</span>
+        <div class="flex gap-2">
+            <button onclick="symbolsPage = Math.max(0, symbolsPage - 1); renderSymbolsBrowser()" ${symbolsPage === 0 ? 'disabled' : ''} class="px-3 py-1 bg-slate-700 rounded text-sm ${symbolsPage === 0 ? 'opacity-50' : 'hover:bg-slate-600'}">Prev</button>
+            <button onclick="symbolsPage = Math.min(${totalPages - 1}, symbolsPage + 1); renderSymbolsBrowser()" ${symbolsPage >= totalPages - 1 ? 'disabled' : ''} class="px-3 py-1 bg-slate-700 rounded text-sm ${symbolsPage >= totalPages - 1 ? 'opacity-50' : 'hover:bg-slate-600'}">Next</button>
+        </div>
+    `;
+}
+
+// ========== File Summaries ==========
+
+async function loadFileSummaries() {
+    if (!currentRepoName) return;
+
+    const list = document.getElementById('file-summaries-list');
+    list.innerHTML = '<p class="text-slate-400">Loading file summaries...</p>';
+
+    try {
+        // Get repo stats to find schema
+        const repoResp = await fetch(`/api/repos/${currentRepoName}/stats`);
+        const repoData = await repoResp.json();
+        const schema = repoData.schema;
+
+        if (!schema) {
+            list.innerHTML = '<p class="text-slate-500">Repository schema not found</p>';
+            return;
+        }
+
+        // Query file_summary table directly
+        const response = await fetch(`/api/tables/${schema}/file_summary/data?limit=50`);
+        const data = await response.json();
+
+        if (data.rows && data.rows.length > 0) {
+            list.innerHTML = data.rows.map(row => `
+                <div class="p-4 bg-slate-700 rounded-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="font-medium text-slate-100">${escapeHtml(row.file_path || 'Unknown file')}</h4>
+                        <span class="text-xs text-slate-500">${row.created_at ? new Date(row.created_at).toLocaleDateString() : ''}</span>
+                    </div>
+                    <p class="text-sm text-slate-300">${escapeHtml(row.summary || 'No summary available')}</p>
+                    ${row.purpose ? `<p class="text-xs text-slate-400 mt-2"><strong>Purpose:</strong> ${escapeHtml(row.purpose)}</p>` : ''}
+                    ${row.key_exports ? `<p class="text-xs text-slate-400 mt-1"><strong>Key exports:</strong> ${escapeHtml(typeof row.key_exports === 'string' ? row.key_exports : JSON.stringify(row.key_exports))}</p>` : ''}
+                </div>
+            `).join('');
+        } else {
+            list.innerHTML = `
+                <div class="text-center py-8">
+                    <p class="text-slate-500 mb-4">No file summaries generated yet</p>
+                    <p class="text-sm text-slate-400">Run a SUMMARIZE_FILES job to generate AI summaries:</p>
+                    <code class="text-xs bg-slate-800 px-2 py-1 rounded mt-2 inline-block text-slate-300">
+                        POST /api/registry/${currentRepoName}/jobs {"job_type": "SUMMARIZE_FILES"}
+                    </code>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading file summaries:', error);
+        list.innerHTML = '<p class="text-red-400">Error loading file summaries</p>';
+    }
+}
+
 async function showFileDetail(encodedPath) {
     const filePath = decodeURIComponent(encodedPath);
 
@@ -529,59 +750,87 @@ function hideFileDetail() {
     document.getElementById('repo-overview').style.display = 'block';
 }
 
-async function loadSymbolDetail(symbolId, symbolName) {
+async function loadSymbolDetail(symbolId, fqn) {
     if (!currentRepoName) return;
 
-    try {
-        // Get callers
-        const callersResp = await fetch('/api/mcp/tools/callers', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ params: { repo: currentRepoName, symbol_name: symbolName, max_depth: 1 } })
-        });
-        const callersData = await callersResp.json();
+    // Build params - use symbol_id if available, otherwise fqn
+    const params = { repo: currentRepoName, max_depth: 2 };
+    if (symbolId) {
+        params.symbol_id = symbolId;
+    } else if (fqn) {
+        params.fqn = fqn;
+    }
 
-        // Get callees
-        const calleesResp = await fetch('/api/mcp/tools/callees', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ params: { repo: currentRepoName, symbol_name: symbolName, max_depth: 1 } })
-        });
+    try {
+        // Get callers and callees in parallel
+        const [callersResp, calleesResp] = await Promise.all([
+            fetch('/api/mcp/tools/callers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ params })
+            }),
+            fetch('/api/mcp/tools/callees', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ params })
+            })
+        ]);
+
+        const callersData = await callersResp.json();
         const calleesData = await calleesResp.json();
 
         document.getElementById('repo-overview').style.display = 'none';
         document.getElementById('symbol-detail').style.display = 'block';
-        document.getElementById('symbol-detail-name').textContent = symbolName;
+        document.getElementById('symbol-detail-name').textContent = fqn || symbolId || 'Symbol';
         document.getElementById('symbol-detail-meta').textContent = `Repository: ${currentRepoName}`;
 
-        // Render callers
+        // Render callers (who calls this symbol)
         const callersList = document.getElementById('symbol-callers-list');
-        if (callersData.result && callersData.result.callers && callersData.result.callers.length > 0) {
-            callersList.innerHTML = callersData.result.callers.map(c => `
-                <div class="text-sm text-slate-300 px-2 py-1 bg-slate-700 rounded">
-                    <span class="text-blue-400">${escapeHtml(c.name || c.caller_name || 'Unknown')}</span>
-                    <span class="text-slate-500 text-xs ml-2">${escapeHtml(c.file_path || '')}</span>
+        const callers = callersData.result?.callers || [];
+        if (callers.length > 0) {
+            callersList.innerHTML = callers.map(c => `
+                <div class="text-sm text-slate-300 px-3 py-2 bg-slate-700 rounded hover:bg-slate-600 cursor-pointer" onclick="loadSymbolDetail('${c.symbol_id || ''}', '${escapeJs(c.fqn || c.name)}')">
+                    <div class="flex items-center gap-2">
+                        ${getSymbolIcon(c.kind || 'function')}
+                        <span class="text-blue-400 font-medium">${escapeHtml(c.name || c.fqn || 'Unknown')}</span>
+                        <span class="text-xs text-slate-500">${c.kind || ''}</span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1">${escapeHtml(c.file_path || '')}${c.line ? `:${c.line}` : ''}</div>
                 </div>
             `).join('');
         } else {
-            callersList.innerHTML = '<p class="text-sm text-slate-500">No callers found</p>';
+            callersList.innerHTML = '<p class="text-sm text-slate-500">No callers found - this symbol is not called by others</p>';
         }
 
-        // Render callees
+        // Render callees (what this symbol calls)
         const calleesList = document.getElementById('symbol-callees-list');
-        if (calleesData.result && calleesData.result.callees && calleesData.result.callees.length > 0) {
-            calleesList.innerHTML = calleesData.result.callees.map(c => `
-                <div class="text-sm text-slate-300 px-2 py-1 bg-slate-700 rounded">
-                    <span class="text-green-400">${escapeHtml(c.name || c.callee_name || 'Unknown')}</span>
-                    <span class="text-slate-500 text-xs ml-2">${escapeHtml(c.file_path || '')}</span>
+        const callees = calleesData.result?.callees || [];
+        if (callees.length > 0) {
+            calleesList.innerHTML = callees.map(c => `
+                <div class="text-sm text-slate-300 px-3 py-2 bg-slate-700 rounded hover:bg-slate-600 cursor-pointer" onclick="loadSymbolDetail('${c.symbol_id || ''}', '${escapeJs(c.fqn || c.name)}')">
+                    <div class="flex items-center gap-2">
+                        ${getSymbolIcon(c.kind || 'function')}
+                        <span class="text-green-400 font-medium">${escapeHtml(c.name || c.fqn || 'Unknown')}</span>
+                        <span class="text-xs text-slate-500">${c.kind || ''}</span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1">${escapeHtml(c.file_path || '')}${c.line ? `:${c.line}` : ''}</div>
                 </div>
             `).join('');
         } else {
-            calleesList.innerHTML = '<p class="text-sm text-slate-500">No callees found</p>';
+            calleesList.innerHTML = '<p class="text-sm text-slate-500">No callees found - this symbol doesn\'t call other functions</p>';
+        }
+
+        // Show error messages if any
+        if (callersData.result?.error) {
+            callersList.innerHTML = `<p class="text-sm text-red-400">${escapeHtml(callersData.result.error)}</p>`;
+        }
+        if (calleesData.result?.error) {
+            calleesList.innerHTML = `<p class="text-sm text-red-400">${escapeHtml(calleesData.result.error)}</p>`;
         }
 
     } catch (error) {
         console.error('Error loading symbol detail:', error);
+        document.getElementById('symbol-callers-list').innerHTML = `<p class="text-sm text-red-400">Error: ${error.message}</p>`;
     }
 }
 
