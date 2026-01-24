@@ -124,7 +124,7 @@ async def list_registry() -> dict[str, Any]:
 
 @router.post("/registry")
 async def create_repo(request: CreateRepoRequest) -> dict[str, Any]:
-    """Register a new repository."""
+    """Register a new repository and optionally start auto-indexing."""
     settings = Settings()
     conn = await asyncpg.connect(dsn=settings.database_url)
 
@@ -140,6 +140,20 @@ async def create_repo(request: CreateRepoRequest) -> dict[str, Any]:
         if existing:
             raise HTTPException(status_code=409, detail=f"Repository '{request.name}' already exists")
 
+        # Create and initialize schema with DDL (same as MCP tool)
+        from pathlib import Path
+        ddl_path = Path(__file__).resolve().parents[3] / "scripts" / "init_db.sql"
+
+        if ddl_path.exists():
+            # Create schema
+            await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+            # Initialize schema with tables
+            ddl = ddl_path.read_text()
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+            await conn.execute(ddl)
+            await conn.execute("RESET search_path")
+
         # Insert into registry
         await conn.execute("""
             INSERT INTO robomonkey_control.repo_registry
@@ -149,11 +163,23 @@ async def create_repo(request: CreateRepoRequest) -> dict[str, Any]:
             request.auto_index, request.auto_embed, request.auto_watch, request.auto_summaries,
             json.dumps(request.config))
 
+        # Enqueue FULL_INDEX job if auto_index is enabled
+        job_id = None
+        if request.auto_index:
+            job_id = await conn.fetchval("""
+                INSERT INTO robomonkey_control.job_queue
+                    (repo_name, schema_name, job_type, payload, priority, dedup_key)
+                VALUES ($1, $2, 'FULL_INDEX', '{}'::jsonb, 7, $3)
+                RETURNING id
+            """, request.name, schema_name, f"{request.name}:full_index")
+
         return {
             "status": "created",
             "name": request.name,
             "schema_name": schema_name,
+            "job_id": str(job_id) if job_id else None,
             "message": f"Repository '{request.name}' registered successfully"
+                       + (f" and indexing started" if job_id else "")
         }
 
     finally:
