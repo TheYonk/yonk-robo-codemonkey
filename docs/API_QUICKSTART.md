@@ -74,14 +74,45 @@ curl http://localhost:9832/api/repos/my-repo/stats
 Look for `stats.embeddings` > 0 and `stats.embedding_percent` close to 100%.
 
 ### Step 7: Search (via MCP or API)
+
+**Semantic Search** (finds conceptually related code):
 ```bash
-curl -X POST http://localhost:9832/api/mcp/hybrid_search \
+curl -X POST 'http://localhost:9832/api/mcp/tools/hybrid_search' \
   -H "Content-Type: application/json" \
-  -d '{
-    "query": "database connection",
-    "repo": "my-repo",
-    "top_k": 10
-  }'
+  -d '{"params": {"query": "database connection", "repo": "my-repo", "final_top_k": 10}}'
+```
+
+**Pattern Search** (finds exact regex matches):
+```bash
+curl -X POST 'http://localhost:9832/api/mcp/tools/pattern_scan' \
+  -H "Content-Type: application/json" \
+  -d '{"params": {"pattern": "SELECT\\s+\\*\\s+FROM", "repo": "my-repo"}}'
+```
+
+---
+
+## Search Types: When to Use What
+
+| Search Type | Tool | Use Case |
+|-------------|------|----------|
+| **Semantic** | `hybrid_search` | "Find code related to authentication" |
+| **Pattern** | `pattern_scan` | "Find all `SELECT *` statements" |
+| **File Browse** | `list_files` | "What Python files exist?" |
+| **File Read** | `read_file` | "Show me src/main.py" |
+
+**Pattern Search Examples:**
+```bash
+# Find SELECT * anti-pattern
+pattern_scan(pattern="SELECT\\s+\\*\\s+FROM", repo="myrepo", languages=["sql", "python"])
+
+# Find eval() calls (security)
+pattern_scan(pattern="eval\\s*\\(", repo="myrepo", file_glob="*.py")
+
+# Find hardcoded passwords (case-insensitive)
+pattern_scan(pattern="password\\s*=\\s*[\"'][^\"']+[\"']", repo="myrepo", case_sensitive=false)
+
+# Find TODO comments
+pattern_scan(pattern="TODO|FIXME|HACK", repo="myrepo", case_sensitive=false)
 ```
 
 ---

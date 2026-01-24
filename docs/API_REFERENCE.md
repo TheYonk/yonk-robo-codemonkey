@@ -1466,6 +1466,190 @@ Execute an MCP tool with parameters.
 }
 ```
 
+### Pattern Scan Tool
+
+Scan repository files with regex pattern matching. Unlike `hybrid_search` which uses semantic/FTS search, this tool performs direct regex matching against file contents.
+
+**Use Cases:**
+- Finding specific code patterns (e.g., `SELECT * FROM`, `eval()`)
+- Detecting anti-patterns or security issues
+- Locating exact syntax constructs
+
+```
+POST /api/mcp/tools/pattern_scan
+```
+
+**Request Body:**
+```json
+{
+  "params": {
+    "pattern": "SELECT\\s+\\*\\s+FROM",
+    "repo": "my-project",
+    "languages": ["sql", "python"],
+    "case_sensitive": false,
+    "context_lines": 2,
+    "max_total_matches": 100
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `pattern` | string | Yes | - | Python regex pattern |
+| `repo` | string | No | DEFAULT_REPO | Repository name |
+| `file_glob` | string | No | null | Filter files by glob (e.g., `*.py`) |
+| `languages` | array | No | null | Filter by language (e.g., `["python", "sql"]`) |
+| `case_sensitive` | boolean | No | true | Case-sensitive matching |
+| `context_lines` | integer | No | 2 | Lines of context before/after |
+| `max_matches_per_file` | integer | No | 50 | Max matches per file |
+| `max_files` | integer | No | 500 | Max files to scan |
+| `max_total_matches` | integer | No | 200 | Max total matches |
+
+**Response:**
+```json
+{
+  "tool": "pattern_scan",
+  "params": {...},
+  "result": {
+    "pattern": "SELECT\\s+\\*\\s+FROM",
+    "case_sensitive": false,
+    "repo": "my-project",
+    "statistics": {
+      "files_scanned": 150,
+      "files_with_matches": 12,
+      "total_matches": 45
+    },
+    "matches": [
+      {
+        "file_path": "src/queries.py",
+        "language": "python",
+        "match_count": 3,
+        "matches": [
+          {
+            "line": 42,
+            "column": 12,
+            "match": "SELECT * FROM",
+            "line_content": "query = \"SELECT * FROM users\"",
+            "context": "...",
+            "context_start_line": 40
+          }
+        ]
+      }
+    ],
+    "why": "Found 45 matches in 12 files (scanned 150 files)"
+  },
+  "success": true
+}
+```
+
+**Pattern Examples:**
+```bash
+# Find SELECT * anti-pattern
+{"params": {"pattern": "SELECT\\s+\\*\\s+FROM", "repo": "myrepo"}}
+
+# Find eval() calls (security risk)
+{"params": {"pattern": "eval\\s*\\(", "repo": "myrepo", "file_glob": "*.py"}}
+
+# Find hardcoded passwords
+{"params": {"pattern": "password\\s*=\\s*[\"'][^\"']+[\"']", "repo": "myrepo", "case_sensitive": false}}
+
+# Find TODO/FIXME comments
+{"params": {"pattern": "TODO|FIXME|HACK", "repo": "myrepo", "case_sensitive": false}}
+
+# Find SQL injection risks (string concatenation in queries)
+{"params": {"pattern": "execute\\s*\\([^)]*\\+|query\\s*\\([^)]*\\+", "repo": "myrepo"}}
+```
+
+### List Files Tool
+
+List files in a repository with optional filtering.
+
+```
+POST /api/mcp/tools/list_files
+```
+
+**Request Body:**
+```json
+{
+  "params": {
+    "repo": "my-project",
+    "file_glob": "src/**/*.py",
+    "languages": ["python"],
+    "limit": 50
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `repo` | string | No | DEFAULT_REPO | Repository name |
+| `file_glob` | string | No | null | Filter files by glob pattern |
+| `languages` | array | No | null | Filter by language |
+| `limit` | integer | No | 100 | Maximum files to return |
+
+**Response:**
+```json
+{
+  "result": {
+    "repo": "my-project",
+    "root_path": "/path/to/repo",
+    "statistics": {
+      "total_files": 250,
+      "returned": 50,
+      "languages": {"python": 45, "sql": 5}
+    },
+    "files": [
+      {"path": "src/main.py", "language": "python", "sha": "abc123"},
+      {"path": "src/models.py", "language": "python", "sha": "def456"}
+    ],
+    "why": "Found 250 files matching filters, returning 50"
+  }
+}
+```
+
+### Read File Tool
+
+Read file content from a repository.
+
+```
+POST /api/mcp/tools/read_file
+```
+
+**Request Body:**
+```json
+{
+  "params": {
+    "path": "src/main.py",
+    "repo": "my-project",
+    "start_line": 10,
+    "end_line": 50
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | Yes | - | File path relative to repo root |
+| `repo` | string | No | DEFAULT_REPO | Repository name |
+| `start_line` | integer | No | null | Starting line (1-indexed) |
+| `end_line` | integer | No | null | Ending line (inclusive) |
+
+**Response:**
+```json
+{
+  "result": {
+    "path": "src/main.py",
+    "repo": "my-project",
+    "content": "def main():\n    ...",
+    "line_count": 40,
+    "total_lines": 150,
+    "range": {"start_line": 10, "end_line": 50},
+    "metadata": {"language": "python", "indexed": true},
+    "why": "Read 40 lines from src/main.py"
+  }
+}
+```
+
 ---
 
 ## Health Check

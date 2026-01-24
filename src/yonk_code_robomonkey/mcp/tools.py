@@ -4465,3 +4465,424 @@ async def sql_schema_search(
 
     finally:
         await conn.close()
+
+
+@tool("pattern_scan")
+async def pattern_scan(
+    pattern: str,
+    repo: str | None = None,
+    file_glob: str | None = None,
+    languages: list[str] | None = None,
+    case_sensitive: bool = True,
+    context_lines: int = 2,
+    max_matches_per_file: int = 50,
+    max_files: int = 500,
+    max_total_matches: int = 200
+) -> dict[str, Any]:
+    """Scan repository files with regex pattern matching.
+
+    Unlike hybrid_search which uses semantic/FTS search, this tool performs
+    direct regex pattern matching against file contents. Use this for:
+    - Finding specific code patterns (e.g., SELECT * FROM, eval(), etc.)
+    - Detecting anti-patterns or security issues
+    - Locating exact syntax constructs
+    - Pattern-based code analysis
+
+    Args:
+        pattern: Regular expression pattern to search for (Python re syntax)
+        repo: Repository name or UUID (uses DEFAULT_REPO from .env if not provided)
+        file_glob: Optional glob pattern to filter files (e.g., "*.py", "**/*.sql")
+        languages: Optional list of languages to filter (e.g., ["python", "sql"])
+        case_sensitive: Whether pattern matching is case-sensitive (default True)
+        context_lines: Number of lines of context before/after match (default 2)
+        max_matches_per_file: Maximum matches to return per file (default 50)
+        max_files: Maximum files to scan (default 500)
+        max_total_matches: Maximum total matches to return (default 200)
+
+    Returns:
+        Dictionary with matches, statistics, and file paths
+
+    Example:
+        # Find SELECT * statements
+        pattern_scan(pattern=r"SELECT\\s+\\*\\s+FROM", repo="myrepo", languages=["sql", "python"])
+
+        # Find eval() calls in Python files
+        pattern_scan(pattern=r"eval\\s*\\(", repo="myrepo", file_glob="*.py")
+
+        # Find hardcoded passwords (case-insensitive)
+        pattern_scan(pattern=r"password\\s*=\\s*[\"'][^\"']+[\"']", repo="myrepo", case_sensitive=False)
+    """
+    import re
+    import fnmatch
+    from pathlib import Path
+
+    settings = Settings()
+    repo_name = get_repo_or_default(repo)
+    if not repo_name:
+        return {"error": "No repository specified. Provide 'repo' parameter."}
+
+    # Compile regex pattern
+    try:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        regex = re.compile(pattern, flags)
+    except re.error as e:
+        return {
+            "error": f"Invalid regex pattern: {str(e)}",
+            "pattern": pattern,
+            "hint": "Ensure the pattern is valid Python regex syntax. Remember to escape special characters."
+        }
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        # Resolve repo to schema
+        result = await resolve_repo_with_suggestions(conn, repo_name)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema = result["schema"]
+
+        # Get repo root path
+        async with schema_context(conn, schema):
+            repo_info = await conn.fetchrow(
+                "SELECT root_path FROM repo WHERE id = $1",
+                repo_id
+            )
+            if not repo_info:
+                return {"error": f"Repository info not found for {repo_name}"}
+            root_path = Path(repo_info["root_path"])
+
+            # Build file query with optional filters
+            query_parts = ["SELECT id, path, language FROM file WHERE repo_id = $1"]
+            params = [repo_id]
+            param_idx = 2
+
+            if languages:
+                placeholders = ", ".join(f"${i}" for i in range(param_idx, param_idx + len(languages)))
+                query_parts.append(f"AND language IN ({placeholders})")
+                params.extend(languages)
+                param_idx += len(languages)
+
+            query_parts.append(f"ORDER BY path LIMIT ${param_idx}")
+            params.append(max_files)
+
+            query = " ".join(query_parts)
+            files = await conn.fetch(query, *params)
+
+        # Process files
+        all_matches = []
+        files_scanned = 0
+        files_with_matches = 0
+        files_skipped = 0
+        errors = []
+
+        for file_row in files:
+            file_path = file_row["path"]
+            language = file_row["language"]
+
+            # Apply glob filter if specified
+            if file_glob:
+                if not fnmatch.fnmatch(file_path, file_glob):
+                    files_skipped += 1
+                    continue
+
+            # Read file content
+            full_path = root_path / file_path
+            if not full_path.exists():
+                errors.append({"file": file_path, "error": "File not found on disk"})
+                continue
+
+            try:
+                content = full_path.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                errors.append({"file": file_path, "error": str(e)})
+                continue
+
+            files_scanned += 1
+            lines = content.splitlines()
+
+            # Find matches
+            file_matches = []
+            for line_num, line in enumerate(lines, 1):
+                for match in regex.finditer(line):
+                    if len(file_matches) >= max_matches_per_file:
+                        break
+
+                    # Get context lines
+                    start_ctx = max(0, line_num - 1 - context_lines)
+                    end_ctx = min(len(lines), line_num + context_lines)
+                    context = lines[start_ctx:end_ctx]
+
+                    file_matches.append({
+                        "line": line_num,
+                        "column": match.start() + 1,
+                        "match": match.group(),
+                        "line_content": line.strip(),
+                        "context": "\n".join(context),
+                        "context_start_line": start_ctx + 1
+                    })
+
+                if len(file_matches) >= max_matches_per_file:
+                    break
+
+            if file_matches:
+                files_with_matches += 1
+                all_matches.append({
+                    "file_path": file_path,
+                    "language": language,
+                    "match_count": len(file_matches),
+                    "matches": file_matches
+                })
+
+                # Check total matches limit
+                total_so_far = sum(len(f["matches"]) for f in all_matches)
+                if total_so_far >= max_total_matches:
+                    break
+
+        # Calculate totals
+        total_matches = sum(len(f["matches"]) for f in all_matches)
+
+        return {
+            "pattern": pattern,
+            "case_sensitive": case_sensitive,
+            "repo": repo_name,
+            "filters": {
+                "file_glob": file_glob,
+                "languages": languages
+            },
+            "statistics": {
+                "files_in_repo": len(files),
+                "files_scanned": files_scanned,
+                "files_skipped": files_skipped,
+                "files_with_matches": files_with_matches,
+                "total_matches": total_matches,
+                "truncated": total_matches >= max_total_matches or files_scanned >= max_files
+            },
+            "matches": all_matches,
+            "errors": errors if errors else None,
+            "why": f"Found {total_matches} matches in {files_with_matches} files (scanned {files_scanned} files)"
+        }
+
+    finally:
+        await conn.close()
+
+
+@tool("list_files")
+async def list_files(
+    repo: str | None = None,
+    file_glob: str | None = None,
+    languages: list[str] | None = None,
+    limit: int = 100
+) -> dict[str, Any]:
+    """List files in a repository with optional filtering.
+
+    Use this to discover what files exist before running pattern_scan or
+    to get file paths for direct access.
+
+    Args:
+        repo: Repository name or UUID (uses DEFAULT_REPO from .env if not provided)
+        file_glob: Optional glob pattern to filter files (e.g., "*.py", "src/**/*.java")
+        languages: Optional list of languages to filter (e.g., ["python", "javascript"])
+        limit: Maximum files to return (default 100)
+
+    Returns:
+        Dictionary with file list and statistics
+
+    Example:
+        # List all Python files
+        list_files(repo="myrepo", languages=["python"])
+
+        # List SQL files in a specific directory
+        list_files(repo="myrepo", file_glob="migrations/*.sql")
+    """
+    import fnmatch
+
+    settings = Settings()
+    repo_name = get_repo_or_default(repo)
+    if not repo_name:
+        return {"error": "No repository specified. Provide 'repo' parameter."}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo_name)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema = result["schema"]
+
+        async with schema_context(conn, schema):
+            # Get repo info
+            repo_info = await conn.fetchrow(
+                "SELECT root_path FROM repo WHERE id = $1",
+                repo_id
+            )
+            root_path = repo_info["root_path"] if repo_info else None
+
+            # Build query
+            query_parts = ["SELECT path, language, sha, mtime FROM file WHERE repo_id = $1"]
+            params = [repo_id]
+            param_idx = 2
+
+            if languages:
+                placeholders = ", ".join(f"${i}" for i in range(param_idx, param_idx + len(languages)))
+                query_parts.append(f"AND language IN ({placeholders})")
+                params.extend(languages)
+                param_idx += len(languages)
+
+            query_parts.append("ORDER BY path")
+            query = " ".join(query_parts)
+
+            all_files = await conn.fetch(query, *params)
+
+            # Apply glob filter in Python (more flexible than SQL LIKE)
+            if file_glob:
+                all_files = [f for f in all_files if fnmatch.fnmatch(f["path"], file_glob)]
+
+            # Get language breakdown
+            language_counts = {}
+            for f in all_files:
+                lang = f["language"]
+                language_counts[lang] = language_counts.get(lang, 0) + 1
+
+            # Apply limit
+            files = all_files[:limit]
+
+            return {
+                "repo": repo_name,
+                "root_path": root_path,
+                "filters": {
+                    "file_glob": file_glob,
+                    "languages": languages
+                },
+                "statistics": {
+                    "total_files": len(all_files),
+                    "returned": len(files),
+                    "truncated": len(all_files) > limit,
+                    "languages": language_counts
+                },
+                "files": [
+                    {
+                        "path": f["path"],
+                        "language": f["language"],
+                        "sha": f["sha"][:8] if f["sha"] else None,
+                        "mtime": f["mtime"].isoformat() if f["mtime"] else None
+                    }
+                    for f in files
+                ],
+                "why": f"Found {len(all_files)} files matching filters, returning {len(files)}"
+            }
+
+    finally:
+        await conn.close()
+
+
+@tool("read_file")
+async def read_file(
+    path: str,
+    repo: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None
+) -> dict[str, Any]:
+    """Read file content from a repository.
+
+    Use this to read file contents directly for analysis. Useful after
+    pattern_scan to get full context or for direct file inspection.
+
+    Args:
+        path: File path relative to repository root
+        repo: Repository name or UUID (uses DEFAULT_REPO from .env if not provided)
+        start_line: Optional starting line number (1-indexed)
+        end_line: Optional ending line number (inclusive)
+
+    Returns:
+        Dictionary with file content and metadata
+
+    Example:
+        # Read entire file
+        read_file(path="src/main.py", repo="myrepo")
+
+        # Read lines 10-50
+        read_file(path="src/main.py", repo="myrepo", start_line=10, end_line=50)
+    """
+    from pathlib import Path
+
+    settings = Settings()
+    repo_name = get_repo_or_default(repo)
+    if not repo_name:
+        return {"error": "No repository specified. Provide 'repo' parameter."}
+
+    conn = await asyncpg.connect(dsn=settings.database_url)
+    try:
+        result = await resolve_repo_with_suggestions(conn, repo_name)
+        if "error" in result:
+            return result
+        repo_id = result["repo_id"]
+        schema = result["schema"]
+
+        async with schema_context(conn, schema):
+            # Get repo root and file info
+            repo_info = await conn.fetchrow(
+                "SELECT root_path FROM repo WHERE id = $1",
+                repo_id
+            )
+            if not repo_info:
+                return {"error": f"Repository info not found for {repo_name}"}
+
+            root_path = Path(repo_info["root_path"])
+            full_path = root_path / path
+
+            # Security check: ensure path is within repo
+            try:
+                full_path.resolve().relative_to(root_path.resolve())
+            except ValueError:
+                return {"error": "Path traversal not allowed", "path": path}
+
+            if not full_path.exists():
+                return {"error": "File not found", "path": path}
+
+            if not full_path.is_file():
+                return {"error": "Path is not a file", "path": path}
+
+            # Get file metadata from DB
+            file_info = await conn.fetchrow(
+                "SELECT id, language, sha, mtime FROM file WHERE repo_id = $1 AND path = $2",
+                repo_id, path
+            )
+
+            # Read content
+            try:
+                content = full_path.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                return {"error": f"Failed to read file: {str(e)}", "path": path}
+
+            lines = content.splitlines()
+            total_lines = len(lines)
+
+            # Apply line range
+            if start_line or end_line:
+                start_idx = (start_line - 1) if start_line else 0
+                end_idx = end_line if end_line else total_lines
+                start_idx = max(0, min(start_idx, total_lines))
+                end_idx = max(0, min(end_idx, total_lines))
+                lines = lines[start_idx:end_idx]
+                content = "\n".join(lines)
+
+            return {
+                "path": path,
+                "repo": repo_name,
+                "content": content,
+                "line_count": len(lines),
+                "total_lines": total_lines,
+                "range": {
+                    "start_line": start_line or 1,
+                    "end_line": end_line or total_lines
+                } if start_line or end_line else None,
+                "metadata": {
+                    "language": file_info["language"] if file_info else None,
+                    "sha": file_info["sha"][:8] if file_info and file_info["sha"] else None,
+                    "indexed": file_info is not None
+                },
+                "why": f"Read {len(lines)} lines from {path}"
+            }
+
+    finally:
+        await conn.close()
