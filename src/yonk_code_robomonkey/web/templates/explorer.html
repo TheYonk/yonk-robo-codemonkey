@@ -281,6 +281,7 @@ let currentTable = null;
 let currentPage = 0;
 const pageSize = 50;
 let currentRows = [];
+let filePathMap = {}; // Cache: file_id -> path
 
 document.addEventListener('DOMContentLoaded', async () => {
     await Promise.all([
@@ -361,6 +362,23 @@ function switchRepoTab(tab) {
     }
 }
 
+// Load file path map for joining with other tables
+async function loadFilePathMap(schema) {
+    if (!schema) return;
+    try {
+        const response = await fetch(`/api/tables/${schema}/file/data?limit=1000`);
+        const data = await response.json();
+        filePathMap = {};
+        if (data.rows) {
+            data.rows.forEach(file => {
+                filePathMap[file.id] = file.path;
+            });
+        }
+    } catch (error) {
+        console.error('Error loading file paths:', error);
+    }
+}
+
 async function loadRepoOverview(repoName) {
     if (!repoName) {
         document.getElementById('repo-empty-state').style.display = 'block';
@@ -425,12 +443,17 @@ async function loadRepoOverview(repoName) {
             symbolTypesChart.innerHTML = '<p class="text-slate-500 col-span-4">No symbol data available</p>';
         }
 
-        // Load files and symbols
+        // Load file path map first, then load files and symbols
+        await loadFilePathMap(data.schema);
         await Promise.all([
             loadFileTree(repoName),
             loadKeySymbols(repoName),
             loadRepoTags(repoName)
         ]);
+
+        // Reset symbols browser when repo changes
+        allSymbols = [];
+        filteredSymbols = [];
 
     } catch (error) {
         console.error('Error loading repo overview:', error);
@@ -573,23 +596,27 @@ async function loadSymbolsBrowser() {
     list.innerHTML = '<p class="text-slate-400">Loading symbols...</p>';
 
     try {
-        // Use hybrid_search to get symbols
-        const response = await fetch('/api/mcp/tools/hybrid_search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                params: {
-                    query: '*',
-                    repo: currentRepoName,
-                    final_top_k: 200,
-                    entity_types: 'symbol'
-                }
-            })
-        });
+        // Get repo schema first
+        const repoResp = await fetch(`/api/repos/${currentRepoName}/stats`);
+        const repoData = await repoResp.json();
+        const schema = repoData.schema;
+
+        if (!schema) {
+            list.innerHTML = '<p class="text-slate-500">Repository schema not found</p>';
+            return;
+        }
+
+        // Query symbol table directly
+        const response = await fetch(`/api/tables/${schema}/symbol/data?limit=500`);
         const data = await response.json();
 
-        if (data.result && data.result.results) {
-            allSymbols = data.result.results;
+        if (data.rows && data.rows.length > 0) {
+            // Add file_path from our cached map
+            allSymbols = data.rows.map(s => ({
+                ...s,
+                symbol_id: s.id,
+                file_path: filePathMap[s.file_id] || 'Unknown'
+            }));
             filteredSymbols = [...allSymbols];
             renderSymbolsBrowser();
         } else {
@@ -677,22 +704,35 @@ async function loadFileSummaries() {
             return;
         }
 
+        // Ensure file path map is loaded
+        if (Object.keys(filePathMap).length === 0) {
+            await loadFilePathMap(schema);
+        }
+
         // Query file_summary table directly
         const response = await fetch(`/api/tables/${schema}/file_summary/data?limit=50`);
         const data = await response.json();
 
         if (data.rows && data.rows.length > 0) {
-            list.innerHTML = data.rows.map(row => `
-                <div class="p-4 bg-slate-700 rounded-lg">
-                    <div class="flex justify-between items-start mb-2">
-                        <h4 class="font-medium text-slate-100">${escapeHtml(row.file_path || 'Unknown file')}</h4>
-                        <span class="text-xs text-slate-500">${row.created_at ? new Date(row.created_at).toLocaleDateString() : ''}</span>
+            list.innerHTML = data.rows.map(row => {
+                // Look up file path from our map using file_id
+                const filePath = filePathMap[row.file_id] || 'Unknown file';
+                const fileName = filePath.split('/').pop();
+                const updatedDate = row.updated_at ? new Date(row.updated_at).toLocaleDateString() : '';
+
+                return `
+                    <div class="p-4 bg-slate-700 rounded-lg">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h4 class="font-medium text-slate-100">${escapeHtml(fileName)}</h4>
+                                <p class="text-xs text-slate-400 font-mono">${escapeHtml(filePath)}</p>
+                            </div>
+                            <span class="text-xs text-slate-500">${updatedDate}</span>
+                        </div>
+                        <p class="text-sm text-slate-300 mt-2">${escapeHtml(row.summary || 'No summary available')}</p>
                     </div>
-                    <p class="text-sm text-slate-300">${escapeHtml(row.summary || 'No summary available')}</p>
-                    ${row.purpose ? `<p class="text-xs text-slate-400 mt-2"><strong>Purpose:</strong> ${escapeHtml(row.purpose)}</p>` : ''}
-                    ${row.key_exports ? `<p class="text-xs text-slate-400 mt-1"><strong>Key exports:</strong> ${escapeHtml(typeof row.key_exports === 'string' ? row.key_exports : JSON.stringify(row.key_exports))}</p>` : ''}
-                </div>
-            `).join('');
+                `;
+            }).join('');
         } else {
             list.innerHTML = `
                 <div class="text-center py-8">
