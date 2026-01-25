@@ -159,16 +159,16 @@ class HealthMonitor:
             )
 
     async def check_stale_jobs(self):
-        """Check for jobs stuck in CLAIMED status."""
+        """Check for jobs stuck in CLAIMED status and auto-release them."""
         try:
             async with self.pool.acquire() as conn:
                 await conn.execute("SET search_path TO robomonkey_control, public")
 
-                # Find jobs claimed more than 1 hour ago
-                stale_threshold = datetime.utcnow() - timedelta(hours=1)
+                # Find jobs claimed more than 30 minutes ago (reduced from 1 hour)
+                stale_threshold = datetime.utcnow() - timedelta(minutes=30)
                 stale_jobs = await conn.fetch(
                     """
-                    SELECT id, repo_name, job_type, claimed_at
+                    SELECT id, repo_name, job_type, claimed_at, claimed_by
                     FROM job_queue
                     WHERE status = 'CLAIMED'
                     AND claimed_at < $1
@@ -177,15 +177,33 @@ class HealthMonitor:
                 )
 
                 if stale_jobs:
-                    logger.warning(f"Found {len(stale_jobs)} stale jobs")
+                    logger.warning(f"Found {len(stale_jobs)} stale jobs - auto-releasing")
                     for job in stale_jobs:
+                        # Reset job to PENDING so it can be picked up again
+                        await conn.execute(
+                            """
+                            UPDATE job_queue
+                            SET status = 'PENDING',
+                                claimed_at = NULL,
+                                claimed_by = NULL,
+                                updated_at = now()
+                            WHERE id = $1
+                            """,
+                            job['id']
+                        )
+                        logger.info(
+                            f"Auto-released stale job {job['id']}: {job['job_type']} "
+                            f"for {job['repo_name']} (was claimed by {job['claimed_by']})"
+                        )
                         await self._log_to_system(
                             'WARNING', 'health_monitor', job['repo_name'],
-                            f'Stale job detected: {job["job_type"]} claimed >1hr ago',
+                            f'Auto-released stale job: {job["job_type"]}',
                             {
                                 'job_id': str(job['id']),
                                 'job_type': job['job_type'],
-                                'claimed_at': job['claimed_at'].isoformat()
+                                'claimed_at': job['claimed_at'].isoformat(),
+                                'claimed_by': job['claimed_by'],
+                                'action': 'auto_released'
                             }
                         )
 

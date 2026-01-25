@@ -51,7 +51,7 @@ class WorkerPool:
         # All supported job types (for generic workers)
         self.all_job_types = [
             "FULL_INDEX", "REINDEX_FILE", "REINDEX_MANY",
-            "EMBED_MISSING", "DOCS_SCAN", "TAG_RULES_SYNC",
+            "EMBED_MISSING", "EMBED_SUMMARIES", "DOCS_SCAN", "TAG_RULES_SYNC",
             "REGENERATE_SUMMARY", "SUMMARIZE_FILES", "SUMMARIZE_SYMBOLS",
         ]
 
@@ -63,7 +63,7 @@ class WorkerPool:
             },
             "embed": {
                 "count": config.workers.embed_workers,
-                "job_types": ["EMBED_MISSING"],
+                "job_types": ["EMBED_MISSING", "EMBED_SUMMARIES"],
             },
             "docs": {
                 "count": config.workers.docs_workers,
@@ -83,6 +83,7 @@ class WorkerPool:
             "REINDEX_FILE": asyncio.Semaphore(limits.FULL_INDEX),  # Share with FULL_INDEX
             "REINDEX_MANY": asyncio.Semaphore(limits.FULL_INDEX),  # Share with FULL_INDEX
             "EMBED_MISSING": asyncio.Semaphore(limits.EMBED_MISSING),
+            "EMBED_SUMMARIES": asyncio.Semaphore(limits.EMBED_MISSING),  # Share with EMBED_MISSING
             "SUMMARIZE_MISSING": asyncio.Semaphore(limits.SUMMARIZE_MISSING),
             "SUMMARIZE_FILES": asyncio.Semaphore(limits.SUMMARIZE_FILES),
             "SUMMARIZE_SYMBOLS": asyncio.Semaphore(limits.SUMMARIZE_SYMBOLS),
@@ -155,6 +156,10 @@ class WorkerPool:
             if job.job_type == "DOCS_SCAN":
                 await self._maybe_enqueue_file_summaries(job)
                 await self._maybe_enqueue_symbol_summaries(job)
+
+            # Auto-enqueue summary embeddings after summary generation
+            if job.job_type in ["SUMMARIZE_FILES", "SUMMARIZE_SYMBOLS"]:
+                await self._maybe_enqueue_summary_embeddings(job)
 
         except Exception as e:
             logger.error(f"Job {job.id} failed: {e}", exc_info=True)
@@ -310,6 +315,31 @@ class WorkerPool:
             payload={},
             priority=2,  # Lowest priority (after file summaries)
             dedup_key=f"{job.repo_name}:summarize_symbols"
+        )
+
+    async def _maybe_enqueue_summary_embeddings(self, job: Job):
+        """Auto-enqueue summary embeddings after SUMMARIZE_FILES or SUMMARIZE_SYMBOLS complete."""
+        if not self.config.embeddings.enabled:
+            return
+
+        # Check if auto_embed is enabled for this repo
+        async with self.pool.acquire() as conn:
+            auto_embed = await conn.fetchval(
+                "SELECT auto_embed FROM robomonkey_control.repo_registry WHERE name = $1",
+                job.repo_name
+            )
+
+        if not auto_embed:
+            return
+
+        logger.info(f"Auto-enqueuing EMBED_SUMMARIES for repo {job.repo_name}")
+        await self.job_queue.enqueue(
+            repo_name=job.repo_name,
+            schema_name=job.schema_name,
+            job_type="EMBED_SUMMARIES",
+            payload={},
+            priority=3,  # After summaries but before comprehensive review
+            dedup_key=f"{job.repo_name}:embed_summaries"
         )
 
     async def _worker_loop(self, worker_id: str, job_types: list[str], skip_global_semaphore: bool = False):

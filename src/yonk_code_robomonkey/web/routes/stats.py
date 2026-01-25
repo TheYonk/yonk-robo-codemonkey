@@ -598,7 +598,7 @@ async def trigger_job(request: TriggerJobRequest) -> dict[str, Any]:
         # Validate job type
         valid_job_types = [
             "FULL_INDEX", "REINDEX_FILE", "REINDEX_MANY",
-            "EMBED_MISSING", "EMBED_CHUNK",
+            "EMBED_MISSING", "EMBED_SUMMARIES", "EMBED_CHUNK",
             "DOCS_SCAN",
             "SUMMARIZE_MISSING", "SUMMARIZE_FILES", "SUMMARIZE_SYMBOLS",
             "TAG_RULES_SYNC", "REGENERATE_SUMMARY"

@@ -620,6 +620,136 @@ class SummarizeSymbolsProcessor(JobProcessor):
         )
 
 
+class EmbedSummariesProcessor(JobProcessor):
+    """Processor for EMBED_SUMMARIES jobs - embeds file, symbol, and module summaries."""
+
+    async def process(self, job: Job) -> None:
+        """Generate embeddings for summaries missing them."""
+        logger.info(f"Processing EMBED_SUMMARIES for {job.repo_name}")
+
+        if not self.config.embeddings.enabled:
+            logger.warning("Embeddings disabled, skipping EMBED_SUMMARIES job")
+            return
+
+        # Parse payload for optional overrides
+        import json
+        payload = job.payload if isinstance(job.payload, dict) else json.loads(job.payload) if job.payload else {}
+
+        # Get embedding settings from payload or fall back to config defaults
+        use_provider = payload.get("provider", self.config.embeddings.provider)
+        use_model = payload.get("model", self.config.embeddings.model)
+        use_batch_size = payload.get("batch_size", self.config.embeddings.batch_size)
+
+        # Determine base_url and api_key based on provider
+        if use_provider == "ollama":
+            default_base_url = self.config.embeddings.ollama.base_url
+            api_key = ""
+        elif use_provider == "vllm":
+            default_base_url = self.config.embeddings.vllm.base_url
+            api_key = self.config.embeddings.vllm.api_key
+        else:  # openai
+            default_base_url = self.config.embeddings.openai.base_url
+            api_key = self.config.embeddings.openai.api_key
+
+        use_base_url = payload.get("base_url", default_base_url)
+
+        # Get repo info
+        async with self.control_pool.acquire() as conn:
+            repo = await conn.fetchrow(
+                """
+                SELECT name, schema_name, root_path
+                FROM robomonkey_control.repo_registry
+                WHERE name = $1
+                """,
+                job.repo_name
+            )
+
+        if not repo:
+            raise ValueError(f"Repo not found: {job.repo_name}")
+
+        schema_name = repo["schema_name"]
+
+        # Get repo_id from the repo schema
+        conn = await asyncpg.connect(dsn=self.config.database.control_dsn)
+        try:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+            repo_id = await conn.fetchval(
+                "SELECT id FROM repo WHERE name = $1",
+                job.repo_name
+            )
+        finally:
+            await conn.close()
+
+        if not repo_id:
+            raise ValueError(f"Repo ID not found for {job.repo_name}")
+
+        # Count missing summary embeddings
+        async with self.control_pool.acquire() as conn:
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+
+            missing_file_summaries = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM file_summary fs
+                JOIN file f ON f.id = fs.file_id
+                LEFT JOIN file_summary_embedding fse ON fs.file_id = fse.file_id
+                WHERE f.repo_id = $1 AND fse.file_id IS NULL
+                """,
+                repo_id
+            )
+
+            missing_symbol_summaries = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM symbol_summary ss
+                JOIN symbol s ON s.id = ss.symbol_id
+                LEFT JOIN symbol_summary_embedding sse ON ss.symbol_id = sse.symbol_id
+                WHERE s.repo_id = $1 AND sse.symbol_id IS NULL
+                """,
+                repo_id
+            )
+
+            missing_module_summaries = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM module_summary ms
+                LEFT JOIN module_summary_embedding mse
+                  ON ms.repo_id = mse.repo_id AND ms.module_path = mse.module_path
+                WHERE ms.repo_id = $1 AND mse.repo_id IS NULL
+                """,
+                repo_id
+            )
+
+        total_missing = missing_file_summaries + missing_symbol_summaries + missing_module_summaries
+        logger.info(
+            f"Found {total_missing} summaries missing embeddings "
+            f"(files={missing_file_summaries}, symbols={missing_symbol_summaries}, modules={missing_module_summaries})"
+        )
+
+        if total_missing == 0:
+            logger.info("No missing summary embeddings, job complete")
+            return
+
+        # Import embedder
+        from yonk_code_robomonkey.embeddings.embedder import embed_summaries
+
+        # Generate summary embeddings
+        stats = await embed_summaries(
+            repo_id=repo_id,
+            database_url=self.config.database.control_dsn,
+            schema_name=schema_name,
+            provider=use_provider,
+            model=use_model,
+            base_url=use_base_url,
+            api_key=api_key,
+            batch_size=use_batch_size,
+            only_missing=True,
+            max_chunk_length=self.config.embeddings.max_chunk_length
+        )
+
+        logger.info(f"EMBED_SUMMARIES complete for {job.repo_name}: {stats}")
+
+
 class RegenerateSummaryProcessor(JobProcessor):
     """Processor for REGENERATE_SUMMARY jobs."""
 
@@ -682,6 +812,7 @@ PROCESSORS: dict[str, type[JobProcessor]] = {
     "REINDEX_FILE": ReindexFileProcessor,
     "REINDEX_MANY": ReindexManyProcessor,
     "EMBED_MISSING": EmbedMissingProcessor,
+    "EMBED_SUMMARIES": EmbedSummariesProcessor,
     "DOCS_SCAN": DocsScanProcessor,
     "TAG_RULES_SYNC": TagRulesSyncProcessor,
     "SUMMARIZE_FILES": SummarizeFilesProcessor,

@@ -109,9 +109,147 @@
     </nav>
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 pb-20">
         {% block content %}{% endblock %}
     </main>
+
+    <!-- Persistent Status Bar -->
+    <div id="status-bar" class="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 px-4 py-2 z-50">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <!-- Repo Status Indicators -->
+            <div class="flex items-center gap-4">
+                <span class="text-xs text-slate-500 font-medium">Repos:</span>
+                <div id="repo-status-indicators" class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500">Loading...</span>
+                </div>
+            </div>
+
+            <!-- Default Repo Selector -->
+            <div class="flex items-center gap-3">
+                <label class="text-xs text-slate-500">Default Repo:</label>
+                <select id="default-repo-selector" class="text-xs bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-200 min-w-[150px]">
+                    <option value="">-- None --</option>
+                </select>
+                <button id="refresh-status-btn" onclick="refreshRepoStatus()" class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1" title="Refresh status">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Bar Script -->
+    <script>
+        // Status bar auto-refresh interval (30 seconds)
+        let statusRefreshInterval = null;
+
+        // Get default repo from localStorage
+        function getDefaultRepo() {
+            return localStorage.getItem('robomonkey_default_repo') || '';
+        }
+
+        // Set default repo in localStorage
+        function setDefaultRepo(repoName) {
+            if (repoName) {
+                localStorage.setItem('robomonkey_default_repo', repoName);
+            } else {
+                localStorage.removeItem('robomonkey_default_repo');
+            }
+            // Dispatch event for other components to react
+            window.dispatchEvent(new CustomEvent('defaultRepoChanged', { detail: { repo: repoName } }));
+        }
+
+        // Refresh repo status
+        async function refreshRepoStatus() {
+            const indicators = document.getElementById('repo-status-indicators');
+            const selector = document.getElementById('default-repo-selector');
+
+            try {
+                const response = await fetch('/api/maintenance/repos/status');
+                const data = await response.json();
+
+                // Update indicators
+                indicators.innerHTML = data.repos.map(repo => {
+                    const colors = {
+                        green: 'bg-emerald-500',
+                        yellow: 'bg-yellow-500',
+                        red: 'bg-red-500'
+                    };
+                    const color = colors[repo.status] || 'bg-slate-500';
+                    return `
+                        <div class="flex items-center gap-1 cursor-pointer group" title="${repo.name}: ${repo.status_text}" onclick="window.location.href='/explorer?repo=${encodeURIComponent(repo.name)}'">
+                            <span class="w-2 h-2 rounded-full ${color}"></span>
+                            <span class="text-xs text-slate-400 group-hover:text-slate-200 hidden sm:inline">${repo.name}</span>
+                        </div>
+                    `;
+                }).join('');
+
+                // Add summary
+                const summary = data.summary;
+                indicators.innerHTML += `
+                    <div class="ml-2 pl-2 border-l border-slate-600 flex items-center gap-2 text-xs text-slate-500">
+                        <span class="text-emerald-400">${summary.green}</span>
+                        <span class="text-yellow-400">${summary.yellow}</span>
+                        <span class="text-red-400">${summary.red}</span>
+                    </div>
+                `;
+
+                // Update selector options
+                const currentDefault = getDefaultRepo();
+                selector.innerHTML = '<option value="">-- None --</option>' +
+                    data.repos.map(repo =>
+                        `<option value="${repo.name}" ${repo.name === currentDefault ? 'selected' : ''}>${repo.name}</option>`
+                    ).join('');
+
+            } catch (error) {
+                console.error('Error fetching repo status:', error);
+                indicators.innerHTML = '<span class="text-xs text-red-400">Error loading status</span>';
+            }
+        }
+
+        // Initialize status bar
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load initial status
+            refreshRepoStatus();
+
+            // Set up auto-refresh
+            statusRefreshInterval = setInterval(refreshRepoStatus, 30000);
+
+            // Handle default repo selection
+            document.getElementById('default-repo-selector').addEventListener('change', function() {
+                setDefaultRepo(this.value);
+            });
+
+            // Apply default repo to page if available
+            applyDefaultRepo();
+        });
+
+        // Apply default repo to any repo selectors on the page
+        function applyDefaultRepo() {
+            const defaultRepo = getDefaultRepo();
+            if (defaultRepo) {
+                // Find all repo select elements and set their value
+                document.querySelectorAll('select[data-repo-selector]').forEach(select => {
+                    if (select.querySelector(`option[value="${defaultRepo}"]`)) {
+                        select.value = defaultRepo;
+                        // Trigger change event
+                        select.dispatchEvent(new Event('change'));
+                    }
+                });
+            }
+        }
+
+        // Listen for default repo changes from other components
+        window.addEventListener('defaultRepoChanged', function(e) {
+            applyDefaultRepo();
+        });
+
+        // Expose function globally for other scripts
+        window.getDefaultRepo = getDefaultRepo;
+        window.setDefaultRepo = setDefaultRepo;
+        window.refreshRepoStatus = refreshRepoStatus;
+    </script>
 
     {% block scripts %}{% endblock %}
 </body>

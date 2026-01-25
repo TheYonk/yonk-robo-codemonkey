@@ -31,6 +31,7 @@
             <label class="block text-sm font-medium text-slate-300 mb-2">Repository</label>
             <select
                 id="repo-select"
+                data-repo-selector
                 class="w-full rounded-md bg-slate-700 border-slate-600 text-slate-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                 onchange="loadRepoOverview(this.value)"
             >
@@ -289,6 +290,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadRepoList(),
         loadSchemas()
     ]);
+
+    // Check for URL parameter first, then default repo
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlRepo = urlParams.get('repo');
+    const defaultRepo = typeof getDefaultRepo === 'function' ? getDefaultRepo() : '';
+
+    const select = document.getElementById('repo-select');
+    const targetRepo = urlRepo || defaultRepo;
+
+    if (targetRepo && select.querySelector(`option[value="${targetRepo}"]`)) {
+        select.value = targetRepo;
+        loadRepoOverview(targetRepo);
+    }
 });
 
 // View switching

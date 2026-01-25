@@ -972,3 +972,188 @@ async def cleanup_old_jobs(request: JobCleanupRequest) -> dict[str, Any]:
 
     finally:
         await conn.close()
+
+
+# =============================================================================
+# Stuck Job Management
+# =============================================================================
+
+@router.post("/jobs/release-stuck")
+async def release_stuck_jobs(minutes: int = 30) -> dict[str, Any]:
+    """Release jobs stuck in CLAIMED status for more than the specified minutes.
+
+    Args:
+        minutes: Jobs claimed longer than this are considered stuck (default 30)
+
+    Returns:
+        Count of released jobs and their details
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        from datetime import datetime, timedelta
+        stale_threshold = datetime.utcnow() - timedelta(minutes=minutes)
+
+        # Find and release stuck jobs
+        released_jobs = await conn.fetch(
+            """
+            UPDATE robomonkey_control.job_queue
+            SET status = 'PENDING',
+                claimed_at = NULL,
+                claimed_by = NULL,
+                updated_at = now()
+            WHERE status = 'CLAIMED'
+            AND claimed_at < $1
+            RETURNING id, repo_name, job_type, claimed_by, claimed_at
+            """,
+            stale_threshold
+        )
+
+        return {
+            "status": "released",
+            "threshold_minutes": minutes,
+            "released_count": len(released_jobs),
+            "released_jobs": [
+                {
+                    "id": str(j["id"]),
+                    "repo_name": j["repo_name"],
+                    "job_type": j["job_type"],
+                    "was_claimed_by": j["claimed_by"],
+                    "claimed_at": j["claimed_at"].isoformat() if j["claimed_at"] else None
+                }
+                for j in released_jobs
+            ],
+            "message": f"Released {len(released_jobs)} stuck jobs"
+        }
+
+    finally:
+        await conn.close()
+
+
+# =============================================================================
+# Repository Status for Status Bar
+# =============================================================================
+
+@router.get("/repos/status")
+async def get_all_repos_status() -> dict[str, Any]:
+    """Get status of all repositories for the status bar.
+
+    Returns status for each repo:
+    - green: All up to date (no pending/running jobs, has data)
+    - yellow: In progress (has pending or running jobs)
+    - red: Error or empty (has failed jobs or no data)
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Get all repos with their stats
+        repos = await conn.fetch("""
+            SELECT
+                r.name,
+                r.schema_name,
+                r.enabled,
+                r.auto_index,
+                r.auto_embed,
+                r.auto_summaries
+            FROM robomonkey_control.repo_registry r
+            ORDER BY r.name
+        """)
+
+        repo_status_list = []
+        for repo in repos:
+            repo_name = repo["name"]
+            schema_name = repo["schema_name"]
+
+            # Get job counts for this repo
+            job_counts = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+                    COUNT(*) FILTER (WHERE status = 'CLAIMED') as running,
+                    COUNT(*) FILTER (WHERE status = 'FAILED' AND completed_at > NOW() - INTERVAL '1 day') as recent_failed
+                FROM robomonkey_control.job_queue
+                WHERE repo_name = $1
+            """, repo_name)
+
+            pending = job_counts["pending"] or 0
+            running = job_counts["running"] or 0
+            recent_failed = job_counts["recent_failed"] or 0
+
+            # Check if schema exists and has data
+            schema_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)",
+                schema_name
+            )
+
+            has_data = False
+            stats = {"files": 0, "symbols": 0, "embeddings": 0, "file_summaries": 0, "symbol_summaries": 0}
+            if schema_exists:
+                try:
+                    await conn.execute(f'SET search_path TO "{schema_name}", public')
+                    stats_row = await conn.fetchrow("""
+                        SELECT
+                            (SELECT COUNT(*) FROM file) as files,
+                            (SELECT COUNT(*) FROM symbol) as symbols,
+                            (SELECT COUNT(*) FROM chunk_embedding) as embeddings,
+                            (SELECT COUNT(*) FROM file_summary) as file_summaries,
+                            (SELECT COUNT(*) FROM symbol_summary) as symbol_summaries
+                    """)
+                    if stats_row:
+                        stats = {
+                            "files": stats_row["files"] or 0,
+                            "symbols": stats_row["symbols"] or 0,
+                            "embeddings": stats_row["embeddings"] or 0,
+                            "file_summaries": stats_row["file_summaries"] or 0,
+                            "symbol_summaries": stats_row["symbol_summaries"] or 0
+                        }
+                        has_data = stats["files"] > 0
+                    await conn.execute("RESET search_path")
+                except Exception:
+                    await conn.execute("RESET search_path")
+
+            # Determine status color
+            if recent_failed > 0:
+                status = "red"
+                status_text = f"{recent_failed} failed job(s)"
+            elif not schema_exists or not has_data:
+                status = "red"
+                status_text = "Empty or not initialized"
+            elif pending > 0 or running > 0:
+                status = "yellow"
+                jobs_text = []
+                if running > 0:
+                    jobs_text.append(f"{running} running")
+                if pending > 0:
+                    jobs_text.append(f"{pending} pending")
+                status_text = ", ".join(jobs_text)
+            else:
+                status = "green"
+                status_text = "Up to date"
+
+            repo_status_list.append({
+                "name": repo_name,
+                "schema_name": schema_name,
+                "enabled": repo["enabled"],
+                "status": status,
+                "status_text": status_text,
+                "jobs": {
+                    "pending": pending,
+                    "running": running,
+                    "recent_failed": recent_failed
+                },
+                "stats": stats
+            })
+
+        return {
+            "repos": repo_status_list,
+            "summary": {
+                "total": len(repo_status_list),
+                "green": sum(1 for r in repo_status_list if r["status"] == "green"),
+                "yellow": sum(1 for r in repo_status_list if r["status"] == "yellow"),
+                "red": sum(1 for r in repo_status_list if r["status"] == "red")
+            }
+        }
+
+    finally:
+        await conn.close()
