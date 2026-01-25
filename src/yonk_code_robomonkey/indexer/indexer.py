@@ -349,24 +349,47 @@ async def _index_file(
             )
 
         # Insert edges (best-effort resolution of FQNs to symbol IDs)
+        # Build name-based lookup map for fallback (simple name -> symbol_id)
+        # This handles cases where extractors return simple names instead of FQNs
+        name_id_map = {}
+        for sym in symbols:
+            if sym.name not in name_id_map:
+                name_id_map[sym.name] = symbol_id_map.get(sym.fqn)
+
         for edge in edges:
             # Resolve source symbol ID
             src_symbol_id = None
             if edge.from_symbol_fqn:
-                # Try local file first
+                # Try local file by FQN first
                 src_symbol_id = symbol_id_map.get(edge.from_symbol_fqn)
-                # If not found, try cross-repo lookup
+                # Try local file by simple name (fallback for languages that use simple names)
+                if not src_symbol_id:
+                    src_symbol_id = name_id_map.get(edge.from_symbol_fqn)
+                # Try cross-repo lookup by FQN
                 if not src_symbol_id:
                     src_symbol_id = await conn.fetchval(
                         "SELECT id FROM symbol WHERE repo_id = $1 AND fqn = $2",
+                        repo_id, edge.from_symbol_fqn
+                    )
+                # Try cross-repo lookup by simple name (may match multiple, takes first)
+                if not src_symbol_id:
+                    src_symbol_id = await conn.fetchval(
+                        "SELECT id FROM symbol WHERE repo_id = $1 AND name = $2 LIMIT 1",
                         repo_id, edge.from_symbol_fqn
                     )
 
             # Resolve destination symbol ID
             dst_symbol_id = symbol_id_map.get(edge.to_symbol_fqn)
             if not dst_symbol_id:
+                dst_symbol_id = name_id_map.get(edge.to_symbol_fqn)
+            if not dst_symbol_id:
                 dst_symbol_id = await conn.fetchval(
                     "SELECT id FROM symbol WHERE repo_id = $1 AND fqn = $2",
+                    repo_id, edge.to_symbol_fqn
+                )
+            if not dst_symbol_id:
+                dst_symbol_id = await conn.fetchval(
+                    "SELECT id FROM symbol WHERE repo_id = $1 AND name = $2 LIMIT 1",
                     repo_id, edge.to_symbol_fqn
                 )
 

@@ -345,7 +345,7 @@ async def callers(
         return {"error": "Must provide either symbol_id or fqn"}
 
     results = await _get_callers(
-        symbol_id, settings.database_url, schema_name, max_depth
+        symbol_id, settings.database_url, repo_id, schema_name, max_depth
     )
 
     return {
@@ -416,7 +416,7 @@ async def callees(
         return {"error": "Must provide either symbol_id or fqn"}
 
     results = await _get_callees(
-        symbol_id, settings.database_url, schema_name, max_depth
+        symbol_id, settings.database_url, repo_id, schema_name, max_depth
     )
 
     return {
