@@ -303,6 +303,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         select.value = targetRepo;
         loadRepoOverview(targetRepo);
     }
+
+    // Listen for default repo changes from the status bar
+    window.addEventListener('defaultRepoChanged', function(e) {
+        const newRepo = e.detail?.repo;
+        if (newRepo) {
+            // Update repo selector if not already set
+            const repoSelect = document.getElementById('repo-select');
+            if (repoSelect && repoSelect.value !== newRepo && repoSelect.querySelector(`option[value="${newRepo}"]`)) {
+                repoSelect.value = newRepo;
+                loadRepoOverview(newRepo);
+            }
+        }
+    });
 });
 
 // View switching
@@ -322,6 +335,36 @@ function switchExplorerView(view) {
         tableView.style.display = 'grid';
         tabRepo.className = 'px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200';
         tabTable.className = 'px-4 py-3 text-sm font-medium border-b-2 border-blue-500 text-blue-400';
+
+        // Auto-select schema based on current repo or default repo
+        autoSelectSchema();
+    }
+}
+
+// Auto-select schema based on current repo selection or default repo
+function autoSelectSchema() {
+    const schemaSelect = document.getElementById('schema-select');
+    const repoSelect = document.getElementById('repo-select');
+
+    // Get current repo from repo selector, or fall back to default
+    let targetRepo = repoSelect?.value;
+    if (!targetRepo && typeof getDefaultRepo === 'function') {
+        targetRepo = getDefaultRepo();
+    }
+
+    if (targetRepo) {
+        // Schema naming convention: robomonkey_{repo_name} with special chars replaced
+        const expectedSchema = 'robomonkey_' + targetRepo.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+        // Try to find and select the matching schema
+        const options = schemaSelect.querySelectorAll('option');
+        for (const option of options) {
+            if (option.value === expectedSchema || option.value.includes(targetRepo.toLowerCase().replace(/[^a-z0-9]/g, '_'))) {
+                schemaSelect.value = option.value;
+                loadTables(option.value);
+                return;
+            }
+        }
     }
 }
 

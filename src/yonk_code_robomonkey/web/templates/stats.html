@@ -598,6 +598,12 @@ function showTriggerJobModal() {
         }
     });
 
+    // Apply default repo if available
+    const defaultRepo = typeof getDefaultRepo === 'function' ? getDefaultRepo() : '';
+    if (defaultRepo && repoSelect.querySelector(`option[value="${defaultRepo}"]`)) {
+        repoSelect.value = defaultRepo;
+    }
+
     modal.classList.remove('hidden');
 }
 

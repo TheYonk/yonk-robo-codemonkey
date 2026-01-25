@@ -162,6 +162,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadRepos(),
         loadTags()
     ]);
+
+    // Listen for default repo changes from the status bar
+    window.addEventListener('defaultRepoChanged', function(e) {
+        const newRepo = e.detail?.repo;
+        if (newRepo) {
+            const quickAskRepo = document.getElementById('quick-ask-repo');
+            if (quickAskRepo && quickAskRepo.querySelector(`option[value="${newRepo}"]`)) {
+                quickAskRepo.value = newRepo;
+            }
+        }
+    });
 });
 
 // Quick Ask functionality
@@ -232,8 +243,12 @@ async function loadRepos() {
             quickAskRepo.appendChild(option);
         });
 
-        // Auto-select if only one repo
-        if (reposList.length === 1) {
+        // Apply default repo if available
+        const defaultRepo = typeof getDefaultRepo === 'function' ? getDefaultRepo() : '';
+        if (defaultRepo && quickAskRepo.querySelector(`option[value="${defaultRepo}"]`)) {
+            quickAskRepo.value = defaultRepo;
+        } else if (reposList.length === 1) {
+            // Auto-select if only one repo
             quickAskRepo.value = reposList[0].name;
         }
     } catch (error) {
