@@ -61,12 +61,12 @@ function renderRepositories(repos) {
         const embeddingPercent = repo.stats.embedding_percent || 0;
 
         card.innerHTML = `
-            <div class="flex justify-between items-start mb-4">
-                <div>
+            <div class="flex justify-between items-start gap-2 mb-4">
+                <div class="min-w-0 flex-1">
                     <h3 class="text-lg font-semibold text-slate-100">${repo.name}</h3>
-                    <p class="text-sm text-slate-400 truncate">${repo.root_path}</p>
+                    <p class="text-sm text-slate-400 break-all">${repo.root_path}</p>
                 </div>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border flex-shrink-0 ${
                     embeddingPercent >= 90 ? 'bg-emerald-900/50 text-emerald-400 border-emerald-700' :
                     embeddingPercent >= 50 ? 'bg-amber-900/50 text-amber-400 border-amber-700' :
                     'bg-slate-700 text-slate-300 border-slate-600'
