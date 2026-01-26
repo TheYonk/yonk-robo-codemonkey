@@ -8,6 +8,9 @@ Complete guide for using RoboMonkey MCP for code search and analysis.
 - [C. Web UI & Maintenance](#c-web-ui--maintenance)
 - [D. Docker Deployment](#d-docker-deployment)
 - [E. Usage Examples](#e-usage-examples)
+  - [Knowledge Base: Ask Docs (RAG Q&A)](#knowledge-base-ask-docs-rag-qa)
+  - [Testing if RoboMonkey is Working](#testing-if-robomonkey-is-working)
+  - [Common Usage Patterns](#common-usage-patterns)
 - [F. Clearing Data and Starting Over](#f-clearing-data-and-starting-over)
 - [G. Troubleshooting](#g-troubleshooting)
 
@@ -338,6 +341,122 @@ EMBEDDINGS_DIMENSION=768
 ---
 
 ## E. Usage Examples
+
+### Knowledge Base: Ask Docs (RAG Q&A)
+
+The Ask Docs feature provides a RAG-powered Q&A chatbot that takes natural language questions and returns LLM-generated answers synthesized from indexed documentation.
+
+#### Using the Web UI
+
+1. Navigate to `http://localhost:9832/knowledge-base`
+2. Find the "Ask Docs" section (blue gradient box at the top)
+3. Enter your question in the text area
+4. Click "Ask" to get an answer
+
+The response includes:
+- A synthesized answer with inline citations `[1]`, `[2]`, etc.
+- Confidence level indicator
+- List of sources with clickable links to view context
+- Execution time and model used
+
+#### Using the API
+
+```bash
+# Ask a question about your documentation
+curl -X POST http://localhost:9832/api/docs/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "How do I migrate Oracle CONNECT BY queries to PostgreSQL?",
+    "doc_types": ["pdf"],
+    "max_context_tokens": 6000
+  }'
+```
+
+**Response:**
+```json
+{
+  "question": "How do I migrate Oracle CONNECT BY queries to PostgreSQL?",
+  "answer": "Oracle's CONNECT BY clause for hierarchical queries can be migrated to PostgreSQL using the WITH RECURSIVE syntax [1]. The basic pattern involves...\n\nFor START WITH conditions, you would use [2]...",
+  "confidence": "high",
+  "sources": [
+    {
+      "index": 1,
+      "document": "oracle-migration-guide",
+      "section": "Hierarchical Queries",
+      "page": 45,
+      "relevance_score": 0.94
+    }
+  ],
+  "chunks_used": 4,
+  "execution_time_ms": 2100.5,
+  "model_used": "gpt-5.2-codex"
+}
+```
+
+#### Python Example
+
+```python
+import httpx
+import asyncio
+
+async def ask_docs(question: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://localhost:9832/api/docs/ask",
+            json={
+                "question": question,
+                "max_context_tokens": 6000
+            },
+            timeout=60.0  # Longer timeout for LLM processing
+        )
+        result = response.json()
+
+        print(f"Question: {result['question']}")
+        print(f"Confidence: {result['confidence']}")
+        print(f"\nAnswer:\n{result['answer']}")
+        print(f"\nSources used: {len(result['sources'])}")
+        for source in result['sources']:
+            print(f"  [{source['index']}] {source['document']}, {source.get('section', 'N/A')}")
+
+# Example usage
+asyncio.run(ask_docs("What are the differences between Oracle and PostgreSQL sequence syntax?"))
+```
+
+#### Filtering by Document
+
+You can narrow down the search to specific documents:
+
+```bash
+# Only search in the EPAS compatibility guide
+curl -X POST http://localhost:9832/api/docs/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What Oracle PL/SQL features are supported?",
+    "doc_names": ["epas-compatibility-guide"]
+  }'
+```
+
+#### Ask Docs vs Search
+
+| Feature | Ask Docs | Search |
+|---------|----------|--------|
+| Output | One synthesized answer | List of relevant chunks |
+| Citations | Inline `[1]`, `[2]` | Direct links to chunks |
+| LLM Required | Yes (uses "deep" model) | Optional (for summarize) |
+| Use Case | Q&A about documentation | Finding specific content |
+| Response Time | Slower (LLM processing) | Faster |
+
+**When to use Ask Docs:**
+- "How do I..." questions
+- Complex topics spanning multiple sections
+- Need a synthesized, cohesive answer
+
+**When to use Search:**
+- Finding specific syntax or code examples
+- Browsing documentation structure
+- Quick keyword lookups
+
+---
 
 ### Testing if RoboMonkey is Working
 

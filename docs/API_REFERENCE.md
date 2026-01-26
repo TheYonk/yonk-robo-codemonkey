@@ -1795,7 +1795,7 @@ Re-process an existing document. Only reprocesses if content changed (unless `fo
 POST /api/docs/search
 ```
 
-Hybrid search combining vector similarity (60%) and full-text search (40%).
+Hybrid search combining vector similarity (60%) and full-text search (40%), with optional context expansion and LLM summarization.
 
 **Request Body:**
 ```json
@@ -1804,7 +1804,9 @@ Hybrid search combining vector similarity (60%) and full-text search (40%).
   "doc_types": ["pdf"],
   "oracle_constructs": ["connect-by"],
   "top_k": 10,
-  "search_mode": "hybrid"
+  "search_mode": "hybrid",
+  "context_chunks": 1,
+  "summarize": false
 }
 ```
 
@@ -1817,8 +1819,25 @@ Hybrid search combining vector similarity (60%) and full-text search (40%).
 | `topics` | array | Filter by topics |
 | `oracle_constructs` | array | Filter by Oracle constructs (rownum, connect-by, decode, etc.) |
 | `epas_features` | array | Filter by EPAS features (dblink_ora, spl, etc.) |
-| `top_k` | int | Number of results (default: 10) |
+| `top_k` | int | Number of results (default: 10, max: 100) |
 | `search_mode` | string | `hybrid` (default), `semantic`, or `fts` |
+| `context_chunks` | int | Number of chunks before/after to include (0-3, default: 0). Set to 1-3 to see surrounding context. |
+| `summarize` | bool | If true, use LLM to summarize each result to answer the query (default: false). Requires LLM configured. |
+| `use_llm_keywords` | bool | If true, use LLM to extract better search keywords (default: false). Improves FTS accuracy for complex natural language questions by identifying key technical terms and synonyms. |
+
+**Search Modes:**
+- `hybrid`: Combines vector similarity (60%) with full-text search (40%) for best results
+- `semantic`: Vector similarity only - finds semantically similar content
+- `fts`: Full-text search only - keyword matching
+
+**Context Expansion:**
+When `context_chunks > 0`, each result includes surrounding chunks from the same document:
+- `context_chunks: 1` - Returns matched chunk plus 1 before and 1 after
+- `context_chunks: 2` - Returns matched chunk plus 2 before and 2 after
+- `context_chunks: 3` - Returns matched chunk plus 3 before and 3 after
+
+**Summarization:**
+When `summarize: true`, the LLM generates a concise answer to your query based on each result's context. This uses the daemon's configured LLM (see `config/robomonkey-daemon.yaml`).
 
 **Response:**
 ```json
@@ -1827,6 +1846,8 @@ Hybrid search combining vector similarity (60%) and full-text search (40%).
   "total_found": 12,
   "search_mode": "hybrid",
   "execution_time_ms": 45.2,
+  "context_chunks_requested": 1,
+  "summarize_requested": false,
   "chunks": [
     {
       "chunk_id": "chunk-uuid",
@@ -1841,11 +1862,141 @@ Hybrid search combining vector similarity (60%) and full-text search (40%).
       "score": 0.892,
       "vec_score": 0.95,
       "fts_score": 0.82,
-      "citation": "oracle-migration-guide, Chapter 5 > SQL Syntax, Page 24"
+      "citation": "oracle-migration-guide, Chapter 5 > SQL Syntax, Page 24",
+      "context_chunks": [
+        {"chunk_id": "prev-chunk-uuid", "content": "...", "chunk_index": 23, "is_target": false},
+        {"chunk_id": "chunk-uuid", "content": "The CONNECT BY clause...", "chunk_index": 24, "is_target": true},
+        {"chunk_id": "next-chunk-uuid", "content": "...", "chunk_index": 25, "is_target": false}
+      ],
+      "context_text": "Full concatenated context text...",
+      "summary": "CONNECT BY queries in Oracle can be migrated to PostgreSQL using WITH RECURSIVE..."
     }
   ]
 }
 ```
+
+### Get Chunk Context
+
+```
+GET /api/docs/chunk/{chunk_id}/context?context_chunks=3
+```
+
+Get a specific chunk with surrounding context chunks.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `chunk_id` | string | UUID of the chunk (path parameter) |
+| `context_chunks` | int | Number of chunks before/after (query param, default: 2) |
+
+**Response:**
+```json
+{
+  "target_chunk_id": "chunk-uuid",
+  "source_document": "oracle-migration-guide",
+  "doc_type": "pdf",
+  "total_context_chunks": 5,
+  "chunks": [
+    {"id": "...", "content": "...", "chunk_index": 22, "is_target": false},
+    {"id": "...", "content": "...", "chunk_index": 23, "is_target": false},
+    {"id": "chunk-uuid", "content": "...", "chunk_index": 24, "is_target": true},
+    {"id": "...", "content": "...", "chunk_index": 25, "is_target": false},
+    {"id": "...", "content": "...", "chunk_index": 26, "is_target": false}
+  ]
+}
+```
+
+### Ask Docs (RAG Q&A)
+
+```
+POST /api/docs/ask
+```
+
+Ask a natural language question and get an LLM-generated answer synthesized from indexed documentation. Unlike search (which returns ranked chunks) or search+summarize (which summarizes each chunk individually), Ask Docs produces **ONE cohesive answer** synthesized across multiple relevant chunks with inline citations.
+
+**Request Body:**
+```json
+{
+  "question": "How does EPAS handle Oracle's XMLParse function?",
+  "doc_types": ["pdf"],
+  "doc_names": ["epas-compatibility-guide"],
+  "max_context_tokens": 6000
+}
+```
+
+**Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `question` | string | Yes | - | Natural language question about the documentation |
+| `doc_types` | array | No | null | Filter by document types (pdf, markdown, html, text) |
+| `doc_names` | array | No | null | Filter by specific document names |
+| `max_context_tokens` | int | No | 6000 | Maximum tokens for context (1000-12000) |
+
+**Response:**
+```json
+{
+  "question": "How does EPAS handle Oracle's XMLParse function?",
+  "answer": "EPAS provides compatibility for Oracle's XMLParse function through its XML handling capabilities [1]. The function accepts...\n\nFor migration, you can use the following approach [2]...",
+  "confidence": "high",
+  "sources": [
+    {
+      "index": 1,
+      "document": "epas-compatibility-guide",
+      "section": "XML Functions",
+      "page": 145,
+      "chunk_id": "550e8400-e29b-41d4-a716-446655440000",
+      "relevance_score": 0.92,
+      "preview": "XMLParse is used to parse XML content from a string..."
+    },
+    {
+      "index": 2,
+      "document": "oracle-migration-guide",
+      "section": "Data Type Mapping",
+      "page": 78,
+      "chunk_id": "660e8400-e29b-41d4-a716-446655440001",
+      "relevance_score": 0.87,
+      "preview": "When migrating XML-related functions from Oracle..."
+    }
+  ],
+  "chunks_used": 5,
+  "execution_time_ms": 2340.5,
+  "model_used": "gpt-5.2-codex"
+}
+```
+
+**Response Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `question` | string | The original question asked |
+| `answer` | string | LLM-generated answer with inline citations `[1]`, `[2]`, etc. |
+| `confidence` | string | Confidence level: `high`, `medium`, `low`, or `no_answer` |
+| `sources` | array | List of sources used, with index matching citations |
+| `chunks_used` | int | Number of documentation chunks used for context |
+| `execution_time_ms` | float | Total execution time in milliseconds |
+| `model_used` | string | LLM model used for answer generation |
+
+**Confidence Levels:**
+| Level | Meaning |
+|-------|---------|
+| `high` | Multiple citations, good source coverage, no uncertainty phrases |
+| `medium` | At least one citation, reasonable source coverage |
+| `low` | Limited sources or citations |
+| `no_answer` | Could not find relevant information in documentation |
+
+**Example - When no answer is found:**
+```json
+{
+  "question": "What is the capital of France?",
+  "answer": "I could not find enough information in the documentation to answer this question.",
+  "confidence": "no_answer",
+  "sources": [],
+  "chunks_used": 0,
+  "execution_time_ms": 450.2,
+  "model_used": "gpt-5.2-codex"
+}
+```
+
+---
 
 ### Get RAG Context
 
