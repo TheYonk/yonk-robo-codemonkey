@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from yonk_code_robomonkey.config import Settings
 
 # Import routes
-from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats, maintenance, sources, docs
+from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats, maintenance, sources, docs, settings
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +160,7 @@ app.include_router(stats.router, prefix="/api/stats", tags=["statistics"])
 app.include_router(maintenance.router, prefix="/api/maintenance", tags=["maintenance"])
 app.include_router(sources.router, prefix="/api", tags=["sources"])
 app.include_router(docs.router, prefix="/api/docs", tags=["knowledge-base"])
+app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -202,6 +203,12 @@ async def source_mounts_page(request: Request):
 async def knowledge_base_page(request: Request):
     """Knowledge base management page."""
     return templates.TemplateResponse("knowledge_base.html", {"request": request})
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """Settings management page."""
+    return templates.TemplateResponse("settings.html", {"request": request})
 
 
 @app.get("/health")

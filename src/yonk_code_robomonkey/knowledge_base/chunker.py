@@ -6,6 +6,7 @@ Creates semantically meaningful chunks with:
 - Overlap between chunks (~100 tokens)
 - Section hierarchy preservation
 - Heading inclusion in each chunk
+- Whitespace normalization
 """
 
 import hashlib
@@ -13,6 +14,36 @@ import logging
 import re
 from typing import Optional
 from uuid import uuid4
+
+
+def normalize_whitespace(text: str) -> str:
+    """Normalize excessive whitespace in text.
+
+    - Collapses multiple spaces to single space
+    - Collapses 3+ newlines to 2 newlines (preserves paragraph breaks)
+    - Strips leading/trailing whitespace from lines
+    - Removes trailing whitespace from entire text
+    """
+    if not text:
+        return text
+
+    # Replace tabs with spaces
+    text = text.replace('\t', ' ')
+
+    # Collapse multiple spaces (but not newlines) to single space
+    text = re.sub(r'[^\S\n]+', ' ', text)
+
+    # Strip whitespace from each line
+    lines = [line.strip() for line in text.split('\n')]
+    text = '\n'.join(lines)
+
+    # Collapse 3+ consecutive newlines to 2 (preserve paragraph breaks)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    # Remove leading/trailing whitespace
+    text = text.strip()
+
+    return text
 
 from .models import (
     ChunkingConfig,
@@ -255,7 +286,10 @@ class DocumentChunker:
         chunk_index: int,
     ) -> DocChunk:
         """Create a DocChunk with all metadata."""
-        # Calculate content hash
+        # Normalize whitespace in content
+        content = normalize_whitespace(content)
+
+        # Calculate content hash (after normalization)
         content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
 
         # Approximate token count (rough estimate: 1 token ≈ 4 chars)

@@ -1,0 +1,468 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h2 class="text-2xl font-bold text-slate-100">Settings</h2>
+        <button onclick="loadSettings()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Refresh
+        </button>
+    </div>
+
+    <!-- Embeddings Settings -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg">
+        <div class="p-6 border-b border-slate-700">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h3 class="text-lg font-semibold text-slate-100">Embeddings</h3>
+                    <p class="text-sm text-slate-400">Configure the embedding model for vector search</p>
+                </div>
+                <button onclick="testEmbeddings()" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
+                    Test Connection
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div id="embeddings-test-result" class="hidden mb-4 p-3 rounded"></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Provider</label>
+                    <select id="emb-provider" onchange="onEmbeddingsProviderChange()"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100">
+                        <option value="ollama">Ollama (Local)</option>
+                        <option value="vllm">vLLM (Local)</option>
+                        <option value="openai">OpenAI / Compatible</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Model</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="emb-model"
+                            class="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="nomic-embed-text">
+                        <select id="emb-model-presets" onchange="document.getElementById('emb-model').value = this.value"
+                            class="px-2 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm">
+                            <option value="">Presets...</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Base URL</label>
+                    <input type="text" id="emb-base-url"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                        placeholder="http://localhost:11434">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Dimension</label>
+                    <input type="number" id="emb-dimension"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                        placeholder="1536" min="64" max="4096">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-300 mb-1">API Key <span class="text-slate-500">(for vLLM/OpenAI)</span></label>
+                    <div class="flex gap-2">
+                        <input type="password" id="emb-api-key"
+                            class="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="Leave blank to keep existing key">
+                        <button onclick="togglePassword('emb-api-key')" class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-slate-300 rounded">
+                            Show
+                        </button>
+                    </div>
+                    <p id="emb-api-key-status" class="text-xs text-slate-500 mt-1"></p>
+                </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button onclick="saveEmbeddings()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+                    Save Embeddings Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LLM Settings (Deep) -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg">
+        <div class="p-6 border-b border-slate-700">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h3 class="text-lg font-semibold text-slate-100">LLM - Deep Model</h3>
+                    <p class="text-sm text-slate-400">For complex tasks: code analysis, comprehensive reviews, feature context</p>
+                </div>
+                <button onclick="testLLM('deep')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
+                    Test Connection
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div id="llm-deep-test-result" class="hidden mb-4 p-3 rounded"></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Provider</label>
+                    <select id="llm-deep-provider" onchange="onLLMProviderChange('deep')"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100">
+                        <option value="ollama">Ollama (Local)</option>
+                        <option value="openai">OpenAI / Compatible</option>
+                        <option value="vllm">vLLM (Local)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Model</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="llm-deep-model"
+                            class="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="llama3.2">
+                        <select id="llm-deep-model-presets" onchange="document.getElementById('llm-deep-model').value = this.value"
+                            class="px-2 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm">
+                            <option value="">Presets...</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Base URL</label>
+                    <input type="text" id="llm-deep-base-url"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                        placeholder="http://localhost:11434">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Temperature</label>
+                        <input type="number" id="llm-deep-temperature" step="0.1" min="0" max="2"
+                            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="0.3">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Max Tokens</label>
+                        <input type="number" id="llm-deep-max-tokens" min="100"
+                            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="64000">
+                    </div>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-300 mb-1">API Key</label>
+                    <div class="flex gap-2">
+                        <input type="password" id="llm-deep-api-key"
+                            class="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="Leave blank to keep existing key">
+                        <button onclick="togglePassword('llm-deep-api-key')" class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-slate-300 rounded">
+                            Show
+                        </button>
+                    </div>
+                    <p id="llm-deep-api-key-status" class="text-xs text-slate-500 mt-1"></p>
+                </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button onclick="saveLLM('deep')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+                    Save Deep Model Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LLM Settings (Small) -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg">
+        <div class="p-6 border-b border-slate-700">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h3 class="text-lg font-semibold text-slate-100">LLM - Small Model</h3>
+                    <p class="text-sm text-slate-400">For quick tasks: summaries, classifications, simple questions</p>
+                </div>
+                <button onclick="testLLM('small')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
+                    Test Connection
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div id="llm-small-test-result" class="hidden mb-4 p-3 rounded"></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Provider</label>
+                    <select id="llm-small-provider" onchange="onLLMProviderChange('small')"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100">
+                        <option value="ollama">Ollama (Local)</option>
+                        <option value="openai">OpenAI / Compatible</option>
+                        <option value="vllm">vLLM (Local)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Model</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="llm-small-model"
+                            class="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="llama3.2">
+                        <select id="llm-small-model-presets" onchange="document.getElementById('llm-small-model').value = this.value"
+                            class="px-2 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm">
+                            <option value="">Presets...</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Base URL</label>
+                    <input type="text" id="llm-small-base-url"
+                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                        placeholder="http://localhost:11434">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Temperature</label>
+                        <input type="number" id="llm-small-temperature" step="0.1" min="0" max="2"
+                            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="0.3">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Max Tokens</label>
+                        <input type="number" id="llm-small-max-tokens" min="100"
+                            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="32000">
+                    </div>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-300 mb-1">API Key</label>
+                    <div class="flex gap-2">
+                        <input type="password" id="llm-small-api-key"
+                            class="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100"
+                            placeholder="Leave blank to keep existing key">
+                        <button onclick="togglePassword('llm-small-api-key')" class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-slate-300 rounded">
+                            Show
+                        </button>
+                    </div>
+                    <p id="llm-small-api-key-status" class="text-xs text-slate-500 mt-1"></p>
+                </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button onclick="saveLLM('small')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+                    Save Small Model Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Config File Info -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-slate-100 mb-4">Configuration Files</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+                <p class="text-slate-400">Environment file (.env):</p>
+                <p id="config-env-path" class="text-slate-300 font-mono text-xs bg-slate-700 p-2 rounded mt-1 break-all"></p>
+            </div>
+            <div>
+                <p class="text-slate-400">Daemon config (YAML):</p>
+                <p id="config-daemon-path" class="text-slate-300 font-mono text-xs bg-slate-700 p-2 rounded mt-1 break-all"></p>
+            </div>
+        </div>
+        <div class="mt-4 p-3 bg-yellow-900/30 border border-yellow-700/50 rounded text-sm text-yellow-300">
+            <strong>Note:</strong> After changing settings, restart the services for changes to take effect:
+            <code class="block mt-2 bg-slate-900 p-2 rounded text-xs">./scripts/restart.sh</code>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let providers = {};
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadProviders();
+    await loadSettings();
+});
+
+async function loadProviders() {
+    try {
+        const response = await fetch('/api/settings/providers');
+        providers = await response.json();
+    } catch (error) {
+        console.error('Failed to load providers:', error);
+    }
+}
+
+async function loadSettings() {
+    try {
+        const response = await fetch('/api/settings/');
+        const data = await response.json();
+
+        // Embeddings
+        document.getElementById('emb-provider').value = data.embeddings.provider;
+        document.getElementById('emb-model').value = data.embeddings.model;
+        document.getElementById('emb-base-url').value = data.embeddings.base_url;
+        document.getElementById('emb-dimension').value = data.embeddings.dimension;
+        document.getElementById('emb-api-key').value = '';
+        document.getElementById('emb-api-key-status').textContent = data.embeddings.has_api_key
+            ? `Current key: ${data.embeddings.api_key_masked}`
+            : 'No API key configured';
+        updateModelPresets('emb', data.embeddings.provider);
+
+        // LLM Deep
+        document.getElementById('llm-deep-provider').value = data.llm.deep.provider;
+        document.getElementById('llm-deep-model').value = data.llm.deep.model;
+        document.getElementById('llm-deep-base-url').value = data.llm.deep.base_url;
+        document.getElementById('llm-deep-temperature').value = data.llm.deep.temperature;
+        document.getElementById('llm-deep-max-tokens').value = data.llm.deep.max_tokens;
+        document.getElementById('llm-deep-api-key').value = '';
+        document.getElementById('llm-deep-api-key-status').textContent = data.llm.deep.has_api_key
+            ? `Current key: ${data.llm.deep.api_key_masked}`
+            : 'No API key configured';
+        updateModelPresets('llm-deep', data.llm.deep.provider);
+
+        // LLM Small
+        document.getElementById('llm-small-provider').value = data.llm.small.provider;
+        document.getElementById('llm-small-model').value = data.llm.small.model;
+        document.getElementById('llm-small-base-url').value = data.llm.small.base_url;
+        document.getElementById('llm-small-temperature').value = data.llm.small.temperature;
+        document.getElementById('llm-small-max-tokens').value = data.llm.small.max_tokens;
+        document.getElementById('llm-small-api-key').value = '';
+        document.getElementById('llm-small-api-key-status').textContent = data.llm.small.has_api_key
+            ? `Current key: ${data.llm.small.api_key_masked}`
+            : 'No API key configured';
+        updateModelPresets('llm-small', data.llm.small.provider);
+
+        // Config paths
+        document.getElementById('config-env-path').textContent = data.config_paths.env_file;
+        document.getElementById('config-daemon-path').textContent = data.config_paths.daemon_config;
+
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+        alert('Failed to load settings: ' + error.message);
+    }
+}
+
+function updateModelPresets(prefix, provider) {
+    const select = document.getElementById(`${prefix}-model-presets`);
+    if (!select) return;
+
+    const category = prefix === 'emb' ? 'embeddings' : 'llm';
+    const models = providers[category]?.common_models?.[provider] || [];
+
+    select.innerHTML = '<option value="">Presets...</option>' +
+        models.map(m => `<option value="${m}">${m}</option>`).join('');
+}
+
+function onEmbeddingsProviderChange() {
+    const provider = document.getElementById('emb-provider').value;
+    const defaultUrls = {
+        'ollama': 'http://localhost:11434',
+        'vllm': 'http://localhost:8000',
+        'openai': 'https://api.openai.com'
+    };
+    document.getElementById('emb-base-url').value = defaultUrls[provider] || '';
+    updateModelPresets('emb', provider);
+}
+
+function onLLMProviderChange(type) {
+    const provider = document.getElementById(`llm-${type}-provider`).value;
+    const defaultUrls = {
+        'ollama': 'http://localhost:11434',
+        'openai': 'https://api.openai.com',
+        'vllm': 'http://localhost:8000'
+    };
+    document.getElementById(`llm-${type}-base-url`).value = defaultUrls[provider] || '';
+    updateModelPresets(`llm-${type}`, provider);
+}
+
+function togglePassword(id) {
+    const input = document.getElementById(id);
+    input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+async function saveEmbeddings() {
+    const data = {
+        provider: document.getElementById('emb-provider').value,
+        model: document.getElementById('emb-model').value,
+        base_url: document.getElementById('emb-base-url').value,
+        dimension: parseInt(document.getElementById('emb-dimension').value) || 1536,
+    };
+
+    const apiKey = document.getElementById('emb-api-key').value;
+    if (apiKey) data.api_key = apiKey;
+
+    try {
+        const response = await fetch('/api/settings/embeddings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        alert(result.message);
+        loadSettings();
+    } catch (error) {
+        alert('Failed to save: ' + error.message);
+    }
+}
+
+async function saveLLM(type) {
+    const data = {
+        model_type: type,
+        provider: document.getElementById(`llm-${type}-provider`).value,
+        model: document.getElementById(`llm-${type}-model`).value,
+        base_url: document.getElementById(`llm-${type}-base-url`).value,
+        temperature: parseFloat(document.getElementById(`llm-${type}-temperature`).value) || 0.3,
+        max_tokens: parseInt(document.getElementById(`llm-${type}-max-tokens`).value) || 32000,
+    };
+
+    const apiKey = document.getElementById(`llm-${type}-api-key`).value;
+    if (apiKey) data.api_key = apiKey;
+
+    try {
+        const response = await fetch('/api/settings/llm', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        alert(result.message);
+        loadSettings();
+    } catch (error) {
+        alert('Failed to save: ' + error.message);
+    }
+}
+
+async function testEmbeddings() {
+    const resultDiv = document.getElementById('embeddings-test-result');
+    resultDiv.classList.remove('hidden');
+    resultDiv.className = 'mb-4 p-3 rounded bg-slate-700 text-slate-300';
+    resultDiv.textContent = 'Testing connection...';
+
+    try {
+        const response = await fetch('/api/settings/test/embeddings', { method: 'POST' });
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            resultDiv.className = 'mb-4 p-3 rounded bg-emerald-900/50 border border-emerald-700 text-emerald-300';
+            resultDiv.innerHTML = `<strong>Success!</strong> ${result.message}`;
+        } else {
+            resultDiv.className = 'mb-4 p-3 rounded bg-red-900/50 border border-red-700 text-red-300';
+            resultDiv.innerHTML = `<strong>Error:</strong> ${result.message}`;
+        }
+    } catch (error) {
+        resultDiv.className = 'mb-4 p-3 rounded bg-red-900/50 border border-red-700 text-red-300';
+        resultDiv.innerHTML = `<strong>Error:</strong> ${error.message}`;
+    }
+}
+
+async function testLLM(type) {
+    const resultDiv = document.getElementById(`llm-${type}-test-result`);
+    resultDiv.classList.remove('hidden');
+    resultDiv.className = 'mb-4 p-3 rounded bg-slate-700 text-slate-300';
+    resultDiv.textContent = 'Testing connection...';
+
+    try {
+        const response = await fetch(`/api/settings/test/llm/${type}`, { method: 'POST' });
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            resultDiv.className = 'mb-4 p-3 rounded bg-emerald-900/50 border border-emerald-700 text-emerald-300';
+            resultDiv.innerHTML = `<strong>Success!</strong> ${result.message}<br><em>Response: "${result.response_preview}"</em>`;
+        } else {
+            resultDiv.className = 'mb-4 p-3 rounded bg-red-900/50 border border-red-700 text-red-300';
+            resultDiv.innerHTML = `<strong>Error:</strong> ${result.message}`;
+        }
+    } catch (error) {
+        resultDiv.className = 'mb-4 p-3 rounded bg-red-900/50 border border-red-700 text-red-300';
+        resultDiv.innerHTML = `<strong>Error:</strong> ${error.message}`;
+    }
+}
+</script>
+{% endblock %}
