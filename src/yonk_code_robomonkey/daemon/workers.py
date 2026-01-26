@@ -18,6 +18,8 @@ import asyncpg
 from yonk_code_robomonkey.config.daemon import DaemonConfig
 from yonk_code_robomonkey.daemon.queue import JobQueue, Job
 from yonk_code_robomonkey.daemon.processors import get_processor
+from yonk_code_robomonkey.daemon.kb_queue import KBJobQueue, KBJob
+from yonk_code_robomonkey.daemon.kb_processors import get_kb_processor
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +27,17 @@ logger = logging.getLogger(__name__)
 class WorkerPool:
     """Manages concurrent workers for job processing with configurable parallelism."""
 
-    def __init__(self, config: DaemonConfig, pool: asyncpg.Pool, job_queue: JobQueue):
+    def __init__(
+        self,
+        config: DaemonConfig,
+        pool: asyncpg.Pool,
+        job_queue: JobQueue,
+        kb_queue: Optional[KBJobQueue] = None,
+    ):
         self.config = config
         self.pool = pool
         self.job_queue = job_queue
+        self.kb_queue = kb_queue
         self.running = False
 
         # Processing mode
@@ -54,6 +63,14 @@ class WorkerPool:
             "EMBED_MISSING", "EMBED_SUMMARIES", "DOCS_SCAN", "TAG_RULES_SYNC",
             "REGENERATE_SUMMARY", "SUMMARIZE_FILES", "SUMMARIZE_SYMBOLS",
         ]
+
+        # KB job types (for knowledge base document processing)
+        self.kb_job_types = [
+            "DOC_INDEX", "DOC_EMBED", "DOC_SUMMARIZE", "DOC_FEATURES",
+        ]
+
+        # Semaphore for KB jobs (limit concurrent KB processing)
+        self.kb_semaphore = asyncio.Semaphore(2)  # Max 2 concurrent KB jobs
 
         # Legacy worker type configuration (for backwards compatibility)
         self.worker_types = {
@@ -170,6 +187,41 @@ class WorkerPool:
                 "error_message": str(e),
             }
             await self.job_queue.fail_job(job.id, str(e), error_detail)
+
+    async def _process_kb_job(self, job: KBJob):
+        """Process a single KB job with concurrency control."""
+        timeout_sec = self.config.workers.job_timeout_sec
+
+        async with self.kb_semaphore:
+            try:
+                logger.info(f"Processing KB job {job.id}: {job.job_type} for {job.source_name}")
+
+                # Get processor for this job type
+                processor = get_kb_processor(job.job_type, self.config, self.pool)
+
+                # Process the job with timeout
+                try:
+                    await asyncio.wait_for(
+                        processor.process(job),
+                        timeout=timeout_sec
+                    )
+                except asyncio.TimeoutError:
+                    raise TimeoutError(f"KB job timed out after {timeout_sec} seconds")
+
+                # Mark job complete
+                await self.kb_queue.complete_job(job.id)
+
+                logger.info(f"KB job {job.id} completed successfully")
+
+            except Exception as e:
+                logger.error(f"KB job {job.id} failed: {e}", exc_info=True)
+
+                # Mark job failed (with retry logic)
+                error_detail = {
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                }
+                await self.kb_queue.fail_job(job.id, str(e), error_detail)
 
     async def _maybe_enqueue_docs_scan(self, job: Job):
         """Auto-enqueue document scanning after indexing."""
@@ -343,7 +395,7 @@ class WorkerPool:
         )
 
     async def _worker_loop(self, worker_id: str, job_types: list[str], skip_global_semaphore: bool = False):
-        """Worker loop: claim and process jobs.
+        """Worker loop: claim and process jobs (both repo and KB).
 
         Args:
             worker_id: Unique identifier for this worker
@@ -354,20 +406,32 @@ class WorkerPool:
 
         while self.running:
             try:
-                # Claim jobs
+                # Claim repo jobs
                 jobs = await self.job_queue.claim_jobs(
                     worker_types=job_types,
                     limit=1  # Claim one at a time for better concurrency control
                 )
 
-                if not jobs:
+                # Also claim KB jobs if KB queue is available
+                kb_jobs = []
+                if self.kb_queue:
+                    kb_jobs = await self.kb_queue.claim_jobs(
+                        job_types=self.kb_job_types,
+                        limit=1
+                    )
+
+                if not jobs and not kb_jobs:
                     # No jobs available, sleep and retry
                     await asyncio.sleep(self.config.workers.poll_interval_sec)
                     continue
 
-                # Process each claimed job
+                # Process repo jobs
                 for job in jobs:
                     await self._process_job(job, skip_global_semaphore=skip_global_semaphore)
+
+                # Process KB jobs
+                for kb_job in kb_jobs:
+                    await self._process_kb_job(kb_job)
 
             except asyncio.CancelledError:
                 logger.info(f"Worker {worker_id} cancelled")

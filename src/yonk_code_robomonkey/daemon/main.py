@@ -15,6 +15,7 @@ import asyncpg
 
 from yonk_code_robomonkey.config.daemon import DaemonConfig
 from yonk_code_robomonkey.daemon.queue import JobQueue
+from yonk_code_robomonkey.daemon.kb_queue import KBJobQueue
 from yonk_code_robomonkey.daemon.workers import WorkerPool
 from yonk_code_robomonkey.llm import set_llm_config
 
@@ -28,6 +29,7 @@ class CodeGraphDaemon:
         self.config = config
         self.pool: Optional[asyncpg.Pool] = None
         self.job_queue: Optional[JobQueue] = None
+        self.kb_queue: Optional[KBJobQueue] = None
         self.worker_pool: Optional[WorkerPool] = None
         self.running = False
         self.shutdown_event = asyncio.Event()
@@ -75,11 +77,25 @@ class CodeGraphDaemon:
             worker_id=self.config.daemon_id,
         )
 
-        # Create worker pool
+        # Create KB job queue
+        self.kb_queue = KBJobQueue(
+            pool=self.pool,
+            worker_id=self.config.daemon_id,
+        )
+
+        # Ensure KB job queue schema exists
+        await self.kb_queue.ensure_schema()
+
+        # Auto-detect and configure embedding dimension if embeddings enabled
+        if self.config.embeddings.enabled:
+            await self._configure_embedding_dimension()
+
+        # Create worker pool (with KB queue)
         self.worker_pool = WorkerPool(
             config=self.config,
             pool=self.pool,
             job_queue=self.job_queue,
+            kb_queue=self.kb_queue,
         )
 
         # Register daemon instance
@@ -87,11 +103,68 @@ class CodeGraphDaemon:
 
         logger.info("Daemon startup complete")
 
+    async def _configure_embedding_dimension(self):
+        """Auto-detect embedding dimension and configure database tables."""
+        from yonk_code_robomonkey.daemon.kb_processors import (
+            detect_embedding_dimension,
+            ensure_embedding_table_dimension,
+        )
+
+        logger.info("Detecting embedding dimension from configured model...")
+
+        # Determine provider settings
+        emb = self.config.embeddings
+        if emb.provider == "ollama":
+            base_url = emb.ollama.base_url
+            api_key = ""
+        elif emb.provider == "vllm":
+            base_url = emb.vllm.base_url
+            api_key = emb.vllm.api_key
+        else:  # openai
+            base_url = emb.openai.base_url
+            api_key = emb.openai.api_key
+
+        # Probe for actual dimension
+        detected_dim = await detect_embedding_dimension(
+            provider=emb.provider,
+            model=emb.model,
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+        logger.info(f"Detected embedding dimension: {detected_dim} (configured: {emb.dimension})")
+
+        # If different from configured, update config and database
+        if detected_dim != emb.dimension:
+            logger.warning(
+                f"Embedding dimension mismatch: config says {emb.dimension}, "
+                f"model produces {detected_dim}. Adjusting tables..."
+            )
+
+        # Ensure database tables match detected dimension
+        async with self.pool.acquire() as conn:
+            # Check if docs schema exists
+            schema_exists = await conn.fetchval("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'robomonkey_docs'
+                    AND table_name = 'doc_chunk_embedding'
+                )
+            """)
+
+            if schema_exists:
+                recreated = await ensure_embedding_table_dimension(conn, detected_dim)
+                if recreated:
+                    logger.info(f"Recreated embedding tables with dimension {detected_dim}")
+
     async def _ensure_control_schema(self):
-        """Initialize control schema if not exists."""
+        """Initialize control schema and docs schema if not exists."""
         logger.info("Ensuring control schema exists")
 
-        ddl_path = Path(__file__).resolve().parents[3] / "scripts" / "init_control.sql"
+        scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
+        ddl_path = scripts_dir / "init_control.sql"
+        docs_ddl_path = scripts_dir / "init_docs_schema.sql"
+
         if not ddl_path.exists():
             logger.warning(f"Control schema DDL not found at {ddl_path}")
             return
@@ -99,7 +172,7 @@ class CodeGraphDaemon:
         ddl = ddl_path.read_text()
 
         async with self.pool.acquire() as conn:
-            # Check if schema exists
+            # Check if control schema exists
             schema_exists = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'robomonkey_control')"
             )
@@ -110,6 +183,19 @@ class CodeGraphDaemon:
                 logger.info("Control schema created successfully")
             else:
                 logger.info("Control schema already exists")
+
+            # Check if docs schema exists
+            docs_schema_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'robomonkey_docs')"
+            )
+
+            if not docs_schema_exists and docs_ddl_path.exists():
+                logger.info("Creating docs schema")
+                docs_ddl = docs_ddl_path.read_text()
+                await conn.execute(docs_ddl)
+                logger.info("Docs schema created successfully")
+            elif docs_schema_exists:
+                logger.info("Docs schema already exists")
 
     async def _register_daemon(self):
         """Register this daemon instance."""

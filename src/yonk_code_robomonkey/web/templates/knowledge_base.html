@@ -1,0 +1,1339 @@
+{% extends "base.html" %}
+
+{% block title %}Knowledge Base - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-100">Knowledge Base</h2>
+            <p class="text-sm text-slate-400 mt-1">Index and search documentation for RAG retrieval</p>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="showUploadModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">
+                + Upload Document
+            </button>
+            <button onclick="showIndexModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium">
+                Index Directory
+            </button>
+            <button onclick="retryAllFailed()" class="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded font-medium">
+                Retry Failed
+            </button>
+            <button onclick="rebuildIndexes()" class="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium">
+                Rebuild Indexes
+            </button>
+            <button onclick="loadDocuments()" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Search Section -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-slate-100 mb-4">Search Documents</h3>
+        <form onsubmit="searchDocuments(event)" class="space-y-4">
+            <div class="flex gap-4">
+                <input type="text" id="search-query"
+                    class="flex-1 px-4 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="Search for Oracle migration guides, CONNECT BY examples...">
+                <select id="search-mode" class="px-4 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100">
+                    <option value="hybrid">Hybrid (Vector + FTS)</option>
+                    <option value="semantic">Semantic Only</option>
+                    <option value="fts">Full-Text Only</option>
+                </select>
+                <button type="submit" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">
+                    Search
+                </button>
+            </div>
+            <div class="flex gap-4 flex-wrap">
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-slate-400">Doc Types:</label>
+                    <label class="inline-flex items-center gap-1 text-sm text-slate-300">
+                        <input type="checkbox" value="pdf" class="doc-type-filter rounded bg-slate-700 border-slate-600"> PDF
+                    </label>
+                    <label class="inline-flex items-center gap-1 text-sm text-slate-300">
+                        <input type="checkbox" value="markdown" class="doc-type-filter rounded bg-slate-700 border-slate-600"> Markdown
+                    </label>
+                    <label class="inline-flex items-center gap-1 text-sm text-slate-300">
+                        <input type="checkbox" value="html" class="doc-type-filter rounded bg-slate-700 border-slate-600"> HTML
+                    </label>
+                    <label class="inline-flex items-center gap-1 text-sm text-slate-300">
+                        <input type="checkbox" value="text" class="doc-type-filter rounded bg-slate-700 border-slate-600"> Text
+                    </label>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-slate-400">Top K:</label>
+                    <input type="number" id="search-top-k" value="10" min="1" max="50"
+                        class="w-16 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm">
+                </div>
+            </div>
+        </form>
+        <div id="search-results" class="mt-4 hidden">
+            <!-- Search results populated here -->
+        </div>
+    </div>
+
+    <!-- Documents List -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg" id="docs-section">
+        <div class="p-6">
+            <h3 class="text-lg font-semibold text-slate-100 mb-4">Indexed Documents</h3>
+            <div id="docs-content">
+                <p class="text-slate-400">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Embeddings Status Section -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6" id="embeddings-section">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-slate-100">Embeddings Status</h3>
+            <button onclick="loadEmbeddingStats()" class="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Refresh
+            </button>
+        </div>
+        <div id="embeddings-content">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Help Section -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-slate-100 mb-3">About the Knowledge Base</h3>
+        <div class="text-sm text-slate-400 space-y-2">
+            <p>The knowledge base stores and indexes documentation for RAG (Retrieval Augmented Generation) queries.</p>
+            <ul class="list-disc list-inside space-y-1 ml-2">
+                <li><strong class="text-slate-200">PDF Documents</strong> - Extracted with structure preservation (headings, tables, code blocks)</li>
+                <li><strong class="text-slate-200">Markdown/HTML</strong> - Parsed with heading hierarchy and code block detection</li>
+                <li><strong class="text-slate-200">Smart Chunking</strong> - 500-1500 token chunks with overlap for context continuity</li>
+                <li><strong class="text-slate-200">Auto-Tagging</strong> - Oracle constructs (ROWNUM, CONNECT BY, DECODE) and EPAS features are auto-detected</li>
+                <li><strong class="text-slate-200">Hybrid Search</strong> - Combines vector similarity (60%) and full-text search (40%)</li>
+            </ul>
+            <p class="mt-3">Use MCP tools <code class="bg-slate-700 px-1 rounded">doc_search</code> and <code class="bg-slate-700 px-1 rounded">doc_get_context</code> for programmatic access.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Document Modal -->
+<div id="upload-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-lg w-full mx-4">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Upload Document</h3>
+            <button onclick="closeUploadModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <form id="upload-form" onsubmit="submitUpload(event)" class="p-4 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Document Name *</label>
+                <input type="text" id="upload-name" required
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="oracle-migration-guide">
+                <p class="text-xs text-slate-500 mt-1">Unique name for this document.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">File *</label>
+                <input type="file" id="upload-file" required accept=".pdf,.md,.html,.txt,.rst"
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-blue-600 file:text-white hover:file:bg-blue-700">
+                <p class="text-xs text-slate-500 mt-1">Supported: PDF, Markdown, HTML, Plain text, RST</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Title (Optional)</label>
+                <input type="text" id="upload-title"
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="Oracle to PostgreSQL Migration Guide">
+            </div>
+        </form>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeUploadModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button id="upload-submit-btn" onclick="document.getElementById('upload-form').requestSubmit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                Upload & Index
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Index Directory Modal -->
+<div id="index-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-lg w-full mx-4">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Index Directory</h3>
+            <button onclick="closeIndexModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <form id="index-form" onsubmit="submitIndex(event)" class="p-4 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Document Name *</label>
+                <input type="text" id="index-name" required
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="epas-docs">
+                <p class="text-xs text-slate-500 mt-1">Unique name for this document collection.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Path *</label>
+                <input type="text" id="index-path" required
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="/sources/docs/epas-guide.pdf">
+                <p class="text-xs text-slate-500 mt-1">File or directory path. Use /sources/* paths for Docker-mounted directories.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Title (Optional)</label>
+                <input type="text" id="index-title"
+                    class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                    placeholder="EDB Postgres Advanced Server Documentation">
+            </div>
+            <div>
+                <label class="flex items-center gap-2 text-sm text-slate-300">
+                    <input type="checkbox" id="index-recursive" checked class="rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500/50">
+                    Process subdirectories recursively
+                </label>
+            </div>
+        </form>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeIndexModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button id="index-submit-btn" onclick="document.getElementById('index-form').requestSubmit()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                Start Indexing
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- View Chunks Modal -->
+<div id="chunks-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 id="chunks-modal-title" class="text-lg font-semibold text-slate-100">Document Chunks</h3>
+            <button onclick="closeChunksModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div id="chunks-content" class="p-4 overflow-y-auto flex-1">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="delete-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div class="p-4 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-red-400">Delete Document</h3>
+        </div>
+        <div class="p-4">
+            <p class="text-slate-300">Are you sure you want to delete <strong id="delete-doc-name" class="text-slate-100"></strong>?</p>
+            <p class="text-sm text-slate-400 mt-2">This will delete all chunks and embeddings for this document.</p>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeDeleteModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Cancel
+            </button>
+            <button onclick="confirmDelete()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded">
+                Delete
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Summary Modal -->
+<div id="summary-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 id="summary-modal-title" class="text-lg font-semibold text-emerald-400">Document Summary</h3>
+            <button onclick="closeSummaryModal()" class="text-slate-400 hover:text-slate-200">&times;</button>
+        </div>
+        <div id="summary-content" class="p-4 overflow-y-auto flex-1">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+        <div class="flex justify-end p-4 border-t border-slate-700">
+            <button onclick="closeSummaryModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Features Modal -->
+<div id="features-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <h3 id="features-modal-title" class="text-lg font-semibold text-purple-400">Extracted Features</h3>
+            <button onclick="closeFeaturesModal()" class="text-slate-400 hover:text-slate-200">&times;</button>
+        </div>
+        <div id="features-content" class="p-4 overflow-y-auto flex-1">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+        <div class="flex justify-end p-4 border-t border-slate-700">
+            <button onclick="closeFeaturesModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let deleteTarget = null;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    const hasProcessing = await loadDocuments();
+    await loadEmbeddingStats();
+    // Auto-start polling if any documents are processing
+    if (hasProcessing) {
+        startStatusPolling();
+    }
+});
+
+async function loadDocuments() {
+    const content = document.getElementById('docs-content');
+    content.innerHTML = '<p class="text-slate-400">Loading...</p>';
+
+    try {
+        // Add timeout to prevent infinite hanging
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
+        const response = await fetch('/api/docs/', { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        const data = await response.json();
+
+        // Check for error in response body
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        if (!response.ok) {
+            throw new Error(data.detail || data.message || 'Failed to load documents');
+        }
+
+        if (!data.documents || data.documents.length === 0) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <p class="text-slate-400 mb-4">No documents indexed yet</p>
+                    <div class="flex justify-center gap-2">
+                        <button onclick="showUploadModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+                            Upload Document
+                        </button>
+                        <button onclick="showIndexModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+                            Index Directory
+                        </button>
+                    </div>
+                </div>
+            `;
+            return false;
+        }
+
+        // Check if any documents are processing (for caller to decide on polling)
+        const hasProcessing = data.documents.some(d =>
+            d.status === 'pending' ||
+            d.status === 'processing' ||
+            d.stop_requested
+        );
+
+        content.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Type</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Title</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Progress</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Pages</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Status</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${data.documents.map(doc => `
+                            <tr class="hover:bg-slate-700/50" data-doc-name="${doc.name}" data-doc-status="${doc.status}">
+                                <td class="px-4 py-3 font-medium text-slate-100">${doc.name}</td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(doc.doc_type)}">${doc.doc_type.toUpperCase()}</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm text-slate-400 truncate max-w-xs" title="${doc.title || ''}">${doc.title || '-'}</td>
+                                <td class="px-4 py-3 text-sm text-slate-300 progress-cell">
+                                    ${renderProgress(doc)}
+                                </td>
+                                <td class="px-4 py-3 text-sm text-slate-300 pages-count">${doc.total_pages || '-'}</td>
+                                <td class="px-4 py-3 text-sm status-cell">
+                                    ${renderStatus(doc)}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="flex gap-1 flex-wrap actions-cell">
+                                        ${renderActions(doc)}
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        return hasProcessing;
+    } catch (error) {
+        let errorMsg = error.message;
+        if (error.name === 'AbortError') {
+            errorMsg = 'Request timed out. Check if the database is running.';
+        }
+        content.innerHTML = `
+            <div class="text-center py-8">
+                <p class="text-red-400 mb-4">Error loading documents: ${errorMsg}</p>
+                <button onclick="loadDocuments()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                    Retry
+                </button>
+            </div>
+        `;
+        return false;
+    }
+}
+
+function getTypeColor(type) {
+    const colors = {
+        pdf: 'bg-red-900/50 text-red-400',
+        markdown: 'bg-purple-900/50 text-purple-400',
+        html: 'bg-orange-900/50 text-orange-400',
+        text: 'bg-slate-600 text-slate-300'
+    };
+    return colors[type] || colors.text;
+}
+
+function getStatusColor(status) {
+    const colors = {
+        ready: 'text-emerald-400',
+        processing: 'text-yellow-400',
+        pending: 'text-slate-400',
+        stopped: 'text-orange-400',
+        failed: 'text-red-400'
+    };
+    return colors[status] || 'text-slate-400';
+}
+
+function renderProgress(doc) {
+    const count = doc.chunks_count || 0;
+    const expected = doc.chunks_expected;
+
+    if (doc.status === 'processing' || doc.status === 'stopped') {
+        if (expected && expected > 0) {
+            const percent = Math.round((count / expected) * 100);
+            return `
+                <div class="flex flex-col gap-1">
+                    <div class="flex items-center gap-2">
+                        <span class="chunks-count">${count}</span>
+                        <span class="text-slate-500">/</span>
+                        <span class="text-slate-400">${expected}</span>
+                    </div>
+                    <div class="w-24 h-1.5 bg-slate-600 rounded-full overflow-hidden">
+                        <div class="h-full bg-yellow-500 transition-all duration-300" style="width: ${percent}%"></div>
+                    </div>
+                </div>
+            `;
+        }
+        return `<span class="chunks-count">${count}</span>`;
+    }
+
+    return `<span class="chunks-count">${count}</span>`;
+}
+
+function renderStatus(doc) {
+    const isProcessing = doc.status === 'processing' || doc.status === 'pending';
+    const isStopping = doc.stop_requested;
+
+    let statusHtml = `<div class="flex items-center gap-2">`;
+
+    if (isProcessing) {
+        statusHtml += `
+            <svg class="animate-spin h-4 w-4 text-yellow-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        `;
+    }
+
+    if (isStopping) {
+        statusHtml += `<span class="text-orange-400">stopping...</span>`;
+    } else {
+        statusHtml += `<span class="${getStatusColor(doc.status)}">${doc.status}</span>`;
+    }
+
+    if (doc.status === 'failed' && doc.error_message) {
+        statusHtml += `
+            <button onclick="showError('${escapeHtml(doc.error_message).replace(/'/g, "\\'")}')"
+                class="text-red-400 hover:text-red-300" title="View error">
+                ⚠️
+            </button>
+        `;
+    }
+
+    statusHtml += `</div>`;
+    return statusHtml;
+}
+
+function renderActions(doc) {
+    const isProcessing = doc.status === 'processing' || doc.status === 'pending';
+    const isStopped = doc.status === 'stopped';
+    const isFailed = doc.status === 'failed';
+    const isReady = doc.status === 'ready';
+
+    let html = '';
+
+    // Stop button (only for processing documents)
+    if (isProcessing && !doc.stop_requested) {
+        html += `
+            <button onclick="stopProcessing('${doc.name}')" class="px-2 py-1 text-xs bg-orange-900/50 hover:bg-orange-800/50 text-orange-400 border border-orange-700 rounded">
+                Stop
+            </button>
+        `;
+    }
+
+    // Resume button (for stopped or failed documents)
+    if (isStopped || isFailed) {
+        html += `
+            <button onclick="resumeProcessing('${doc.name}')" class="px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded">
+                Resume
+            </button>
+        `;
+    }
+
+    // Summary button (only for ready documents)
+    html += `
+        <button onclick="viewSummary('${doc.name}')" class="px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded" ${!isReady ? 'disabled' : ''}>
+            Summary
+        </button>
+    `;
+
+    // Features button (only for ready documents)
+    html += `
+        <button onclick="viewFeatures('${doc.name}')" class="px-2 py-1 text-xs bg-purple-900/50 hover:bg-purple-800/50 text-purple-400 border border-purple-700 rounded" ${!isReady ? 'disabled' : ''}>
+            Features
+        </button>
+    `;
+
+    // Chunks button (only for ready or stopped documents with chunks)
+    html += `
+        <button onclick="viewChunks('${doc.name}')" class="px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-slate-200 rounded" ${!isReady && !isStopped ? 'disabled' : ''}>
+            Chunks
+        </button>
+    `;
+
+    // Reindex button (always available)
+    html += `
+        <button onclick="reindexDoc('${doc.name}')" class="px-2 py-1 text-xs bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded">
+            Reindex
+        </button>
+    `;
+
+    // Delete button (always available)
+    html += `
+        <button onclick="showDeleteModal('${doc.name}')" class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded">
+            Delete
+        </button>
+    `;
+
+    return html;
+}
+
+// Search
+async function searchDocuments(event) {
+    event.preventDefault();
+
+    const query = document.getElementById('search-query').value;
+    if (!query.trim()) return;
+
+    const searchMode = document.getElementById('search-mode').value;
+    const topK = parseInt(document.getElementById('search-top-k').value) || 10;
+
+    const docTypes = [];
+    document.querySelectorAll('.doc-type-filter:checked').forEach(cb => {
+        docTypes.push(cb.value);
+    });
+
+    const resultsDiv = document.getElementById('search-results');
+    resultsDiv.classList.remove('hidden');
+    resultsDiv.innerHTML = '<p class="text-slate-400">Searching...</p>';
+
+    try {
+        const response = await fetch('/api/docs/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: query,
+                search_mode: searchMode,
+                top_k: topK,
+                doc_types: docTypes.length > 0 ? docTypes : null
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.chunks.length === 0) {
+            resultsDiv.innerHTML = `
+                <div class="text-center py-4 text-slate-400">
+                    No results found for "${query}"
+                </div>
+            `;
+            return;
+        }
+
+        resultsDiv.innerHTML = `
+            <div class="text-sm text-slate-400 mb-3">
+                Found ${data.total_found} results in ${data.execution_time_ms.toFixed(0)}ms (${data.search_mode} mode)
+            </div>
+            <div class="space-y-3">
+                ${data.chunks.map((chunk, i) => `
+                    <div class="p-4 bg-slate-700/50 border border-slate-600 rounded">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs text-slate-500">#${i + 1}</span>
+                                <span class="font-medium text-slate-200">${chunk.source_document}</span>
+                                ${chunk.heading ? `<span class="text-slate-400">/ ${chunk.heading}</span>` : ''}
+                            </div>
+                            <div class="flex gap-2 text-xs">
+                                ${chunk.vec_score ? `<span class="text-blue-400" title="Vector score">V: ${chunk.vec_score.toFixed(3)}</span>` : ''}
+                                ${chunk.fts_score ? `<span class="text-emerald-400" title="FTS score">F: ${chunk.fts_score.toFixed(3)}</span>` : ''}
+                                <span class="text-slate-400">Score: ${chunk.score.toFixed(3)}</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-slate-300 mb-2 whitespace-pre-wrap">${escapeHtml(chunk.content)}</div>
+                        <div class="flex flex-wrap gap-2 text-xs">
+                            ${chunk.page_number ? `<span class="px-2 py-0.5 bg-slate-600 rounded">Page ${chunk.page_number}</span>` : ''}
+                            ${chunk.section_path.length > 0 ? `<span class="px-2 py-0.5 bg-slate-600 rounded">${chunk.section_path.join(' > ')}</span>` : ''}
+                            ${chunk.oracle_constructs.map(t => `<span class="px-2 py-0.5 bg-orange-900/50 text-orange-400 rounded">${t}</span>`).join('')}
+                            ${chunk.epas_features.map(t => `<span class="px-2 py-0.5 bg-purple-900/50 text-purple-400 rounded">${t}</span>`).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (error) {
+        resultsDiv.innerHTML = `<p class="text-red-400">Search error: ${error.message}</p>`;
+    }
+}
+
+// Upload Modal
+function showUploadModal() {
+    document.getElementById('upload-name').value = '';
+    document.getElementById('upload-file').value = '';
+    document.getElementById('upload-title').value = '';
+    document.getElementById('upload-modal').classList.remove('hidden');
+}
+
+function closeUploadModal() {
+    document.getElementById('upload-modal').classList.add('hidden');
+}
+
+async function submitUpload(event) {
+    event.preventDefault();
+
+    const name = document.getElementById('upload-name').value;
+    const file = document.getElementById('upload-file').files[0];
+    const title = document.getElementById('upload-title').value;
+
+    if (!file) {
+        alert('Please select a file');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('file', file);
+    if (title) formData.append('title', title);
+
+    // Show loading state
+    const uploadBtn = document.getElementById('upload-submit-btn');
+    const originalText = uploadBtn.textContent;
+    uploadBtn.disabled = true;
+    uploadBtn.innerHTML = `
+        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Processing ${file.name}...
+    `;
+
+    try {
+        const response = await fetch('/api/docs/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Upload failed');
+        }
+
+        // Close modal and refresh - status shown in table
+        closeUploadModal();
+        await loadDocuments();
+    } catch (error) {
+        alert('Error: ' + error.message);  // Only alert on errors
+    } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = originalText;
+    }
+}
+
+// Index Modal
+function showIndexModal() {
+    document.getElementById('index-name').value = '';
+    document.getElementById('index-path').value = '';
+    document.getElementById('index-title').value = '';
+    document.getElementById('index-recursive').checked = true;
+    document.getElementById('index-modal').classList.remove('hidden');
+}
+
+function closeIndexModal() {
+    document.getElementById('index-modal').classList.add('hidden');
+}
+
+async function submitIndex(event) {
+    event.preventDefault();
+
+    const name = document.getElementById('index-name').value;
+    const path = document.getElementById('index-path').value;
+    const title = document.getElementById('index-title').value;
+    const recursive = document.getElementById('index-recursive').checked;
+
+    // Show loading state
+    const indexBtn = document.getElementById('index-submit-btn');
+    const originalText = indexBtn.textContent;
+    indexBtn.disabled = true;
+    indexBtn.innerHTML = `
+        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Queuing...
+    `;
+
+    try {
+        const response = await fetch('/api/docs/index', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                path: path,
+                description: title || null,
+                recursive: recursive
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Index failed');
+        }
+
+        // Close modal and refresh - status shown in table
+        closeIndexModal();
+        await loadDocuments();
+
+        // Start polling for status updates if there are pending files
+        const pendingCount = result.sources ? result.sources.filter(s => s.status === 'pending').length : 0;
+        if (pendingCount > 0) {
+            startStatusPolling();
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);  // Only alert on errors
+    } finally {
+        indexBtn.disabled = false;
+        indexBtn.textContent = originalText;
+    }
+}
+
+// Poll for document status updates (without full page refresh)
+let statusPollActive = false;
+let statusPollPending = false;
+const STATUS_POLL_INTERVAL = 3000; // Poll every 3 seconds
+
+function startStatusPolling() {
+    if (statusPollActive) return; // Already polling
+    statusPollActive = true;
+    scheduleNextPoll();
+}
+
+function scheduleNextPoll() {
+    if (!statusPollActive) return;
+    setTimeout(pollDocumentStatus, STATUS_POLL_INTERVAL);
+}
+
+async function pollDocumentStatus() {
+    if (!statusPollActive) return;
+    if (statusPollPending) {
+        // Previous request still in flight - skip this cycle
+        scheduleNextPoll();
+        return;
+    }
+
+    statusPollPending = true;
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+        const response = await fetch('/api/docs/', { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        const data = await response.json();
+
+        // Check if any documents are still processing or have stop requested
+        const hasProcessing = data.documents.some(d =>
+            d.status === 'pending' ||
+            d.status === 'processing' ||
+            d.stop_requested
+        );
+
+        // Update only changed cells (no full reload)
+        updateDocumentRows(data.documents);
+
+        // Stop polling if nothing is processing
+        if (!hasProcessing) {
+            stopStatusPolling();
+            return;
+        }
+
+        // Schedule next poll
+        scheduleNextPoll();
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.warn('Status poll timed out, retrying...');
+        } else {
+            console.error('Status poll error:', error);
+        }
+        // Continue polling on error, but with backoff
+        if (statusPollActive) {
+            setTimeout(pollDocumentStatus, STATUS_POLL_INTERVAL * 2);
+        }
+    } finally {
+        statusPollPending = false;
+    }
+}
+
+function stopStatusPolling() {
+    statusPollActive = false;
+    statusPollPending = false;
+}
+
+function updateDocumentRows(documents) {
+    documents.forEach(doc => {
+        const row = document.querySelector(`tr[data-doc-name="${doc.name}"]`);
+        if (!row) return; // Row doesn't exist, might need full reload
+
+        // Check if status changed - may need to update actions
+        const oldStatus = row.getAttribute('data-doc-status');
+        const statusChanged = oldStatus !== doc.status;
+        if (statusChanged) {
+            row.setAttribute('data-doc-status', doc.status);
+        }
+
+        // Update progress cell (includes chunks count and progress bar)
+        const progressCell = row.querySelector('.progress-cell');
+        if (progressCell) {
+            progressCell.innerHTML = renderProgress(doc);
+        }
+
+        // Update pages count
+        const pagesCell = row.querySelector('.pages-count');
+        if (pagesCell) pagesCell.textContent = doc.total_pages || '-';
+
+        // Update status cell
+        const statusCell = row.querySelector('.status-cell');
+        if (statusCell) {
+            statusCell.innerHTML = renderStatus(doc);
+        }
+
+        // Update actions cell if status changed
+        if (statusChanged) {
+            const actionsCell = row.querySelector('.actions-cell');
+            if (actionsCell) {
+                actionsCell.innerHTML = renderActions(doc);
+            }
+        }
+    });
+}
+
+// View Chunks
+async function viewChunks(docName) {
+    document.getElementById('chunks-modal-title').textContent = `Chunks: ${docName}`;
+    document.getElementById('chunks-content').innerHTML = '<p class="text-slate-400">Loading chunks...</p>';
+    document.getElementById('chunks-modal').classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/api/docs/${docName}`);
+        const data = await response.json();
+
+        if (!data.chunks || data.chunks.length === 0) {
+            document.getElementById('chunks-content').innerHTML = '<p class="text-slate-400">No chunks found</p>';
+            return;
+        }
+
+        document.getElementById('chunks-content').innerHTML = `
+            <div class="space-y-4">
+                ${data.chunks.map((chunk, i) => `
+                    <div class="p-4 bg-slate-700/50 border border-slate-600 rounded">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="font-medium text-slate-200">Chunk #${chunk.chunk_index}</span>
+                                ${chunk.heading ? `<span class="text-slate-400">| ${chunk.heading}</span>` : ''}
+                                ${chunk.page_number ? `<span class="text-slate-500">| Page ${chunk.page_number}</span>` : ''}
+                            </div>
+                            <span class="text-xs text-slate-500">${chunk.char_count} chars</span>
+                        </div>
+                        <div class="text-sm text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">${escapeHtml(chunk.content)}</div>
+                        ${chunk.section_path.length > 0 ? `
+                            <div class="mt-2 text-xs text-slate-500">
+                                Path: ${chunk.section_path.join(' > ')}
+                            </div>
+                        ` : ''}
+                        <div class="flex flex-wrap gap-1 mt-2">
+                            ${(chunk.oracle_constructs || []).map(t => `<span class="px-2 py-0.5 text-xs bg-orange-900/50 text-orange-400 rounded">${t}</span>`).join('')}
+                            ${(chunk.epas_features || []).map(t => `<span class="px-2 py-0.5 text-xs bg-purple-900/50 text-purple-400 rounded">${t}</span>`).join('')}
+                            ${(chunk.topics || []).slice(0, 5).map(t => `<span class="px-2 py-0.5 text-xs bg-slate-600 text-slate-300 rounded">${t}</span>`).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('chunks-content').innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+    }
+}
+
+function closeChunksModal() {
+    document.getElementById('chunks-modal').classList.add('hidden');
+}
+
+// View Summary
+async function viewSummary(docName) {
+    document.getElementById('summary-modal-title').textContent = `Summary: ${docName}`;
+    document.getElementById('summary-content').innerHTML = '<p class="text-slate-400">Loading summary...</p>';
+    document.getElementById('summary-modal').classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/api/docs/${docName}/summary`);
+        const data = await response.json();
+
+        if (!data.summary) {
+            document.getElementById('summary-content').innerHTML = `
+                <p class="text-slate-400">No summary available yet. Summary will be generated when the document is processed.</p>
+            `;
+            return;
+        }
+
+        document.getElementById('summary-content').innerHTML = `
+            <div class="space-y-4">
+                <div>
+                    <h4 class="text-sm font-medium text-slate-400 mb-2">Summary</h4>
+                    <p class="text-slate-200">${escapeHtml(data.summary)}</p>
+                </div>
+                ${data.key_topics && data.key_topics.length > 0 ? `
+                    <div>
+                        <h4 class="text-sm font-medium text-slate-400 mb-2">Key Topics</h4>
+                        <div class="flex flex-wrap gap-2">
+                            ${data.key_topics.map(topic => `
+                                <span class="px-2 py-1 text-sm bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded">${escapeHtml(topic)}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                <div class="grid grid-cols-2 gap-4">
+                    ${data.target_audience ? `
+                        <div>
+                            <h4 class="text-sm font-medium text-slate-400 mb-1">Target Audience</h4>
+                            <p class="text-slate-300 capitalize">${data.target_audience}</p>
+                        </div>
+                    ` : ''}
+                    ${data.document_purpose ? `
+                        <div>
+                            <h4 class="text-sm font-medium text-slate-400 mb-1">Document Purpose</h4>
+                            <p class="text-slate-300 capitalize">${data.document_purpose.replace('-', ' ')}</p>
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="text-xs text-slate-500 pt-2 border-t border-slate-700">
+                    Generated by: ${data.generated_by || 'unknown'}
+                    ${data.generated_at ? ` | ${new Date(data.generated_at).toLocaleString()}` : ''}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('summary-content').innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+    }
+}
+
+function closeSummaryModal() {
+    document.getElementById('summary-modal').classList.add('hidden');
+}
+
+// View Features
+async function viewFeatures(docName) {
+    document.getElementById('features-modal-title').textContent = `Features: ${docName}`;
+    document.getElementById('features-content').innerHTML = '<p class="text-slate-400">Loading features...</p>';
+    document.getElementById('features-modal').classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/api/docs/${docName}/features`);
+        const data = await response.json();
+
+        if (!data.features || data.features.length === 0) {
+            document.getElementById('features-content').innerHTML = `
+                <p class="text-slate-400">No features extracted yet. Features will be extracted when the document is processed.</p>
+            `;
+            return;
+        }
+
+        // Group features by category
+        const byCategory = {};
+        data.features.forEach(f => {
+            const cat = f.category || 'other';
+            if (!byCategory[cat]) byCategory[cat] = [];
+            byCategory[cat].push(f);
+        });
+
+        const categoryColors = {
+            oracle: 'bg-orange-900/50 text-orange-400 border-orange-700',
+            epas: 'bg-purple-900/50 text-purple-400 border-purple-700',
+            postgres: 'bg-blue-900/50 text-blue-400 border-blue-700',
+            other: 'bg-slate-600 text-slate-300 border-slate-500'
+        };
+
+        const typeIcons = {
+            package: '📦',
+            function: 'ƒ',
+            procedure: '⚙️',
+            syntax: '✦',
+            datatype: '📊',
+            parameter: '⚡',
+            tool: '🔧',
+            feature: '✨'
+        };
+
+        // Store features data for click handling
+        window._featuresData = data.features;
+
+        document.getElementById('features-content').innerHTML = `
+            <div class="text-sm text-slate-400 mb-4">
+                Found ${data.total_features} features across ${Object.keys(byCategory).length} categories.
+                <span class="text-slate-500">Click a feature name to see its description.</span>
+            </div>
+            <div class="space-y-6">
+                ${Object.entries(byCategory).map(([category, features]) => `
+                    <div>
+                        <h4 class="text-sm font-medium text-slate-300 mb-2 capitalize">${category} (${features.length})</h4>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full text-sm">
+                                <thead class="bg-slate-700">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-slate-300">Name</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-slate-300">Type</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-slate-300">EPAS Support</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-slate-300">PG Equivalent</th>
+                                        <th class="px-3 py-2 text-right text-xs font-medium text-slate-300">Mentions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-600">
+                                    ${features.map((f, idx) => `
+                                        <tr class="hover:bg-slate-700/50 cursor-pointer feature-row" data-feature-name="${escapeHtml(f.name)}" onclick="toggleFeatureDesc(this)">
+                                            <td class="px-3 py-2 font-mono text-blue-400 hover:text-blue-300">
+                                                ${typeIcons[f.type] || '•'} ${escapeHtml(f.name)}
+                                                ${f.description ? '<span class="text-slate-500 ml-1">ⓘ</span>' : ''}
+                                            </td>
+                                            <td class="px-3 py-2 text-slate-400">${f.type}</td>
+                                            <td class="px-3 py-2">
+                                                ${f.epas_support ? `<span class="${getSupportColor(f.epas_support)}">${f.epas_support}</span>` : '-'}
+                                            </td>
+                                            <td class="px-3 py-2 text-slate-400 text-xs">${f.postgres_equivalent || '-'}</td>
+                                            <td class="px-3 py-2 text-right text-slate-300">${f.mentions}</td>
+                                        </tr>
+                                        <tr class="feature-desc-row hidden bg-slate-700/30" data-for="${escapeHtml(f.name)}">
+                                            <td colspan="5" class="px-4 py-3">
+                                                <div class="text-sm text-slate-300">
+                                                    ${f.description ? escapeHtml(f.description) : '<span class="text-slate-500 italic">No description available</span>'}
+                                                </div>
+                                                ${f.first_page ? `<div class="text-xs text-slate-500 mt-1">First seen on page ${f.first_page}</div>` : ''}
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('features-content').innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+    }
+}
+
+function getSupportColor(support) {
+    const colors = {
+        full: 'text-emerald-400',
+        partial: 'text-yellow-400',
+        unsupported: 'text-red-400',
+        workaround: 'text-blue-400'
+    };
+    return colors[support] || 'text-slate-400';
+}
+
+function toggleFeatureDesc(row) {
+    const featureName = row.getAttribute('data-feature-name');
+    const descRow = document.querySelector(`tr.feature-desc-row[data-for="${featureName}"]`);
+    if (descRow) {
+        descRow.classList.toggle('hidden');
+    }
+}
+
+function closeFeaturesModal() {
+    document.getElementById('features-modal').classList.add('hidden');
+}
+
+// Show error message
+function showError(message) {
+    alert('Error: ' + message);
+}
+
+// Stop processing a document
+async function stopProcessing(docName) {
+    try {
+        const response = await fetch(`/api/docs/${docName}/stop`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'stop_requested') {
+            // Update UI immediately to show stopping state
+            const row = document.querySelector(`tr[data-doc-name="${docName}"]`);
+            if (row) {
+                const statusCell = row.querySelector('.status-cell');
+                if (statusCell) {
+                    statusCell.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <svg class="animate-spin h-4 w-4 text-orange-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span class="text-orange-400">stopping...</span>
+                        </div>
+                    `;
+                }
+            }
+        } else if (result.status === 'not_processing') {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Resume processing a document
+async function resumeProcessing(docName) {
+    try {
+        const response = await fetch(`/api/docs/${docName}/resume`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Resume failed');
+        }
+
+        if (result.status === 'resuming') {
+            // Reload documents and start polling if needed
+            const hasProcessing = await loadDocuments();
+            if (hasProcessing) startStatusPolling();
+        } else if (result.status === 'cannot_resume') {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Retry all failed documents
+async function retryAllFailed() {
+    try {
+        const response = await fetch('/api/docs/');
+        const data = await response.json();
+
+        const failedDocs = data.documents.filter(d => d.status === 'failed');
+
+        if (failedDocs.length === 0) {
+            alert('No failed documents to retry');
+            return;
+        }
+
+        if (!confirm(`Retry ${failedDocs.length} failed document(s)?`)) {
+            return;
+        }
+
+        let retried = 0;
+        for (const doc of failedDocs) {
+            try {
+                await fetch(`/api/docs/reindex/${doc.name}?force=true`, { method: 'POST' });
+                retried++;
+            } catch (e) {
+                console.error(`Failed to retry ${doc.name}:`, e);
+            }
+        }
+
+        alert(`Queued ${retried} document(s) for reprocessing`);
+        const hasProcessing = await loadDocuments();
+        if (hasProcessing) startStatusPolling();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Rebuild vector indexes
+async function rebuildIndexes() {
+    if (!confirm('Rebuild vector indexes for document embeddings? This may take a moment for large datasets.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/docs/rebuild-indexes', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            alert(`Indexes rebuilt successfully!\nType: ${result.index_type}\nEmbeddings indexed: ${result.embeddings_indexed}`);
+            await loadEmbeddingStats();  // Refresh stats after rebuild
+        } else if (result.status === 'skipped') {
+            alert(result.message || 'No embeddings to index');
+        } else {
+            alert('Error rebuilding indexes: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Reindex
+async function reindexDoc(docName) {
+    if (!confirm(`Reindex "${docName}"? This will delete existing chunks and re-process the document.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/docs/reindex/${docName}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Reindex failed');
+        }
+
+        alert(`Reindexed: ${result.chunks_created} chunks created`);
+        await loadDocuments();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Delete
+function showDeleteModal(docName) {
+    deleteTarget = docName;
+    document.getElementById('delete-doc-name').textContent = docName;
+    document.getElementById('delete-modal').classList.remove('hidden');
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.add('hidden');
+    deleteTarget = null;
+}
+
+async function confirmDelete() {
+    if (!deleteTarget) return;
+
+    try {
+        const response = await fetch(`/api/docs/${deleteTarget}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Delete failed');
+        }
+
+        alert(result.message || 'Deleted');
+        closeDeleteModal();
+        await loadDocuments();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Embedding Stats
+async function loadEmbeddingStats() {
+    const content = document.getElementById('embeddings-content');
+    content.innerHTML = '<p class="text-slate-400">Loading...</p>';
+
+    try {
+        const response = await fetch('/api/docs/stats/embeddings');
+        const data = await response.json();
+
+        if (data.error) {
+            content.innerHTML = `<p class="text-red-400">Error: ${data.error}</p>`;
+            return;
+        }
+
+        const rebuildClass = data.rebuild_recommended
+            ? 'bg-orange-900/50 border-orange-700 text-orange-400'
+            : 'bg-emerald-900/50 border-emerald-700 text-emerald-400';
+
+        const indexStatus = data.rebuild_recommended
+            ? `<span class="text-orange-400">⚠ Rebuild Recommended</span>`
+            : `<span class="text-emerald-400">✓ Up to date</span>`;
+
+        content.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="p-4 bg-slate-700/50 rounded-lg">
+                    <div class="text-2xl font-bold text-slate-100">${data.total_chunks.toLocaleString()}</div>
+                    <div class="text-sm text-slate-400">Total Chunks</div>
+                </div>
+                <div class="p-4 bg-slate-700/50 rounded-lg">
+                    <div class="text-2xl font-bold text-blue-400">${data.embedded_chunks.toLocaleString()}</div>
+                    <div class="text-sm text-slate-400">Embedded (${data.embed_percent}%)</div>
+                </div>
+                <div class="p-4 bg-slate-700/50 rounded-lg">
+                    <div class="text-2xl font-bold ${data.pending_chunks > 0 ? 'text-yellow-400' : 'text-slate-300'}">${data.pending_chunks.toLocaleString()}</div>
+                    <div class="text-sm text-slate-400">Pending Embedding</div>
+                </div>
+                <div class="p-4 bg-slate-700/50 rounded-lg">
+                    <div class="text-lg font-semibold text-slate-100">${data.index_type.toUpperCase()}</div>
+                    <div class="text-xs text-slate-400">${data.index_size}</div>
+                </div>
+            </div>
+            <div class="mt-4 flex items-center justify-between p-3 rounded border ${rebuildClass}">
+                <div>
+                    <span class="font-medium">Index Status:</span> ${indexStatus}
+                    ${data.rebuild_reason ? `<div class="text-xs mt-1 opacity-75">${data.rebuild_reason}</div>` : ''}
+                </div>
+                ${data.rebuild_recommended ? `
+                    <button onclick="rebuildIndexes()" class="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white text-sm rounded">
+                        Rebuild Now
+                    </button>
+                ` : ''}
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<p class="text-red-400">Failed to load stats: ${error.message}</p>`;
+    }
+}
+
+// Utility
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}
