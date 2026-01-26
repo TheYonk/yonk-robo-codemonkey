@@ -4886,3 +4886,293 @@ async def read_file(
 
     finally:
         await conn.close()
+
+
+# =============================================================================
+# Knowledge Base / Document Tools
+# =============================================================================
+
+@tool("doc_search")
+async def doc_search(
+    query: str,
+    doc_types: list[str] | None = None,
+    doc_names: list[str] | None = None,
+    topics: list[str] | None = None,
+    oracle_constructs: list[str] | None = None,
+    epas_features: list[str] | None = None,
+    top_k: int = 10,
+    search_mode: str = "hybrid"
+) -> dict[str, Any]:
+    """Search indexed documentation using hybrid search (vector + FTS).
+
+    Use this to find relevant documentation chunks for Oracle-to-Postgres
+    migrations, EPAS features, and general technical documentation.
+
+    Args:
+        query: Search query string (e.g., "CONNECT BY hierarchical query")
+        doc_types: Filter by document types (pdf, markdown, html, text)
+        doc_names: Filter by specific document names
+        topics: Filter by topic tags
+        oracle_constructs: Filter by Oracle constructs (e.g., ["rownum", "connect-by"])
+        epas_features: Filter by EPAS features (e.g., ["dblink_ora", "spl"])
+        top_k: Number of results to return (default 10)
+        search_mode: Search mode: "hybrid" (default), "semantic", or "fts"
+
+    Returns:
+        Dictionary with search results, scores, and citations
+
+    Example:
+        # Search for hierarchical query migration info
+        doc_search(query="CONNECT BY hierarchical query migration")
+
+        # Search for Oracle-specific constructs
+        doc_search(query="DECODE function", oracle_constructs=["decode"])
+
+        # Search in specific documents
+        doc_search(query="data types", doc_names=["oracle-migration-guide"])
+    """
+    from yonk_code_robomonkey.knowledge_base.models import DocSearchParams, DocType
+    from yonk_code_robomonkey.knowledge_base.search import doc_search as _doc_search
+    from yonk_code_robomonkey.embeddings.embedder import get_embedder
+
+    settings = Settings()
+
+    # Convert doc_types strings to enum
+    doc_type_enums = None
+    if doc_types:
+        try:
+            doc_type_enums = [DocType(dt) for dt in doc_types]
+        except ValueError as e:
+            return {"error": f"Invalid doc_type: {e}. Valid types: pdf, markdown, html, text"}
+
+    # Build search params
+    params = DocSearchParams(
+        query=query,
+        doc_types=doc_type_enums,
+        doc_names=doc_names,
+        topics=topics,
+        oracle_constructs=oracle_constructs,
+        epas_features=epas_features,
+        top_k=top_k,
+        search_mode=search_mode,
+    )
+
+    # Get embedding function
+    embedding_func = None
+    if search_mode in ("hybrid", "semantic"):
+        try:
+            embedder = get_embedder(settings)
+            async def embed_query(text: str) -> list[float]:
+                return await embedder.embed_single(text)
+            embedding_func = embed_query
+        except Exception as e:
+            if search_mode == "semantic":
+                return {"error": f"Embedding service required for semantic search: {e}"}
+            # Fall back to FTS-only for hybrid
+
+    try:
+        result = await _doc_search(params, settings.database_url, embedding_func)
+
+        return {
+            "query": result.query,
+            "total_found": result.total_found,
+            "search_mode": result.search_mode,
+            "execution_time_ms": round(result.execution_time_ms, 2),
+            "results": [
+                {
+                    "chunk_id": str(chunk.chunk_id),
+                    "content": chunk.content[:500] + "..." if len(chunk.content) > 500 else chunk.content,
+                    "full_content_length": len(chunk.content),
+                    "source_document": chunk.source_document,
+                    "doc_type": chunk.doc_type.value,
+                    "section_path": chunk.section_path,
+                    "heading": chunk.heading,
+                    "page_number": chunk.page_number,
+                    "topics": chunk.topics,
+                    "oracle_constructs": chunk.oracle_constructs,
+                    "epas_features": chunk.epas_features,
+                    "score": round(chunk.score, 4) if chunk.score else None,
+                    "vec_score": round(chunk.vec_score, 4) if chunk.vec_score else None,
+                    "fts_score": round(chunk.fts_score, 4) if chunk.fts_score else None,
+                    "citation": chunk.citation,
+                }
+                for chunk in result.chunks
+            ],
+            "why": f"Found {result.total_found} documentation chunks matching '{query}'"
+        }
+    except Exception as e:
+        return {"error": f"Search failed: {str(e)}"}
+
+
+@tool("doc_list")
+async def doc_list(
+    doc_type: str | None = None,
+    status: str | None = None
+) -> dict[str, Any]:
+    """List all indexed documents in the knowledge base.
+
+    Args:
+        doc_type: Filter by document type (pdf, markdown, html, text)
+        status: Filter by status (pending, processing, ready, failed)
+
+    Returns:
+        List of indexed documents with metadata
+
+    Example:
+        # List all documents
+        doc_list()
+
+        # List only PDF documents
+        doc_list(doc_type="pdf")
+
+        # List failed documents
+        doc_list(status="failed")
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Build query with optional filters
+        conditions = []
+        params = []
+        param_idx = 1
+
+        if doc_type:
+            conditions.append(f"doc_type = ${param_idx}")
+            params.append(doc_type)
+            param_idx += 1
+
+        if status:
+            conditions.append(f"status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+        query = f"""
+            SELECT
+                id, name, doc_type, source_path, source_url,
+                title, status, chunks_count, total_pages,
+                created_at, updated_at
+            FROM robomonkey_docs.doc_source
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+        """
+
+        rows = await conn.fetch(query, *params)
+
+        documents = [
+            {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "doc_type": row["doc_type"],
+                "source_path": row["source_path"],
+                "source_url": row["source_url"],
+                "title": row["title"],
+                "status": row["status"],
+                "chunks_count": row["chunks_count"],
+                "total_pages": row["total_pages"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+            for row in rows
+        ]
+
+        return {
+            "total": len(documents),
+            "filters": {
+                "doc_type": doc_type,
+                "status": status,
+            },
+            "documents": documents,
+            "why": f"Listed {len(documents)} indexed documents"
+        }
+    except Exception as e:
+        return {"error": f"Failed to list documents: {str(e)}"}
+    finally:
+        await conn.close()
+
+
+@tool("doc_get_context")
+async def doc_get_context(
+    query: str,
+    doc_types: list[str] | None = None,
+    doc_names: list[str] | None = None,
+    max_tokens: int = 4000,
+    include_citations: bool = True,
+    context_type: str | None = None
+) -> dict[str, Any]:
+    """Get formatted context from documentation for RAG prompts.
+
+    Retrieves relevant documentation chunks and formats them for injection
+    into LLM prompts, respecting token limits and including citations.
+
+    Args:
+        query: Query to find relevant context for
+        doc_types: Filter by document types (pdf, markdown, html, text)
+        doc_names: Filter by specific document names
+        max_tokens: Maximum tokens for context (default 4000)
+        include_citations: Include source citations (default True)
+        context_type: Context hint: "oracle_construct" or "epas_feature"
+
+    Returns:
+        Formatted context string ready for LLM prompts
+
+    Example:
+        # Get context for a migration question
+        doc_get_context(query="How to migrate Oracle sequences to Postgres?")
+
+        # Get Oracle-specific context
+        doc_get_context(
+            query="ROWNUM pagination",
+            context_type="oracle_construct",
+            max_tokens=2000
+        )
+    """
+    from yonk_code_robomonkey.knowledge_base.models import DocContextParams, DocType
+    from yonk_code_robomonkey.knowledge_base.search import doc_get_context as _doc_get_context
+    from yonk_code_robomonkey.embeddings.embedder import get_embedder
+
+    settings = Settings()
+
+    # Convert doc_types strings to enum
+    doc_type_enums = None
+    if doc_types:
+        try:
+            doc_type_enums = [DocType(dt) for dt in doc_types]
+        except ValueError as e:
+            return {"error": f"Invalid doc_type: {e}. Valid types: pdf, markdown, html, text"}
+
+    # Build context params
+    params = DocContextParams(
+        query=query,
+        doc_types=doc_type_enums,
+        doc_names=doc_names,
+        max_tokens=max_tokens,
+        include_citations=include_citations,
+        context_type=context_type,
+    )
+
+    # Get embedding function
+    embedding_func = None
+    try:
+        embedder = get_embedder(settings)
+        async def embed_query(text: str) -> list[float]:
+            return await embedder.embed_single(text)
+        embedding_func = embed_query
+    except Exception as e:
+        # Continue without embeddings, will use FTS-only
+        pass
+
+    try:
+        result = await _doc_get_context(params, settings.database_url, embedding_func)
+
+        return {
+            "context": result.context,
+            "chunks_used": result.chunks_used,
+            "total_tokens_approx": result.total_tokens_approx,
+            "sources": result.sources,
+            "why": f"Retrieved {result.chunks_used} chunks (~{result.total_tokens_approx} tokens) for context"
+        }
+    except Exception as e:
+        return {"error": f"Failed to get context: {str(e)}"}

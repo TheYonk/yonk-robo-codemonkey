@@ -136,6 +136,16 @@ robomonkey db ping
 - `main.py` - CLI entry point
 - `commands.py` - Command implementations (db init/ping, index)
 
+**`knowledge_base/`** - Document indexing for RAG (separate from code)
+- `models.py` - Pydantic models (DocSource, DocChunk, SearchParams)
+- `chunker.py` - Smart chunker with section hierarchy, Oracle/EPAS auto-tagging
+- `search.py` - Hybrid search (60% vector + 40% FTS) and RAG context builder
+- `extractors/` - Document format extractors
+  - `pdf.py` - PDF extraction with pdfplumber (structure preservation)
+  - `markdown.py` - Markdown with heading hierarchy
+  - `html.py` - HTML with BeautifulSoup
+  - `plain.py` - Plain text
+
 ### Hybrid Search Algorithm
 
 The hybrid search combines three retrieval methods:
@@ -155,11 +165,19 @@ The hybrid search combines three retrieval methods:
 
 ### MCP Tools (Planned v1)
 
+**Code Search & Analysis:**
 - `hybrid_search` - Hybrid retrieval with filters (supports `require_text_match` for exact construct matching)
 - `symbol_lookup` - Find symbol by FQN
 - `symbol_context` - Pack context around symbol (definition + callsites + neighborhood)
 - `callers` / `callees` - Graph traversal
-- `doc_search` - Search documentation
+- `doc_search` - Search repo documentation (README, docs/)
+
+**Knowledge Base (External Documentation):**
+- `kb_search` / `doc_search` - Hybrid search over PDFs, Markdown, HTML docs (60% vector + 40% FTS)
+- `kb_list` / `doc_list` - List indexed documents
+- `kb_get_context` / `doc_get_context` - Get RAG context with token limits and citations
+
+**Summaries & Organization:**
 - `file_summary` / `symbol_summary` / `module_summary` - Get cached summaries
 - `list_tags` - List available tags
 - `tag_entity` - Manually tag entities
@@ -316,6 +334,16 @@ The web UI provides HTTP endpoints for management and monitoring:
 - `POST /api/maintenance/embed-missing` - Queue embedding job for a repository
 - `POST /api/maintenance/reembed-table` - Truncate and regenerate embeddings for a table
 - `GET /api/maintenance/embedding-status` - Get embedding completion status per schema
+
+### Knowledge Base Endpoints
+- `GET /api/docs/` - List indexed documents
+- `GET /api/docs/{name}` - Get document details with chunks
+- `DELETE /api/docs/{name}` - Delete document
+- `POST /api/docs/index` - Index PDF/Markdown/HTML from path
+- `POST /api/docs/upload` - Upload and index file
+- `POST /api/docs/reindex/{name}` - Re-index existing document
+- `POST /api/docs/search` - Hybrid search (60% vector + 40% FTS)
+- `POST /api/docs/context` - Get RAG context with token limits
 
 ### Auto-Rebuild After Embedding Jobs
 

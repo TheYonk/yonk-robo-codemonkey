@@ -11,7 +11,9 @@ This document provides comprehensive information about all MCP tools available i
 | `symbol_lookup` | Find specific function/class | When you know the exact symbol name |
 | `symbol_context` | Understand symbol usage | Analyzing how a function is called/used |
 | `callers` / `callees` | Call graph traversal | Understanding dependencies |
-| `doc_search` | Search documentation | Finding README, docs, guides |
+| `doc_search` | Search repo documentation | Finding README, docs, guides in repos |
+| `kb_search` | Search knowledge base | PDFs, migration guides, external docs |
+| `kb_get_context` | RAG context retrieval | Getting LLM-ready context from docs |
 | `comprehensive_review` | Architecture analysis | High-level codebase understanding |
 | `feature_context` | Feature implementation | Understanding how a feature works |
 | `db_review` | Database analysis | Understanding database schema |
@@ -684,6 +686,118 @@ func (h *AuthHandler) Login(...)
 - Phased migration plan
 - Step-by-step instructions
 - Testing strategy
+
+---
+
+## Knowledge Base Tools (RAG Documentation)
+
+The Knowledge Base provides document indexing and RAG-style search for external documentation (PDFs, guides, reference manuals) separate from code. Use these tools to search migration guides, database documentation, and technical references.
+
+### `kb_search` (also `doc_search` via MCP)
+
+**KNOWLEDGE BASE SEARCH** - Hybrid search over indexed documentation (PDFs, Markdown, HTML) using vector similarity (60%) and full-text search (40%). Includes automatic tagging of Oracle constructs and EPAS features for migration-related queries.
+
+**When to use:**
+- "Find documentation about CONNECT BY migration"
+- "Search Oracle migration guides for DECODE alternatives"
+- "What does the EPAS documentation say about dblink_ora?"
+- Finding external documentation about database constructs
+- RAG context for migration assessments
+
+**Don't use when:**
+- Searching code in a repository → use `hybrid_search`
+- Searching repo documentation (README, docs/) → use `doc_search`
+- Need code and docs together → use `universal_search`
+
+**Parameters:**
+- `query` (required): Search query (e.g., "CONNECT BY hierarchical query")
+- `doc_types` (optional): Filter by document types (pdf, markdown, html, text)
+- `doc_names` (optional): Filter by specific document names
+- `topics` (optional): Filter by topic tags
+- `oracle_constructs` (optional): Filter by Oracle constructs (rownum, connect-by, decode, nvl, etc.)
+- `epas_features` (optional): Filter by EPAS features (dblink_ora, spl, edbplus, etc.)
+- `top_k` (optional): Number of results (default: 10)
+- `search_mode` (optional): Search mode - "hybrid" (default), "semantic", or "fts"
+
+**Returns:**
+- Chunks with content, source document, section path, page numbers
+- Oracle constructs and EPAS features detected in each chunk
+- Scores: combined score, vector score, FTS score
+- Citations for referencing
+
+**Example:**
+```json
+{
+  "query": "CONNECT BY hierarchical query alternative",
+  "oracle_constructs": ["connect-by", "hierarchical-query"],
+  "top_k": 5
+}
+```
+
+---
+
+### `kb_list` (also `doc_list` via MCP)
+
+**LIST INDEXED DOCUMENTS** - List all documents in the knowledge base with metadata.
+
+**When to use:**
+- "What documentation is indexed?"
+- Discovering available reference materials
+- Checking indexing status of documents
+
+**Parameters:**
+- `doc_type` (optional): Filter by type (pdf, markdown, html, text)
+- `status` (optional): Filter by status (pending, processing, ready, failed)
+
+**Returns:**
+- List of documents with name, type, title, chunk count, page count, status
+
+---
+
+### `kb_get_context` (also `doc_get_context` via MCP)
+
+**RAG CONTEXT RETRIEVAL** - Get formatted context from the knowledge base for injection into LLM prompts. Respects token limits and includes source citations.
+
+**When to use:**
+- Building RAG prompts for migration questions
+- Getting background context for Oracle-to-Postgres conversions
+- Injecting documentation into LLM context window
+
+**Parameters:**
+- `query` (required): Query to find relevant context
+- `doc_types` (optional): Filter by document types
+- `doc_names` (optional): Filter by specific documents
+- `max_tokens` (optional): Token budget (default: 4000)
+- `include_citations` (optional): Include source citations (default: true)
+- `context_type` (optional): Hint for filtering - "oracle_construct" or "epas_feature"
+
+**Returns:**
+- `context`: Formatted string ready for LLM prompt injection
+- `chunks_used`: Number of chunks included
+- `total_tokens_approx`: Approximate token count
+- `sources`: List of citations
+
+**Example:**
+```json
+{
+  "query": "How to migrate Oracle sequences to PostgreSQL?",
+  "context_type": "oracle_construct",
+  "max_tokens": 2000,
+  "include_citations": true
+}
+```
+
+Returns formatted context like:
+```
+[Source: Oracle Migration Guide, Chapter 5 > Sequences, Page 42]
+In Oracle, sequences are created using CREATE SEQUENCE... In PostgreSQL/EPAS,
+the equivalent is...
+
+---
+
+[Source: EPAS 18 Compatibility Guide, Sequences]
+EPAS provides full Oracle sequence compatibility including NEXTVAL, CURRVAL...
+```
 
 ---
 

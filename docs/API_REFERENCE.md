@@ -16,6 +16,7 @@ Complete API reference for the RoboMonkey Web UI running on port 9832.
 - [Database Explorer](#database-explorer)
 - [Maintenance Operations](#maintenance-operations)
 - [MCP Tools](#mcp-tools)
+- [Knowledge Base (Document Indexing)](#knowledge-base-document-indexing)
 - [Health Check](#health-check)
 
 ---
@@ -1652,6 +1653,233 @@ POST /api/mcp/tools/read_file
 
 ---
 
+## Knowledge Base (Document Indexing)
+
+Index and search external documentation (PDFs, Markdown, HTML) for RAG-style retrieval. Separate from code indexing - designed for migration guides, database documentation, and technical references.
+
+### List Documents
+
+```
+GET /api/docs/
+```
+
+List all indexed documents with metadata.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `doc_type` | string | Filter by type: `pdf`, `markdown`, `html`, `text` |
+| `status` | string | Filter by status: `pending`, `processing`, `ready`, `failed` |
+
+**Response:**
+```json
+{
+  "documents": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "oracle-migration-guide",
+      "doc_type": "pdf",
+      "title": "Oracle to PostgreSQL Migration Guide",
+      "chunks_count": 156,
+      "total_pages": 42,
+      "status": "ready",
+      "indexed_at": "2025-01-15T10:30:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+### Get Document Details
+
+```
+GET /api/docs/{doc_name}
+```
+
+Get document details including all chunks.
+
+**Response:**
+```json
+{
+  "document": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "oracle-migration-guide",
+    "doc_type": "pdf",
+    "title": "Oracle to PostgreSQL Migration Guide",
+    "chunks_count": 156,
+    "status": "ready"
+  },
+  "chunks": [
+    {
+      "id": "chunk-uuid",
+      "content": "CONNECT BY clause is used for hierarchical queries...",
+      "section_path": ["Chapter 5", "SQL Syntax", "Hierarchical Queries"],
+      "heading": "CONNECT BY",
+      "page_number": 24,
+      "chunk_index": 45,
+      "oracle_constructs": ["connect-by", "hierarchical-query"],
+      "epas_features": []
+    }
+  ]
+}
+```
+
+### Delete Document
+
+```
+DELETE /api/docs/{doc_name}
+```
+
+Delete a document and all its chunks.
+
+### Index Document
+
+```
+POST /api/docs/index
+```
+
+Index a PDF, Markdown, HTML, or text file.
+
+**Request Body:**
+```json
+{
+  "path": "/sources/docs/oracle-migration.pdf",
+  "name": "oracle-migration-guide",
+  "doc_type": "general",
+  "title": "Oracle to PostgreSQL Migration Guide",
+  "version": "18",
+  "description": "Official migration guide for EPAS 18"
+}
+```
+
+**Response:**
+```json
+{
+  "source_id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "oracle-migration-guide",
+  "chunks_created": 156,
+  "total_pages": 42,
+  "status": "ready",
+  "message": "Successfully indexed 156 chunks"
+}
+```
+
+### Upload Document
+
+```
+POST /api/docs/upload
+Content-Type: multipart/form-data
+```
+
+Upload and index a file directly.
+
+**Form Fields:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | file | Yes | Document file (PDF, MD, HTML, TXT) |
+| `doc_type` | string | No | Document type (default: `general`) |
+| `version` | string | No | Version identifier |
+| `description` | string | No | Document description/title |
+
+### Reindex Document
+
+```
+POST /api/docs/reindex/{doc_name}?force=false
+```
+
+Re-process an existing document. Only reprocesses if content changed (unless `force=true`).
+
+### Search Documents
+
+```
+POST /api/docs/search
+```
+
+Hybrid search combining vector similarity (60%) and full-text search (40%).
+
+**Request Body:**
+```json
+{
+  "query": "CONNECT BY hierarchical query migration",
+  "doc_types": ["pdf"],
+  "oracle_constructs": ["connect-by"],
+  "top_k": 10,
+  "search_mode": "hybrid"
+}
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `query` | string | Search query (required) |
+| `doc_types` | array | Filter by document types |
+| `doc_names` | array | Filter by document names |
+| `topics` | array | Filter by topics |
+| `oracle_constructs` | array | Filter by Oracle constructs (rownum, connect-by, decode, etc.) |
+| `epas_features` | array | Filter by EPAS features (dblink_ora, spl, etc.) |
+| `top_k` | int | Number of results (default: 10) |
+| `search_mode` | string | `hybrid` (default), `semantic`, or `fts` |
+
+**Response:**
+```json
+{
+  "query": "CONNECT BY hierarchical query migration",
+  "total_found": 12,
+  "search_mode": "hybrid",
+  "execution_time_ms": 45.2,
+  "chunks": [
+    {
+      "chunk_id": "chunk-uuid",
+      "content": "The CONNECT BY clause creates hierarchical queries...",
+      "source_document": "oracle-migration-guide",
+      "doc_type": "pdf",
+      "section_path": ["Chapter 5", "SQL Syntax"],
+      "heading": "Hierarchical Queries",
+      "page_number": 24,
+      "oracle_constructs": ["connect-by", "hierarchical-query"],
+      "epas_features": [],
+      "score": 0.892,
+      "vec_score": 0.95,
+      "fts_score": 0.82,
+      "citation": "oracle-migration-guide, Chapter 5 > SQL Syntax, Page 24"
+    }
+  ]
+}
+```
+
+### Get RAG Context
+
+```
+POST /api/docs/context
+```
+
+Get formatted context for LLM prompts with token limits and citations.
+
+**Request Body:**
+```json
+{
+  "query": "How to migrate Oracle sequences?",
+  "context_type": "oracle_construct",
+  "max_tokens": 4000,
+  "include_citations": true
+}
+```
+
+**Response:**
+```json
+{
+  "context": "[Source: oracle-migration-guide, Chapter 3 > Sequences, Page 15]\nOracle sequences use CREATE SEQUENCE with options...\n\n---\n\n[Source: epas-compatibility-guide, Sequences]\nEPAS provides full Oracle sequence compatibility...",
+  "chunks_used": 4,
+  "total_tokens_approx": 3200,
+  "sources": [
+    "oracle-migration-guide, Chapter 3 > Sequences, Page 15",
+    "epas-compatibility-guide, Sequences"
+  ]
+}
+```
+
+---
+
 ## Health Check
 
 ### Health Status
@@ -1706,3 +1934,4 @@ The API also serves HTML pages:
 | `/tools` | MCP tool tester |
 | `/stats` | Statistics and job management |
 | `/sources` | Source mount management (Docker mode) |
+| `/knowledge-base` | Document indexing and search (PDFs, Markdown, etc.) |

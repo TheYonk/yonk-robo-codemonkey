@@ -45,7 +45,14 @@ echo ""
 
 # Stop Web UI
 echo -e "${YELLOW}[1/3]${NC} Stopping Web UI..."
-pkill -f "yonk_code_robomonkey.web" 2>/dev/null && echo "Web UI stopped" || echo "Web UI was not running"
+pkill -f "yonk_code_robomonkey.web" 2>/dev/null || true
+# Also kill any process on port 9832 (uvicorn may not match the pkill pattern)
+if lsof -ti:9832 >/dev/null 2>&1; then
+    lsof -ti:9832 | xargs kill -9 2>/dev/null || true
+    echo "Web UI stopped (port 9832)"
+else
+    echo "Web UI was not running"
+fi
 
 # Stop Daemon
 echo -e "${YELLOW}[2/3]${NC} Stopping Daemon..."

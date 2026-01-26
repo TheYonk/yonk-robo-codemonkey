@@ -229,7 +229,7 @@ def run() -> None:
 
 
 async def db_init(database_url: str) -> None:
-    """Initialize database schema from DDL file.
+    """Initialize database schema from DDL files.
 
     Args:
         database_url: PostgreSQL connection string
@@ -244,6 +244,9 @@ async def db_init(database_url: str) -> None:
             f"DDL file not found at {DDL_PATH}. "
             f"Expected location: scripts/init_db.sql"
         )
+
+    # Check for docs schema file
+    docs_ddl_path = DDL_PATH.parent / "init_docs_schema.sql"
 
     # Read DDL
     try:
@@ -269,6 +272,18 @@ async def db_init(database_url: str) -> None:
     try:
         await conn.execute(sql)
         print("✓ Database schema initialized successfully")
+
+        # Initialize docs schema if file exists
+        if docs_ddl_path.exists():
+            try:
+                docs_sql = docs_ddl_path.read_text(encoding="utf-8")
+                await conn.execute(docs_sql)
+                print("✓ Knowledge base schema initialized successfully")
+            except asyncpg.PostgresError as e:
+                print(f"⚠ Warning: Failed to initialize docs schema: {e}")
+        else:
+            print("⚠ Docs schema file not found, skipping knowledge base initialization")
+
     except asyncpg.PostgresError as e:
         raise RuntimeError(f"Failed to execute DDL: {e}")
     finally:

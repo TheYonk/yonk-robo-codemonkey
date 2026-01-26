@@ -43,6 +43,8 @@ tags:
     description: Call graph traversal (callers/callees)
   - name: Documentation
     description: Documentation search and validation
+  - name: Knowledge Base
+    description: Document indexing and RAG search for PDFs, Markdown, HTML
   - name: Summaries
     description: AI-generated code summaries
   - name: Tags
@@ -885,6 +887,209 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ClaimVerificationResponse'
+
+  # Knowledge Base Endpoints (RAG Documentation)
+  /kb:
+    get:
+      summary: List indexed documents
+      description: |
+        List all documents indexed in the knowledge base with metadata.
+        Use for discovering available documentation for RAG queries.
+      operationId: kbList
+      tags: [Knowledge Base]
+      parameters:
+        - name: doc_type
+          in: query
+          schema:
+            type: string
+            enum: [pdf, markdown, html, text]
+          description: Filter by document type
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, ready, failed]
+          description: Filter by indexing status
+      responses:
+        '200':
+          description: List of indexed documents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBDocListResponse'
+
+  /kb/{doc_name}:
+    get:
+      summary: Get document details
+      description: Get details of a specific document including its chunks
+      operationId: kbGetDocument
+      tags: [Knowledge Base]
+      parameters:
+        - name: doc_name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Document name
+      responses:
+        '200':
+          description: Document details with chunks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBDocDetailResponse'
+        '404':
+          description: Document not found
+
+    delete:
+      summary: Delete document
+      description: Delete a document and all its chunks
+      operationId: kbDeleteDocument
+      tags: [Knowledge Base]
+      parameters:
+        - name: doc_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Document deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  document:
+                    type: string
+
+  /kb/index:
+    post:
+      summary: Index document or directory
+      description: |
+        Index a PDF, Markdown, HTML, or text file into the knowledge base.
+        Extracts structure, chunks content semantically, and auto-tags
+        Oracle constructs and EPAS features.
+      operationId: kbIndex
+      tags: [Knowledge Base]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KBIndexRequest'
+      responses:
+        '200':
+          description: Indexing result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBIndexResponse'
+
+  /kb/upload:
+    post:
+      summary: Upload and index document
+      description: Upload a file and index it into the knowledge base
+      operationId: kbUpload
+      tags: [Knowledge Base]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Document file (PDF, MD, HTML, TXT)
+                doc_type:
+                  type: string
+                  default: general
+                version:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBIndexResponse'
+
+  /kb/reindex/{doc_name}:
+    post:
+      summary: Reindex document
+      description: Re-process an existing document (useful after updates)
+      operationId: kbReindex
+      tags: [Knowledge Base]
+      parameters:
+        - name: doc_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: force
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Force reindex even if unchanged
+      responses:
+        '200':
+          description: Reindex result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBIndexResponse'
+
+  /kb/search:
+    post:
+      summary: Search knowledge base
+      description: |
+        Hybrid search combining vector similarity (60%) and full-text search (40%).
+        Supports filtering by document type, topics, Oracle constructs, and EPAS features.
+      operationId: kbSearch
+      tags: [Knowledge Base]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KBSearchRequest'
+      responses:
+        '200':
+          description: Search results with scores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBSearchResponse'
+
+  /kb/context:
+    post:
+      summary: Get RAG context
+      description: |
+        Retrieve relevant documentation chunks formatted for LLM prompts.
+        Respects token limits and includes citations.
+      operationId: kbGetContext
+      tags: [Knowledge Base]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KBContextRequest'
+      responses:
+        '200':
+          description: Formatted context for RAG
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBContextResponse'
 
   /suggest-tool:
     post:
@@ -2092,3 +2297,290 @@ components:
         last_activity:
           type: string
           format: date-time
+
+    # Knowledge Base Schemas
+    KBDocListResponse:
+      type: object
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/KBDocSummary'
+        total:
+          type: integer
+
+    KBDocSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        doc_type:
+          type: string
+          enum: [pdf, markdown, html, text]
+        title:
+          type: string
+          nullable: true
+        chunks_count:
+          type: integer
+        total_pages:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [pending, processing, ready, failed]
+        indexed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    KBDocDetailResponse:
+      type: object
+      properties:
+        document:
+          $ref: '#/components/schemas/KBDocSummary'
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/KBChunk'
+
+    KBChunk:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        section_path:
+          type: array
+          items:
+            type: string
+        heading:
+          type: string
+          nullable: true
+        page_number:
+          type: integer
+          nullable: true
+        chunk_index:
+          type: integer
+        char_count:
+          type: integer
+        topics:
+          type: array
+          items:
+            type: string
+        oracle_constructs:
+          type: array
+          items:
+            type: string
+          description: Detected Oracle constructs (ROWNUM, CONNECT BY, DECODE, etc.)
+        epas_features:
+          type: array
+          items:
+            type: string
+          description: Detected EPAS features (dblink_ora, SPL, etc.)
+
+    KBIndexRequest:
+      type: object
+      required: [path, name]
+      properties:
+        path:
+          type: string
+          description: File or directory path to index
+        name:
+          type: string
+          description: Unique document name
+        doc_type:
+          type: string
+          enum: [pdf, markdown, html, text, general]
+          default: general
+        title:
+          type: string
+          description: Document title
+        version:
+          type: string
+          description: Version identifier (e.g., "18" for EPAS 18)
+        description:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    KBIndexResponse:
+      type: object
+      properties:
+        source_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        chunks_created:
+          type: integer
+        total_pages:
+          type: integer
+          nullable: true
+        status:
+          type: string
+        message:
+          type: string
+
+    KBSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: Search query
+          example: "CONNECT BY hierarchical query migration"
+        doc_types:
+          type: array
+          items:
+            type: string
+            enum: [pdf, markdown, html, text]
+          description: Filter by document types
+        doc_names:
+          type: array
+          items:
+            type: string
+          description: Filter by specific document names
+        topics:
+          type: array
+          items:
+            type: string
+          description: Filter by topic tags
+        oracle_constructs:
+          type: array
+          items:
+            type: string
+          description: Filter by Oracle constructs (rownum, connect-by, decode, etc.)
+          example: ["connect-by", "hierarchical-query"]
+        epas_features:
+          type: array
+          items:
+            type: string
+          description: Filter by EPAS features (dblink_ora, spl, etc.)
+        top_k:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 100
+        search_mode:
+          type: string
+          enum: [hybrid, semantic, fts]
+          default: hybrid
+          description: Search mode (hybrid=60% vector + 40% FTS)
+
+    KBSearchResponse:
+      type: object
+      properties:
+        query:
+          type: string
+        total_found:
+          type: integer
+        search_mode:
+          type: string
+        execution_time_ms:
+          type: number
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/KBSearchResult'
+
+    KBSearchResult:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+          description: Chunk content (may be truncated)
+        source_document:
+          type: string
+        doc_type:
+          type: string
+        section_path:
+          type: array
+          items:
+            type: string
+        heading:
+          type: string
+          nullable: true
+        page_number:
+          type: integer
+          nullable: true
+        topics:
+          type: array
+          items:
+            type: string
+        oracle_constructs:
+          type: array
+          items:
+            type: string
+        epas_features:
+          type: array
+          items:
+            type: string
+        score:
+          type: number
+          description: Combined relevance score
+        vec_score:
+          type: number
+          nullable: true
+          description: Vector similarity score (normalized)
+        fts_score:
+          type: number
+          nullable: true
+          description: Full-text search score (normalized)
+        citation:
+          type: string
+          description: Formatted citation for the chunk
+
+    KBContextRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: Query to find relevant context
+        doc_types:
+          type: array
+          items:
+            type: string
+        doc_names:
+          type: array
+          items:
+            type: string
+        max_tokens:
+          type: integer
+          default: 4000
+          minimum: 100
+          maximum: 10000
+          description: Maximum tokens for context
+        include_citations:
+          type: boolean
+          default: true
+          description: Include source citations in context
+        context_type:
+          type: string
+          enum: [oracle_construct, epas_feature, migration_issue]
+          description: Context hint for better filtering
+
+    KBContextResponse:
+      type: object
+      properties:
+        context:
+          type: string
+          description: Formatted context ready for LLM prompts
+        chunks_used:
+          type: integer
+        total_tokens_approx:
+          type: integer
+        sources:
+          type: array
+          items:
+            type: string
+          description: List of source citations
