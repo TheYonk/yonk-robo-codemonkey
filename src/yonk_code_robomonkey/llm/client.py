@@ -67,6 +67,29 @@ def set_llm_config(config: dict[str, Any]) -> None:
     )
 
 
+def _load_config_from_file() -> dict[str, Any] | None:
+    """Load LLM config from daemon yaml file if available."""
+    from pathlib import Path
+    try:
+        import yaml
+        # Try multiple possible config locations
+        config_paths = [
+            Path(__file__).parent.parent.parent.parent / "config" / "robomonkey-daemon.yaml",
+            Path("config/robomonkey-daemon.yaml"),
+            Path.home() / ".config" / "robomonkey" / "daemon.yaml",
+        ]
+        for config_path in config_paths:
+            if config_path.exists():
+                with open(config_path) as f:
+                    config = yaml.safe_load(f)
+                    if config and "llm" in config:
+                        logger.info(f"Loaded LLM config from {config_path}")
+                        return config["llm"]
+    except Exception as e:
+        logger.debug(f"Could not load config from file: {e}")
+    return None
+
+
 def get_llm_config(task_type: TaskType = "small") -> dict[str, Any]:
     """Get LLM configuration for a task type.
 
@@ -76,6 +99,12 @@ def get_llm_config(task_type: TaskType = "small") -> dict[str, Any]:
     Returns:
         Dict with provider, model, base_url, temperature, max_tokens
     """
+    global _llm_config
+
+    # If not set, try to load from config file
+    if _llm_config is None:
+        _llm_config = _load_config_from_file()
+
     if _llm_config:
         if task_type == "deep":
             return _llm_config.get("deep", DEFAULT_DEEP_CONFIG)
@@ -161,15 +190,29 @@ async def call_llm(
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                 }
-                # GPT-5+ models require max_completion_tokens instead of max_tokens
-                is_new_model = model and ("gpt-5" in model or "gpt-4.1" in model or "o1" in model or "o3" in model)
-                if is_new_model:
+
+                # Check if we're calling the actual OpenAI API vs an OpenAI-compatible API
+                # Parameter restrictions only apply to actual OpenAI
+                is_actual_openai = "api.openai.com" in base_url.lower()
+
+                if is_actual_openai:
+                    # Apply OpenAI-specific parameter naming
+                    # OpenAI now uses max_completion_tokens for all newer models
+                    model_lower = (model or "").lower()
+
+                    # Reasoning models (o1*, o3*) don't support temperature
+                    is_reasoning_model = model_lower.startswith("o1") or model_lower.startswith("o3")
+
+                    # Use max_completion_tokens for all OpenAI models (new standard)
                     request_body["max_completion_tokens"] = max_tokens
+
+                    # Only add temperature for non-reasoning models
+                    if not is_reasoning_model:
+                        request_body["temperature"] = temperature
                 else:
+                    # OpenAI-compatible APIs (vLLM, local servers, etc.)
+                    # Use standard parameters
                     request_body["max_tokens"] = max_tokens
-                # Mini/nano models don't support custom temperature - only default (1.0)
-                is_restricted_model = model and ("-mini" in model or "-nano" in model)
-                if not is_restricted_model:
                     request_body["temperature"] = temperature
                 response = await client.post(
                     f"{base_url.rstrip('/')}/v1/chat/completions",
