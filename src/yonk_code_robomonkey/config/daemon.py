@@ -106,6 +106,12 @@ class EmbeddingsConfig(BaseModel):
     vllm: VLLMConfig = Field(default_factory=VLLMConfig)
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
 
+    # Long text handling
+    long_text_strategy: Literal["mean_pool", "llm_summarize", "truncate"] = Field(
+        "mean_pool",
+        description="How to handle texts exceeding model's max input: mean_pool (split & average), llm_summarize (use LLM to compress), truncate (simple cutoff)"
+    )
+
     # Index rebuild settings
     auto_rebuild_indexes: bool = Field(True, description="Auto-rebuild vector indexes after embedding jobs")
     rebuild_change_threshold: float = Field(0.20, ge=0.0, le=1.0, description="Min change rate (0-1) to trigger rebuild")

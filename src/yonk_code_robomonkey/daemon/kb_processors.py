@@ -102,25 +102,108 @@ async def detect_embedding_dimension(
     return 768  # Safe default
 
 
+async def summarize_for_embedding(
+    text: str,
+    max_chars: int,
+    llm_func = None,
+) -> str:
+    """Use LLM to summarize text to fit within embedding model's input limit.
+
+    This preserves semantic meaning better than truncation by having the LLM
+    identify and preserve key information while reducing length.
+
+    Args:
+        text: The text to summarize
+        max_chars: Maximum characters for the summary
+        llm_func: Async function to call LLM (text) -> summary
+
+    Returns:
+        Summarized text that fits within max_chars
+    """
+    if len(text) <= max_chars:
+        return text
+
+    if llm_func is None:
+        # Fallback to truncation if no LLM available
+        logger.warning(f"No LLM available for summarization, truncating {len(text)} chars to {max_chars}")
+        return text[:max_chars]
+
+    # Calculate target length (80% of max to leave buffer)
+    target_chars = int(max_chars * 0.8)
+
+    prompt = f"""Summarize the following text to under {target_chars} characters while preserving:
+- Key technical concepts and terminology
+- Important names, functions, or identifiers
+- Critical relationships and dependencies
+- Any code snippets or examples (abbreviated if needed)
+
+Be concise but accurate. Do not add commentary, just provide the summary.
+
+TEXT TO SUMMARIZE:
+{text}
+
+SUMMARY:"""
+
+    try:
+        summary = await llm_func(prompt)
+        summary = summary.strip()
+
+        # Ensure it fits (truncate if LLM exceeded limit)
+        if len(summary) > max_chars:
+            summary = summary[:max_chars]
+
+        logger.debug(f"Summarized {len(text)} chars to {len(summary)} chars using LLM")
+        return summary
+
+    except Exception as e:
+        logger.warning(f"LLM summarization failed: {e}, falling back to truncation")
+        return text[:max_chars]
+
+
 async def embed_long_text(
     text: str,
     max_chars: int,
     embed_func,
     overlap_chars: int = 200,
+    use_llm_summarization: bool = False,
+    llm_func = None,
 ) -> list[float]:
-    """Embed a long text by chunking and averaging embeddings.
+    """Embed a long text using mean pooling or LLM summarization.
 
-    For texts longer than max_chars:
-    1. Split into overlapping segments
-    2. Embed each segment
-    3. Mean pool the embeddings
+    For texts longer than max_chars, two strategies are available:
 
-    This preserves information that would be lost by truncation.
+    1. Mean Pooling (default):
+       - Split into overlapping segments
+       - Embed each segment
+       - Average the embeddings
+
+    2. LLM Summarization (if use_llm_summarization=True):
+       - Use LLM to create a semantic summary that fits
+       - Embed the summary directly
+       - Better preserves meaning but requires LLM calls
+
+    Args:
+        text: Text to embed
+        max_chars: Max input characters for embedding model
+        embed_func: Async function to generate embeddings
+        overlap_chars: Overlap between segments for mean pooling
+        use_llm_summarization: Use LLM to summarize instead of mean pooling
+        llm_func: Async function for LLM calls (required if use_llm_summarization=True)
+
+    Returns:
+        Embedding vector
     """
     if len(text) <= max_chars:
         embeddings = await embed_func([text])
         return embeddings[0]
 
+    # Strategy 1: LLM Summarization
+    if use_llm_summarization and llm_func is not None:
+        summarized = await summarize_for_embedding(text, max_chars, llm_func)
+        embeddings = await embed_func([summarized])
+        return embeddings[0]
+
+    # Strategy 2: Mean Pooling (default)
     # Split into overlapping segments
     segments = []
     start = 0
@@ -583,14 +666,32 @@ class DocEmbedProcessor(KBJobProcessor):
                             """, chunk["id"], embedding_str)
                             embedded_count += 1
 
-                    # Process long texts individually with mean pooling
+                    # Process long texts based on configured strategy
+                    long_text_strategy = self.config.embeddings.long_text_strategy
+
+                    # Get LLM function if needed for summarization
+                    llm_func = None
+                    if long_text_strategy == "llm_summarize":
+                        from yonk_code_robomonkey.llm import generate_text
+                        async def llm_func(prompt: str) -> str:
+                            return await generate_text(prompt, task_type="small")
+
                     for chunk in long_chunks:
-                        embedding = await embed_long_text(
-                            text=chunk["content"],
-                            max_chars=max_chars,
-                            embed_func=embed_batch,
-                            overlap_chars=min(200, max_chars // 5),
-                        )
+                        if long_text_strategy == "truncate":
+                            # Simple truncation
+                            truncated = chunk["content"][:max_chars]
+                            embeddings_result = await embed_batch([truncated])
+                            embedding = embeddings_result[0]
+                        else:
+                            # Mean pooling or LLM summarization
+                            embedding = await embed_long_text(
+                                text=chunk["content"],
+                                max_chars=max_chars,
+                                embed_func=embed_batch,
+                                overlap_chars=min(200, max_chars // 5),
+                                use_llm_summarization=(long_text_strategy == "llm_summarize"),
+                                llm_func=llm_func,
+                            )
                         embedding_str = '[' + ','.join(str(x) for x in embedding) + ']'
                         await conn.execute("""
                             INSERT INTO robomonkey_docs.doc_chunk_embedding (chunk_id, embedding)
