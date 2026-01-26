@@ -26,6 +26,7 @@ from ...knowledge_base.chunker import DocumentChunker
 from ...knowledge_base.extractors import get_extractor
 from ...knowledge_base.models import (
     ChunkingConfig,
+    DocAskRequest,
     DocContextParams,
     DocIndexRequest,
     DocIndexResult,
@@ -35,6 +36,7 @@ from ...knowledge_base.models import (
     SourceStatus,
 )
 from ...knowledge_base.search import doc_get_context, doc_search
+from ...knowledge_base.ask_docs import ask_docs
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +46,22 @@ router = APIRouter(tags=["documents"])
 # ============ Pydantic Models for API ============
 
 class DocSearchRequest(BaseModel):
-    """Search request body."""
+    """Search request body.
+
+    Supports hybrid search (vector + FTS) with optional context expansion
+    and LLM-powered summarization.
+    """
     query: str = Field(..., description="Search query")
-    doc_types: Optional[list[str]] = Field(default=None, description="Filter by doc types")
-    doc_names: Optional[list[str]] = Field(default=None, description="Filter by document names")
+    doc_types: Optional[list[str]] = Field(default=None, description="Filter by doc types (e.g., ['epas_docs', 'migration_toolkit'])")
+    doc_names: Optional[list[str]] = Field(default=None, description="Filter by specific document names")
     topics: Optional[list[str]] = Field(default=None, description="Filter by topics")
-    oracle_constructs: Optional[list[str]] = Field(default=None, description="Filter by Oracle constructs")
-    epas_features: Optional[list[str]] = Field(default=None, description="Filter by EPAS features")
-    top_k: int = Field(default=10, ge=1, le=100)
-    search_mode: str = Field(default="hybrid", description="hybrid, semantic, or fts")
+    oracle_constructs: Optional[list[str]] = Field(default=None, description="Filter by Oracle constructs (e.g., ['ROWNUM', 'CONNECT BY'])")
+    epas_features: Optional[list[str]] = Field(default=None, description="Filter by EPAS features (e.g., ['dblink_ora', 'SPL'])")
+    top_k: int = Field(default=10, ge=1, le=100, description="Number of results to return")
+    search_mode: str = Field(default="hybrid", description="Search mode: 'hybrid' (vector+FTS), 'semantic' (vector only), or 'fts' (text only)")
+    context_chunks: int = Field(default=0, ge=0, le=3, description="Number of chunks before/after each result to include (0-3). 0 returns just the matched chunk.")
+    summarize: bool = Field(default=False, description="If true, use LLM to summarize each result with context to answer the query")
+    use_llm_keywords: bool = Field(default=False, description="If true, use LLM to extract better search keywords (improves FTS accuracy for complex questions)")
 
 
 class DocContextRequest(BaseModel):
@@ -84,14 +93,22 @@ async def get_embedding_func():
         return None
 
     async def embed(text: str) -> list[float]:
-        from ...embeddings.embedder import get_embedding_client
-        client = get_embedding_client(
-            provider=settings.embeddings_provider,
-            base_url=settings.embeddings_base_url,
-            model=settings.embeddings_model,
-            api_key=getattr(settings, 'vllm_api_key', None),
-        )
-        embeddings = await client.embed_batch([text])
+        from ...embeddings.ollama import ollama_embed
+        from ...embeddings.vllm_openai import vllm_embed
+
+        if settings.embeddings_provider == "ollama":
+            embeddings = await ollama_embed(
+                texts=[text],
+                model=settings.embeddings_model,
+                base_url=settings.embeddings_base_url,
+            )
+        else:  # vllm or openai
+            embeddings = await vllm_embed(
+                texts=[text],
+                model=settings.embeddings_model,
+                base_url=settings.embeddings_base_url,
+                api_key=getattr(settings, 'vllm_api_key', None) or '',
+            )
         return embeddings[0] if embeddings else []
 
     return embed
@@ -558,40 +575,426 @@ async def reindex_document(
         await conn.close()
 
 
+@router.post("/reindex-all")
+async def reindex_all_documents(
+    force: bool = True,
+) -> dict[str, Any]:
+    """Reindex ALL documents - re-chunk with whitespace normalization and re-embed.
+
+    This will:
+    1. Delete all existing chunks for each document
+    2. Re-process documents with current chunking code (includes whitespace normalization)
+    3. Queue embedding jobs for all new chunks
+    """
+    settings = Settings()
+    conn = await asyncpg.connect(dsn=settings.database_url)
+
+    try:
+        # Get all documents with file paths
+        sources = await conn.fetch("""
+            SELECT id, name, file_path, doc_type, version, description
+            FROM robomonkey_docs.doc_source
+            WHERE file_path IS NOT NULL
+            ORDER BY name
+        """)
+
+        if not sources:
+            return {
+                "status": "no_documents",
+                "message": "No documents with file paths found to reindex"
+            }
+
+        queued = []
+        skipped = []
+        errors = []
+
+        for source in sources:
+            try:
+                file_path = Path(source["file_path"])
+                if not file_path.exists():
+                    skipped.append({"name": source["name"], "reason": "file not found"})
+                    continue
+
+                current_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+                # Delete existing chunks
+                await conn.execute("DELETE FROM robomonkey_docs.doc_chunk WHERE source_id = $1", source["id"])
+                try:
+                    await conn.execute("DELETE FROM robomonkey_docs.doc_feature WHERE source_id = $1", source["id"])
+                    await conn.execute("DELETE FROM robomonkey_docs.doc_summary WHERE source_id = $1", source["id"])
+                except Exception:
+                    pass
+
+                # Update status to pending
+                await conn.execute("""
+                    UPDATE robomonkey_docs.doc_source
+                    SET status = 'pending', error_message = NULL, content_hash = $2,
+                        total_chunks = 0, total_pages = NULL, updated_at = NOW()
+                    WHERE id = $1
+                """, source["id"], current_hash)
+
+                # Queue job
+                job_id = await conn.fetchval("""
+                    SELECT robomonkey_docs.enqueue_kb_job(
+                        $1, $2, $3, 'DOC_INDEX', $4::jsonb, 5, $5
+                    )
+                """,
+                    source["id"], source["name"], str(file_path),
+                    json.dumps({
+                        "doc_type": source["doc_type"],
+                        "force": True,
+                    }),
+                    f"{source['name']}:reindex-all"
+                )
+
+                queued.append({"name": source["name"], "job_id": str(job_id) if job_id else None})
+
+            except Exception as e:
+                errors.append({"name": source["name"], "error": str(e)})
+
+        return {
+            "status": "queued",
+            "message": f"Queued {len(queued)} documents for reprocessing",
+            "queued": queued,
+            "skipped": skipped,
+            "errors": errors,
+        }
+
+    finally:
+        await conn.close()
+
+
 @router.post("/search")
 async def search_documents(request: DocSearchRequest) -> dict[str, Any]:
-    """Search document chunks.
+    """Search document chunks with optional context expansion and summarization.
 
-    Hybrid search combining vector similarity (60%) and full-text search (40%).
+    Performs hybrid search combining vector similarity (60%) and full-text search (40%).
+
+    **Search Modes:**
+    - `hybrid` (default): Combines semantic and text search for best results
+    - `semantic`: Vector similarity only (requires embeddings configured)
+    - `fts`: Full-text search only (keyword matching)
+
+    **Context Expansion:**
+    Set `context_chunks` (1-3) to include surrounding chunks with each result.
+    This provides more context around the matched text.
+
+    **Summarization:**
+    Set `summarize=true` to get LLM-generated summaries for each result that
+    directly answer your query. Automatically includes +-1 chunk for context.
+    Requires LLM configured in daemon.
     """
     settings = Settings()
 
-    # Convert doc_types strings to enum
-    doc_types = None
-    if request.doc_types:
-        doc_types = [DocType(dt) for dt in request.doc_types]
+    try:
+        # Convert doc_types strings to enum
+        doc_types = None
+        if request.doc_types:
+            doc_types = [DocType(dt) for dt in request.doc_types]
 
-    params = DocSearchParams(
-        query=request.query,
-        doc_types=doc_types,
-        doc_names=request.doc_names,
-        topics=request.topics,
-        oracle_constructs=request.oracle_constructs,
-        epas_features=request.epas_features,
-        top_k=request.top_k,
-        search_mode=request.search_mode,
-    )
+        params = DocSearchParams(
+            query=request.query,
+            doc_types=doc_types,
+            doc_names=request.doc_names,
+            topics=request.topics,
+            oracle_constructs=request.oracle_constructs,
+            epas_features=request.epas_features,
+            top_k=request.top_k,
+            search_mode=request.search_mode,
+        )
 
-    embedding_func = await get_embedding_func()
-    result = await doc_search(params, settings.database_url, embedding_func)
+        embedding_func = await get_embedding_func()
 
-    return {
-        "query": result.query,
-        "total_found": result.total_found,
-        "search_mode": result.search_mode,
-        "execution_time_ms": result.execution_time_ms,
-        "chunks": [chunk.model_dump() for chunk in result.chunks],
-    }
+        # Check if semantic search requested but no embedding function
+        if request.search_mode == "semantic" and embedding_func is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Semantic search requires embeddings to be configured. Check EMBEDDINGS_PROVIDER in .env"
+            )
+
+        result = await doc_search(
+            params, settings.database_url, embedding_func,
+            use_llm_keywords=request.use_llm_keywords
+        )
+
+        # Build response chunks with optional context expansion
+        chunks_response = []
+
+        if request.context_chunks > 0 or request.summarize:
+            # Need to fetch context for each chunk
+            conn = await asyncpg.connect(dsn=settings.database_url)
+            try:
+                for chunk in result.chunks:
+                    # Use at least 1 context chunk for summarization
+                    ctx_count = max(request.context_chunks, 1 if request.summarize else 0)
+
+                    # Get chunk's source_id and chunk_index
+                    chunk_info = await conn.fetchrow("""
+                        SELECT source_id, chunk_index
+                        FROM robomonkey_docs.doc_chunk
+                        WHERE id = $1
+                    """, chunk.chunk_id)
+
+                    if not chunk_info:
+                        chunks_response.append(chunk.model_dump())
+                        continue
+
+                    # Get surrounding chunks
+                    context_rows = await conn.fetch("""
+                        SELECT id, content, chunk_index, heading, page_number
+                        FROM robomonkey_docs.doc_chunk
+                        WHERE source_id = $1
+                        AND chunk_index BETWEEN $2 AND $3
+                        ORDER BY chunk_index
+                    """, chunk_info["source_id"],
+                        chunk_info["chunk_index"] - ctx_count,
+                        chunk_info["chunk_index"] + ctx_count)
+
+                    # Build context chunks list
+                    context_list = []
+                    full_context_text = []
+                    for row in context_rows:
+                        is_target = str(row["id"]) == str(chunk.chunk_id)
+                        context_list.append({
+                            "chunk_id": str(row["id"]),
+                            "content": row["content"],
+                            "chunk_index": row["chunk_index"],
+                            "heading": row["heading"],
+                            "page_number": row["page_number"],
+                            "is_target": is_target,
+                        })
+                        full_context_text.append(row["content"])
+
+                    chunk_data = chunk.model_dump()
+                    chunk_data["context_chunks"] = context_list
+                    chunk_data["context_text"] = "\n\n---\n\n".join(full_context_text)
+
+                    # Summarize if requested
+                    if request.summarize:
+                        summary = await _summarize_for_query(
+                            request.query,
+                            chunk_data["context_text"],
+                            chunk.source_document,
+                            settings
+                        )
+                        chunk_data["summary"] = summary
+
+                    chunks_response.append(chunk_data)
+            finally:
+                await conn.close()
+        else:
+            chunks_response = [chunk.model_dump() for chunk in result.chunks]
+
+        return {
+            "query": result.query,
+            "total_found": result.total_found,
+            "search_mode": result.search_mode,
+            "execution_time_ms": result.execution_time_ms,
+            "context_chunks_requested": request.context_chunks,
+            "summarize_requested": request.summarize,
+            "chunks": chunks_response,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@router.post("/ask")
+async def ask_documents(request: DocAskRequest) -> dict[str, Any]:
+    """Ask a question and get an LLM-generated answer from documentation.
+
+    This is a RAG Q&A feature that:
+    1. Searches for relevant documentation chunks
+    2. Uses an LLM to synthesize a cohesive answer with inline citations
+    3. Returns the answer along with source information
+
+    Unlike search (which returns ranked chunks) or search+summarize (which
+    summarizes each chunk individually), this produces ONE cohesive answer
+    synthesized across multiple relevant chunks.
+
+    **Example Questions:**
+    - "How does EPAS handle Oracle's XMLParse function?"
+    - "What is the syntax for CONNECT BY in EPAS?"
+    - "How do I migrate Oracle packages to PostgreSQL?"
+
+    **Response includes:**
+    - `answer`: The synthesized answer with inline citations [1], [2]
+    - `confidence`: "high", "medium", "low", or "no_answer"
+    - `sources`: List of sources used with document, section, page info
+    """
+    settings = Settings()
+
+    try:
+        embedding_func = await get_embedding_func()
+
+        result = await ask_docs(request, settings.database_url, embedding_func)
+
+        return {
+            "question": result.question,
+            "answer": result.answer,
+            "confidence": result.confidence,
+            "sources": [
+                {
+                    "index": s.index,
+                    "document": s.document,
+                    "section": s.section,
+                    "page": s.page,
+                    "chunk_id": str(s.chunk_id),
+                    "relevance_score": s.relevance_score,
+                    "preview": s.preview,
+                }
+                for s in result.sources
+            ],
+            "chunks_used": result.chunks_used,
+            "execution_time_ms": result.execution_time_ms,
+            "model_used": result.model_used,
+        }
+
+    except Exception as e:
+        logger.error(f"Ask docs error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Ask failed: {str(e)}")
+
+
+async def _summarize_for_query(query: str, context: str, source: str, settings) -> str:
+    """Use LLM to summarize context in response to query."""
+    try:
+        # Try to use daemon's LLM config
+        import yaml
+        config_path = Path(__file__).parent.parent.parent.parent.parent / "config" / "robomonkey-daemon.yaml"
+        if not config_path.exists():
+            return "(Summarization unavailable - daemon config not found)"
+
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+
+        llm_config = config.get("llm", {}).get("small", {})
+        if not llm_config:
+            return "(Summarization unavailable - LLM not configured)"
+
+        provider = llm_config.get("provider", "ollama")
+        model = llm_config.get("model", "llama3.2")
+        base_url = llm_config.get("base_url", "http://localhost:11434")
+
+        prompt = f"""Based on the following documentation excerpt from "{source}", answer this question concisely:
+
+Question: {query}
+
+Documentation:
+{context[:4000]}
+
+Provide a brief, direct answer (2-3 sentences) based only on the documentation above. If the documentation doesn't answer the question, say so."""
+
+        if provider == "ollama":
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{base_url}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False}
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("response", "(No response)")
+                return f"(LLM error: {resp.status_code})"
+        else:  # openai-compatible
+            import httpx
+            api_key = llm_config.get("api_key") or os.environ.get("OPENAI_API_KEY", "")
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{base_url}/v1/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 500,
+                    }
+                )
+                if resp.status_code == 200:
+                    return resp.json()["choices"][0]["message"]["content"]
+                return f"(LLM error: {resp.status_code})"
+
+    except Exception as e:
+        logger.warning(f"Summarization failed: {e}")
+        return f"(Summarization error: {str(e)})"
+
+
+@router.get("/chunk/{chunk_id}/context")
+async def get_chunk_context(chunk_id: str, context_chunks: int = 2) -> dict[str, Any]:
+    """Get a chunk with surrounding context chunks.
+
+    Args:
+        chunk_id: UUID of the chunk
+        context_chunks: Number of chunks before and after to include (default 2)
+    """
+    settings = Settings()
+
+    try:
+        conn = await asyncpg.connect(dsn=settings.database_url)
+        try:
+            # Get the target chunk and its position
+            target = await conn.fetchrow("""
+                SELECT
+                    dc.id, dc.content, dc.source_id, dc.chunk_index,
+                    dc.heading, dc.section_path, dc.page_number,
+                    ds.name as source_name, ds.doc_type
+                FROM robomonkey_docs.doc_chunk dc
+                JOIN robomonkey_docs.doc_source ds ON dc.source_id = ds.id
+                WHERE dc.id = $1
+            """, chunk_id)
+
+            if not target:
+                raise HTTPException(status_code=404, detail="Chunk not found")
+
+            # Get surrounding chunks from the same document
+            context = await conn.fetch("""
+                SELECT
+                    dc.id, dc.content, dc.chunk_index,
+                    dc.heading, dc.section_path, dc.page_number
+                FROM robomonkey_docs.doc_chunk dc
+                WHERE dc.source_id = $1
+                AND dc.chunk_index BETWEEN $2 AND $3
+                ORDER BY dc.chunk_index
+            """, target["source_id"],
+                target["chunk_index"] - context_chunks,
+                target["chunk_index"] + context_chunks)
+
+            chunks = []
+            for row in context:
+                chunks.append({
+                    "id": str(row["id"]),
+                    "content": row["content"],
+                    "chunk_index": row["chunk_index"],
+                    "heading": row["heading"],
+                    "section_path": row["section_path"] or [],
+                    "page_number": row["page_number"],
+                    "is_target": str(row["id"]) == chunk_id,
+                })
+
+            return {
+                "target_chunk_id": chunk_id,
+                "source_document": target["source_name"],
+                "doc_type": target["doc_type"],
+                "chunks": chunks,
+                "total_context_chunks": len(chunks),
+            }
+
+        finally:
+            await conn.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting chunk context: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get context: {str(e)}")
 
 
 @router.get("/{doc_name}/features")
@@ -741,18 +1144,43 @@ async def get_embedding_stats() -> dict[str, Any]:
         pending_chunks = total_chunks - embedded_chunks
         embed_percent = round((embedded_chunks / total_chunks * 100) if total_chunks > 0 else 0, 1)
 
-        # Get index info
-        index_info = await conn.fetchrow("""
-            SELECT
-                indexname, indexdef,
-                pg_size_pretty(pg_relation_size(indexrelid)) as size
+        # Get index info - look for any non-primary key index on the embedding table
+        # First, get all indexes on the table for debugging
+        all_indexes = await conn.fetch("""
+            SELECT schemaname, indexname, indexdef
             FROM pg_indexes
-            JOIN pg_class ON pg_class.relname = indexname
-            JOIN pg_index ON pg_index.indexrelid = pg_class.oid
-            WHERE schemaname = 'robomonkey_docs'
-            AND indexname LIKE '%embedding%'
-            LIMIT 1
+            WHERE tablename = 'doc_chunk_embedding'
         """)
+
+        logger.info(f"Found {len(all_indexes)} indexes on doc_chunk_embedding: {[(r['schemaname'], r['indexname']) for r in all_indexes]}")
+
+        # Look for vector indexes (by indexdef content, not name)
+        index_info = None
+        for idx in all_indexes:
+            indexdef_lower = idx["indexdef"].lower()
+            if any(op in indexdef_lower for op in ['vector_cosine_ops', 'vector_l2_ops', 'vector_ip_ops', 'hnsw', 'ivfflat']):
+                # Get size for this index
+                try:
+                    size = await conn.fetchval("""
+                        SELECT pg_size_pretty(pg_relation_size($1::regclass))
+                    """, f"{idx['schemaname']}.{idx['indexname']}")
+                    index_info = {
+                        "indexname": idx["indexname"],
+                        "indexdef": idx["indexdef"],
+                        "size": size or "unknown",
+                        "schemaname": idx["schemaname"],
+                    }
+                    logger.info(f"Found vector index: {index_info}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Could not get size for index {idx['indexname']}: {e}")
+                    index_info = {
+                        "indexname": idx["indexname"],
+                        "indexdef": idx["indexdef"],
+                        "size": "unknown",
+                        "schemaname": idx["schemaname"],
+                    }
+                    break
 
         index_type = "none"
         index_size = "0 bytes"
@@ -762,6 +1190,8 @@ async def get_embedding_stats() -> dict[str, Any]:
                 index_type = "hnsw"
             elif "ivfflat" in index_info["indexdef"].lower():
                 index_type = "ivfflat"
+            else:
+                index_type = "btree"  # Fallback for other index types
 
         # Check for last rebuild time (using index creation as proxy)
         last_rebuild = await conn.fetchval("""
@@ -1699,25 +2129,49 @@ async def rebuild_doc_vector_indexes(conn: asyncpg.Connection) -> dict:
         if count == 0:
             return {"status": "skipped", "message": "No embeddings to index"}
 
+        # Clean up any legacy index in public schema (from previous bug)
+        logger.info("Cleaning up any legacy index in public schema...")
+        await conn.execute("DROP INDEX IF EXISTS public.idx_doc_chunk_embedding_vec")
+
+        # Set search_path to ensure index is created in correct schema
+        logger.info("Setting search_path to robomonkey_docs...")
+        await conn.execute("SET search_path TO robomonkey_docs, public")
+
+        # Drop existing index first
+        logger.info("Dropping existing index if any...")
+        await conn.execute("DROP INDEX IF EXISTS idx_doc_chunk_embedding_vec")
+
         # Determine optimal index type based on count
         if count < 10000:
             # IVFFlat for smaller datasets
             lists = max(10, count // 100)
+            logger.info(f"Creating IVFFlat index with {lists} lists for {count} embeddings...")
             await conn.execute(f"""
-                DROP INDEX IF EXISTS robomonkey_docs.idx_doc_chunk_embedding_vec;
-                CREATE INDEX idx_doc_chunk_embedding_vec ON robomonkey_docs.doc_chunk_embedding
-                USING ivfflat (embedding vector_cosine_ops) WITH (lists = {lists});
+                CREATE INDEX idx_doc_chunk_embedding_vec ON doc_chunk_embedding
+                USING ivfflat (embedding vector_cosine_ops) WITH (lists = {lists})
             """)
             results["index_type"] = "ivfflat"
             results["lists"] = lists
         else:
             # HNSW for larger datasets
+            logger.info(f"Creating HNSW index for {count} embeddings...")
             await conn.execute("""
-                DROP INDEX IF EXISTS robomonkey_docs.idx_doc_chunk_embedding_vec;
-                CREATE INDEX idx_doc_chunk_embedding_vec ON robomonkey_docs.doc_chunk_embedding
-                USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+                CREATE INDEX idx_doc_chunk_embedding_vec ON doc_chunk_embedding
+                USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)
             """)
             results["index_type"] = "hnsw"
+
+        # Verify the index was created
+        verify = await conn.fetchrow("""
+            SELECT schemaname, indexname, indexdef
+            FROM pg_indexes
+            WHERE indexname = 'idx_doc_chunk_embedding_vec'
+        """)
+        if verify:
+            logger.info(f"Index created successfully in schema: {verify['schemaname']}")
+            results["schema"] = verify["schemaname"]
+        else:
+            logger.warning("Index creation completed but index not found in pg_indexes!")
 
         results["status"] = "success"
         results["embeddings_indexed"] = count

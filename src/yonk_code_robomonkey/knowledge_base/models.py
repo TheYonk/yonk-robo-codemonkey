@@ -167,6 +167,7 @@ class DocChunkResult(BaseModel):
     score: float
     vec_score: Optional[float] = None
     fts_score: Optional[float] = None
+    keyword_matches: int = Field(default=0, description="Number of query keywords found in this chunk")
 
     # For citation
     citation: Optional[str] = None
@@ -179,6 +180,7 @@ class DocSearchResult(BaseModel):
     chunks: list[DocChunkResult]
     search_mode: str
     execution_time_ms: Optional[float] = None
+    extracted_keywords: list[str] = Field(default_factory=list, description="Keywords extracted from query")
 
 
 class DocContextParams(BaseModel):
@@ -221,6 +223,38 @@ class ExtractedDocument(BaseModel):
     total_pages: Optional[int] = None
     sections: list[ExtractedSection]
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# ============ Ask Docs (RAG Q&A) Models ============
+
+class DocAskRequest(BaseModel):
+    """Request for RAG Q&A - ask a question about the documentation."""
+    question: str = Field(..., description="Natural language question about the documentation")
+    doc_types: Optional[list[str]] = Field(default=None, description="Filter by document types")
+    doc_names: Optional[list[str]] = Field(default=None, description="Filter by document names")
+    max_context_tokens: int = Field(default=6000, ge=1000, le=12000, description="Maximum tokens for context")
+
+
+class DocAskSource(BaseModel):
+    """A source used in a RAG Q&A answer."""
+    index: int = Field(..., description="Citation index [1], [2], etc.")
+    document: str = Field(..., description="Source document name")
+    section: Optional[str] = Field(default=None, description="Section heading if available")
+    page: Optional[int] = Field(default=None, description="Page number if available")
+    chunk_id: UUID = Field(..., description="UUID of the chunk")
+    relevance_score: float = Field(..., description="Search relevance score")
+    preview: str = Field(..., description="First 200 chars of the chunk")
+
+
+class DocAskResult(BaseModel):
+    """Result of RAG Q&A - synthesized answer with citations."""
+    question: str = Field(..., description="The original question")
+    answer: str = Field(..., description="LLM-generated answer with inline citations [1], [2]")
+    confidence: str = Field(..., description="Confidence level: high, medium, low, no_answer")
+    sources: list[DocAskSource] = Field(default_factory=list, description="Sources used in the answer")
+    chunks_used: int = Field(..., description="Number of chunks used for context")
+    execution_time_ms: float = Field(..., description="Total execution time in milliseconds")
+    model_used: str = Field(..., description="LLM model used for generation")
 
 
 class ChunkingConfig(BaseModel):

@@ -22,9 +22,60 @@
             <button onclick="rebuildIndexes()" class="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium">
                 Rebuild Indexes
             </button>
+            <button onclick="reprocessAllDocuments()" class="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium" title="Re-chunk all documents with whitespace normalization and re-embed">
+                Reprocess All
+            </button>
             <button onclick="loadDocuments()" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
                 Refresh
             </button>
+        </div>
+    </div>
+
+    <!-- Ask Docs Section (RAG Q&A) -->
+    <div class="bg-gradient-to-r from-slate-800 to-slate-800/80 border border-blue-500/30 shadow-lg rounded-lg p-6">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="p-2 bg-blue-600/20 rounded-lg">
+                <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+            <div>
+                <h3 class="text-lg font-semibold text-slate-100">Ask Docs</h3>
+                <p class="text-sm text-slate-400">Get AI-powered answers synthesized from your documentation</p>
+            </div>
+        </div>
+        <form onsubmit="askDocs(event)" class="space-y-4">
+            <div>
+                <textarea id="ask-question"
+                    class="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 resize-none"
+                    placeholder="Ask a question about the documentation...
+
+Example: How does EPAS handle Oracle's XMLParse function?"
+                    rows="3"></textarea>
+            </div>
+            <div class="flex gap-4 items-center flex-wrap">
+                <button type="submit" id="ask-submit-btn" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    Ask
+                </button>
+                <div class="flex items-center gap-2 text-sm text-slate-400">
+                    <label>Max context:</label>
+                    <select id="ask-max-tokens" class="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm">
+                        <option value="4000">4K tokens</option>
+                        <option value="6000" selected>6K tokens</option>
+                        <option value="8000">8K tokens</option>
+                        <option value="10000">10K tokens</option>
+                    </select>
+                </div>
+                <div class="text-xs text-slate-500">
+                    Uses hybrid search + LLM synthesis for accurate answers with citations
+                </div>
+            </div>
+        </form>
+        <div id="ask-result" class="mt-4 hidden">
+            <!-- Ask result populated here -->
         </div>
     </div>
 
@@ -66,6 +117,19 @@
                     <input type="number" id="search-top-k" value="10" min="1" max="50"
                         class="w-16 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm">
                 </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-slate-400">Context:</label>
+                    <select id="search-context" class="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm">
+                        <option value="0">None</option>
+                        <option value="1">+/- 1 chunk</option>
+                        <option value="2">+/- 2 chunks</option>
+                        <option value="3">+/- 3 chunks</option>
+                    </select>
+                </div>
+                <label class="inline-flex items-center gap-2 text-sm text-slate-300" title="Use LLM to summarize each result to answer your query">
+                    <input type="checkbox" id="search-summarize" class="rounded bg-slate-700 border-slate-600">
+                    <span>Summarize</span>
+                </label>
             </div>
         </form>
         <div id="search-results" class="mt-4 hidden">
@@ -101,14 +165,22 @@
         <h3 class="text-lg font-semibold text-slate-100 mb-3">About the Knowledge Base</h3>
         <div class="text-sm text-slate-400 space-y-2">
             <p>The knowledge base stores and indexes documentation for RAG (Retrieval Augmented Generation) queries.</p>
+
+            <h4 class="text-slate-200 font-medium mt-4 mb-2">Features</h4>
             <ul class="list-disc list-inside space-y-1 ml-2">
-                <li><strong class="text-slate-200">PDF Documents</strong> - Extracted with structure preservation (headings, tables, code blocks)</li>
-                <li><strong class="text-slate-200">Markdown/HTML</strong> - Parsed with heading hierarchy and code block detection</li>
-                <li><strong class="text-slate-200">Smart Chunking</strong> - 500-1500 token chunks with overlap for context continuity</li>
-                <li><strong class="text-slate-200">Auto-Tagging</strong> - Oracle constructs (ROWNUM, CONNECT BY, DECODE) and EPAS features are auto-detected</li>
+                <li><strong class="text-slate-200">Ask Docs (RAG Q&A)</strong> - Ask natural language questions and get AI-synthesized answers with citations</li>
                 <li><strong class="text-slate-200">Hybrid Search</strong> - Combines vector similarity (60%) and full-text search (40%)</li>
+                <li><strong class="text-slate-200">Smart Chunking</strong> - 500-1500 token chunks with overlap for context continuity</li>
+                <li><strong class="text-slate-200">Auto-Tagging</strong> - Oracle constructs and EPAS features are auto-detected</li>
             </ul>
-            <p class="mt-3">Use MCP tools <code class="bg-slate-700 px-1 rounded">doc_search</code> and <code class="bg-slate-700 px-1 rounded">doc_get_context</code> for programmatic access.</p>
+
+            <h4 class="text-slate-200 font-medium mt-4 mb-2">Ask Docs vs Search</h4>
+            <ul class="list-disc list-inside space-y-1 ml-2">
+                <li><strong class="text-blue-400">Ask Docs</strong> - Get ONE synthesized answer from multiple sources with inline citations [1], [2]</li>
+                <li><strong class="text-slate-200">Search</strong> - Browse ranked chunks with scores and optional per-chunk summaries</li>
+            </ul>
+
+            <p class="mt-3">Use MCP tools <code class="bg-slate-700 px-1 rounded">kb_ask</code>, <code class="bg-slate-700 px-1 rounded">kb_search</code>, and <code class="bg-slate-700 px-1 rounded">kb_get_context</code> for programmatic access.</p>
         </div>
     </div>
 </div>
@@ -147,6 +219,27 @@
             </button>
             <button id="upload-submit-btn" onclick="document.getElementById('upload-form').requestSubmit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed">
                 Upload & Index
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Chunk Context Modal -->
+<div id="context-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
+    <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700">
+            <div>
+                <h3 class="text-lg font-semibold text-slate-100">Document Context</h3>
+                <p id="context-source" class="text-sm text-slate-400"></p>
+            </div>
+            <button onclick="closeContextModal()" class="text-slate-400 hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div id="context-content" class="p-4 overflow-y-auto flex-1">
+            <p class="text-slate-400">Loading context...</p>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-slate-700">
+            <button onclick="closeContextModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">
+                Close
             </button>
         </div>
     </div>
@@ -210,6 +303,9 @@
         </div>
     </div>
 </div>
+
+<!-- Toast Notifications Container -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
 <!-- Delete Confirmation Modal -->
 <div id="delete-modal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center">
@@ -533,6 +629,172 @@ function renderActions(doc) {
     return html;
 }
 
+// Ask Docs (RAG Q&A)
+async function askDocs(event) {
+    event.preventDefault();
+
+    const question = document.getElementById('ask-question').value.trim();
+    if (!question) {
+        showToast('Please enter a question', 'warning');
+        return;
+    }
+
+    const maxTokens = parseInt(document.getElementById('ask-max-tokens').value) || 6000;
+
+    const resultDiv = document.getElementById('ask-result');
+    const submitBtn = document.getElementById('ask-submit-btn');
+    const originalBtnContent = submitBtn.innerHTML;
+
+    // Show loading state
+    resultDiv.classList.remove('hidden');
+    resultDiv.innerHTML = `
+        <div class="flex items-center gap-3 p-4 bg-slate-700/50 rounded-lg">
+            <svg class="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <div>
+                <p class="text-slate-300">Searching documentation and generating answer...</p>
+                <p class="text-xs text-slate-500 mt-1">This may take a moment as the AI synthesizes information from multiple sources</p>
+            </div>
+        </div>
+    `;
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `
+        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Thinking...
+    `;
+
+    try {
+        const response = await fetch('/api/docs/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question,
+                max_context_tokens: maxTokens
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || data.error || data.detail) {
+            const errMsg = data.detail || data.error || 'Ask failed';
+            resultDiv.innerHTML = `<div class="p-4 bg-red-900/30 border border-red-700 rounded-lg text-red-300">${escapeHtml(errMsg)}</div>`;
+            return;
+        }
+
+        // Render the result
+        resultDiv.innerHTML = renderAskResult(data);
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="p-4 bg-red-900/30 border border-red-700 rounded-lg text-red-300">Error: ${escapeHtml(error.message)}</div>`;
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnContent;
+    }
+}
+
+function renderAskResult(data) {
+    const confidenceColors = {
+        high: 'bg-emerald-900/50 border-emerald-600 text-emerald-400',
+        medium: 'bg-yellow-900/50 border-yellow-600 text-yellow-400',
+        low: 'bg-orange-900/50 border-orange-600 text-orange-400',
+        no_answer: 'bg-red-900/50 border-red-600 text-red-400'
+    };
+
+    const confidenceLabels = {
+        high: 'High Confidence',
+        medium: 'Medium Confidence',
+        low: 'Low Confidence',
+        no_answer: 'Could Not Answer'
+    };
+
+    const confidenceClass = confidenceColors[data.confidence] || confidenceColors.low;
+    const confidenceLabel = confidenceLabels[data.confidence] || data.confidence;
+
+    // Format the answer - convert markdown-style formatting
+    let formattedAnswer = escapeHtml(data.answer);
+    // Convert code blocks
+    formattedAnswer = formattedAnswer.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-slate-900 p-3 rounded mt-2 mb-2 overflow-x-auto text-sm"><code>$2</code></pre>');
+    // Convert inline code
+    formattedAnswer = formattedAnswer.replace(/`([^`]+)`/g, '<code class="bg-slate-700 px-1 rounded text-blue-300">$1</code>');
+    // Convert newlines to paragraphs
+    formattedAnswer = formattedAnswer.split('\n\n').map(p => `<p class="mb-3">${p}</p>`).join('');
+    // Highlight citations
+    formattedAnswer = formattedAnswer.replace(/\[(\d+)\]/g, '<span class="text-blue-400 font-medium cursor-pointer hover:underline" onclick="scrollToSource($1)">[$1]</span>');
+
+    return `
+        <div class="space-y-4">
+            <!-- Answer Section -->
+            <div class="p-5 bg-slate-700/50 border border-slate-600 rounded-lg">
+                <div class="flex justify-between items-start mb-4">
+                    <h4 class="text-sm font-medium text-slate-400 uppercase tracking-wide">Answer</h4>
+                    <div class="flex items-center gap-3">
+                        <span class="px-2 py-1 rounded text-xs font-medium border ${confidenceClass}">${confidenceLabel}</span>
+                        <span class="text-xs text-slate-500">${data.execution_time_ms.toFixed(0)}ms</span>
+                    </div>
+                </div>
+                <div class="text-slate-200 leading-relaxed prose prose-invert prose-sm max-w-none">
+                    ${formattedAnswer}
+                </div>
+            </div>
+
+            <!-- Sources Section -->
+            ${data.sources && data.sources.length > 0 ? `
+                <div class="p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+                    <h4 class="text-sm font-medium text-slate-400 uppercase tracking-wide mb-3">Sources (${data.sources.length})</h4>
+                    <div class="space-y-2">
+                        ${data.sources.map((source, i) => `
+                            <div id="source-${source.index}" class="p-3 bg-slate-700/30 border border-slate-600/50 rounded hover:bg-slate-700/50 transition-colors">
+                                <div class="flex justify-between items-start">
+                                    <div class="flex items-center gap-2">
+                                        <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">${source.index}</span>
+                                        <div>
+                                            <span class="font-medium text-slate-200">${escapeHtml(source.document)}</span>
+                                            ${source.section ? `<span class="text-slate-400"> / ${escapeHtml(source.section)}</span>` : ''}
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        ${source.page ? `<span class="text-xs text-slate-500">Page ${source.page}</span>` : ''}
+                                        <span class="text-xs text-slate-500">Score: ${source.relevance_score.toFixed(3)}</span>
+                                        <button onclick="showChunkContext('${source.chunk_id}')"
+                                            class="px-2 py-1 text-xs bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 rounded">
+                                            View Context
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mt-2 text-sm text-slate-400 line-clamp-2">${escapeHtml(source.preview)}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- Meta Info -->
+            <div class="flex items-center gap-4 text-xs text-slate-500">
+                <span>Model: ${escapeHtml(data.model_used)}</span>
+                <span>Chunks used: ${data.chunks_used}</span>
+            </div>
+        </div>
+    `;
+}
+
+function scrollToSource(index) {
+    const sourceEl = document.getElementById(`source-${index}`);
+    if (sourceEl) {
+        sourceEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Briefly highlight the source
+        sourceEl.classList.add('ring-2', 'ring-blue-500');
+        setTimeout(() => {
+            sourceEl.classList.remove('ring-2', 'ring-blue-500');
+        }, 2000);
+    }
+}
+
 // Search
 async function searchDocuments(event) {
     event.preventDefault();
@@ -542,6 +804,8 @@ async function searchDocuments(event) {
 
     const searchMode = document.getElementById('search-mode').value;
     const topK = parseInt(document.getElementById('search-top-k').value) || 10;
+    const contextChunks = parseInt(document.getElementById('search-context').value) || 0;
+    const summarize = document.getElementById('search-summarize').checked;
 
     const docTypes = [];
     document.querySelectorAll('.doc-type-filter:checked').forEach(cb => {
@@ -550,7 +814,9 @@ async function searchDocuments(event) {
 
     const resultsDiv = document.getElementById('search-results');
     resultsDiv.classList.remove('hidden');
-    resultsDiv.innerHTML = '<p class="text-slate-400">Searching...</p>';
+    resultsDiv.innerHTML = summarize
+        ? '<p class="text-slate-400">Searching and summarizing (this may take a moment)...</p>'
+        : '<p class="text-slate-400">Searching...</p>';
 
     try {
         const response = await fetch('/api/docs/search', {
@@ -560,46 +826,89 @@ async function searchDocuments(event) {
                 query: query,
                 search_mode: searchMode,
                 top_k: topK,
-                doc_types: docTypes.length > 0 ? docTypes : null
+                doc_types: docTypes.length > 0 ? docTypes : null,
+                context_chunks: contextChunks,
+                summarize: summarize
             })
         });
 
         const data = await response.json();
 
-        if (data.chunks.length === 0) {
+        // Check for server-side errors
+        if (!response.ok || data.error || data.detail) {
+            const errMsg = data.detail || data.error || 'Search failed';
+            resultsDiv.innerHTML = `<p class="text-red-400">Search error: ${escapeHtml(errMsg)}</p>`;
+            return;
+        }
+
+        if (!data.chunks || data.chunks.length === 0) {
             resultsDiv.innerHTML = `
                 <div class="text-center py-4 text-slate-400">
-                    No results found for "${query}"
+                    No results found for "${escapeHtml(query)}"
                 </div>
             `;
             return;
         }
 
+        // Show extracted keywords
+        const keywordsHtml = data.extracted_keywords && data.extracted_keywords.length > 0
+            ? `<div class="mb-3 flex flex-wrap items-center gap-2">
+                   <span class="text-xs text-slate-500">Keywords:</span>
+                   ${data.extracted_keywords.map(kw => `<span class="px-2 py-0.5 bg-blue-900/50 text-blue-300 rounded text-xs">${escapeHtml(kw)}</span>`).join('')}
+               </div>`
+            : '';
+
         resultsDiv.innerHTML = `
             <div class="text-sm text-slate-400 mb-3">
                 Found ${data.total_found} results in ${data.execution_time_ms.toFixed(0)}ms (${data.search_mode} mode)
+                ${data.context_chunks_requested > 0 ? ` | Context: +/-${data.context_chunks_requested} chunks` : ''}
+                ${data.summarize_requested ? ' | Summarized' : ''}
             </div>
+            ${keywordsHtml}
             <div class="space-y-3">
                 ${data.chunks.map((chunk, i) => `
                     <div class="p-4 bg-slate-700/50 border border-slate-600 rounded">
                         <div class="flex justify-between items-start mb-2">
                             <div class="flex items-center gap-2">
                                 <span class="text-xs text-slate-500">#${i + 1}</span>
-                                <span class="font-medium text-slate-200">${chunk.source_document}</span>
+                                <span class="font-medium text-slate-200">${chunk.source_document || 'Unknown'}</span>
                                 ${chunk.heading ? `<span class="text-slate-400">/ ${chunk.heading}</span>` : ''}
                             </div>
-                            <div class="flex gap-2 text-xs">
+                            <div class="flex gap-2 text-xs items-center">
                                 ${chunk.vec_score ? `<span class="text-blue-400" title="Vector score">V: ${chunk.vec_score.toFixed(3)}</span>` : ''}
                                 ${chunk.fts_score ? `<span class="text-emerald-400" title="FTS score">F: ${chunk.fts_score.toFixed(3)}</span>` : ''}
-                                <span class="text-slate-400">Score: ${chunk.score.toFixed(3)}</span>
+                                ${chunk.keyword_matches ? `<span class="text-yellow-400" title="Keywords matched">KW: ${chunk.keyword_matches}</span>` : ''}
+                                <span class="text-slate-400">Score: ${(chunk.score || 0).toFixed(3)}</span>
+                                <button onclick="showChunkContext('${chunk.chunk_id}')"
+                                    class="ml-2 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs"
+                                    title="View surrounding context">
+                                    More Context
+                                </button>
                             </div>
                         </div>
-                        <div class="text-sm text-slate-300 mb-2 whitespace-pre-wrap">${escapeHtml(chunk.content)}</div>
+                        ${chunk.summary ? `
+                            <div class="mb-3 p-3 bg-emerald-900/30 border border-emerald-700/50 rounded">
+                                <div class="text-xs text-emerald-400 font-medium mb-1">Summary:</div>
+                                <div class="text-sm text-slate-200">${escapeHtml(chunk.summary)}</div>
+                            </div>
+                        ` : ''}
+                        ${chunk.context_chunks && chunk.context_chunks.length > 1 ? `
+                            <div class="mb-2 p-3 bg-slate-800/50 border border-slate-700 rounded text-sm text-slate-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                                ${chunk.context_chunks.map(ctx => {
+                                    const text = escapeHtml(ctx.content || '');
+                                    return ctx.is_target
+                                        ? '<mark class="bg-blue-900/50 text-blue-100 px-1 rounded">' + text + '</mark>'
+                                        : text;
+                                }).join('\\n\\n')}
+                            </div>
+                        ` : `
+                            <div class="text-sm text-slate-300 mb-2 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(chunk.content || '')}</div>
+                        `}
                         <div class="flex flex-wrap gap-2 text-xs">
                             ${chunk.page_number ? `<span class="px-2 py-0.5 bg-slate-600 rounded">Page ${chunk.page_number}</span>` : ''}
-                            ${chunk.section_path.length > 0 ? `<span class="px-2 py-0.5 bg-slate-600 rounded">${chunk.section_path.join(' > ')}</span>` : ''}
-                            ${chunk.oracle_constructs.map(t => `<span class="px-2 py-0.5 bg-orange-900/50 text-orange-400 rounded">${t}</span>`).join('')}
-                            ${chunk.epas_features.map(t => `<span class="px-2 py-0.5 bg-purple-900/50 text-purple-400 rounded">${t}</span>`).join('')}
+                            ${(chunk.section_path && chunk.section_path.length > 0) ? `<span class="px-2 py-0.5 bg-slate-600 rounded">${chunk.section_path.join(' > ')}</span>` : ''}
+                            ${(chunk.oracle_constructs || []).map(t => `<span class="px-2 py-0.5 bg-orange-900/50 text-orange-400 rounded">${t}</span>`).join('')}
+                            ${(chunk.epas_features || []).map(t => `<span class="px-2 py-0.5 bg-purple-900/50 text-purple-400 rounded">${t}</span>`).join('')}
                         </div>
                     </div>
                 `).join('')}
@@ -608,6 +917,60 @@ async function searchDocuments(event) {
     } catch (error) {
         resultsDiv.innerHTML = `<p class="text-red-400">Search error: ${error.message}</p>`;
     }
+}
+
+// Context Modal
+async function showChunkContext(chunkId) {
+    const modal = document.getElementById('context-modal');
+    const contentDiv = document.getElementById('context-content');
+    const sourceP = document.getElementById('context-source');
+
+    modal.classList.remove('hidden');
+    contentDiv.innerHTML = '<p class="text-slate-400">Loading context...</p>';
+    sourceP.textContent = '';
+
+    try {
+        const response = await fetch(`/api/docs/chunk/${chunkId}/context?context_chunks=3`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            contentDiv.innerHTML = `<p class="text-red-400">Error: ${data.detail || 'Failed to load context'}</p>`;
+            return;
+        }
+
+        sourceP.textContent = `${data.source_document} (${data.doc_type})`;
+
+        // Combine all chunks into one continuous text block
+        // Highlight the matched section
+        const combinedContent = data.chunks.map(chunk => {
+            const text = escapeHtml(chunk.content);
+            if (chunk.is_target) {
+                return `<mark class="bg-blue-900/50 text-blue-100 px-1 rounded">${text}</mark>`;
+            }
+            return text;
+        }).join('\n\n');
+
+        const pageInfo = data.chunks.find(c => c.page_number)?.page_number;
+        const headings = [...new Set(data.chunks.filter(c => c.heading).map(c => c.heading))];
+
+        contentDiv.innerHTML = `
+            <div class="mb-3 flex flex-wrap gap-2 text-xs text-slate-400">
+                ${pageInfo ? `<span class="px-2 py-1 bg-slate-700 rounded">Page ${pageInfo}</span>` : ''}
+                ${headings.map(h => `<span class="px-2 py-1 bg-slate-700 rounded">${escapeHtml(h)}</span>`).join('')}
+                <span class="px-2 py-1 bg-slate-700 rounded">Chunks ${data.chunks[0]?.chunk_index || '?'} - ${data.chunks[data.chunks.length-1]?.chunk_index || '?'}</span>
+            </div>
+            <div class="p-4 bg-slate-700/50 border border-slate-600 rounded text-sm text-slate-200 whitespace-pre-wrap max-h-96 overflow-y-auto">${combinedContent}</div>
+            <div class="mt-2 text-xs text-slate-500">
+                <span class="inline-block px-2 py-1 bg-blue-900/30 rounded mr-2">Highlighted</span> = matched chunk
+            </div>
+        `;
+    } catch (error) {
+        contentDiv.innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+    }
+}
+
+function closeContextModal() {
+    document.getElementById('context-modal').classList.add('hidden');
 }
 
 // Upload Modal
@@ -630,7 +993,7 @@ async function submitUpload(event) {
     const title = document.getElementById('upload-title').value;
 
     if (!file) {
-        alert('Please select a file');
+        showToast('Please select a file', 'warning');
         return;
     }
 
@@ -665,9 +1028,11 @@ async function submitUpload(event) {
 
         // Close modal and refresh - status shown in table
         closeUploadModal();
-        await loadDocuments();
+        showToast(`Uploaded ${name} - processing started`, 'success');
+        const hasProcessing = await loadDocuments();
+        if (hasProcessing) startStatusPolling();
     } catch (error) {
-        alert('Error: ' + error.message);  // Only alert on errors
+        showToast('Error: ' + error.message, 'error');
     } finally {
         uploadBtn.disabled = false;
         uploadBtn.textContent = originalText;
@@ -727,6 +1092,7 @@ async function submitIndex(event) {
 
         // Close modal and refresh - status shown in table
         closeIndexModal();
+        showToast(`Indexing started for ${name}`, 'success');
         await loadDocuments();
 
         // Start polling for status updates if there are pending files
@@ -735,7 +1101,7 @@ async function submitIndex(event) {
             startStatusPolling();
         }
     } catch (error) {
-        alert('Error: ' + error.message);  // Only alert on errors
+        showToast('Error: ' + error.message, 'error');
     } finally {
         indexBtn.disabled = false;
         indexBtn.textContent = originalText;
@@ -1090,7 +1456,7 @@ function closeFeaturesModal() {
 
 // Show error message
 function showError(message) {
-    alert('Error: ' + message);
+    showToast('Error: ' + message, 'error', 8000);
 }
 
 // Stop processing a document
@@ -1119,11 +1485,12 @@ async function stopProcessing(docName) {
                     `;
                 }
             }
+            showToast(`Stopping ${docName}...`, 'info');
         } else if (result.status === 'not_processing') {
-            alert(result.message);
+            showToast(result.message, 'warning');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -1141,14 +1508,15 @@ async function resumeProcessing(docName) {
         }
 
         if (result.status === 'resuming') {
+            showToast(`Resuming processing of ${docName}`, 'success');
             // Reload documents and start polling if needed
             const hasProcessing = await loadDocuments();
             if (hasProcessing) startStatusPolling();
         } else if (result.status === 'cannot_resume') {
-            alert(result.message);
+            showToast(result.message, 'warning');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -1161,7 +1529,7 @@ async function retryAllFailed() {
         const failedDocs = data.documents.filter(d => d.status === 'failed');
 
         if (failedDocs.length === 0) {
-            alert('No failed documents to retry');
+            showToast('No failed documents to retry', 'info');
             return;
         }
 
@@ -1179,11 +1547,11 @@ async function retryAllFailed() {
             }
         }
 
-        alert(`Queued ${retried} document(s) for reprocessing`);
+        showToast(`Queued ${retried} document(s) for reprocessing`, 'success');
         const hasProcessing = await loadDocuments();
         if (hasProcessing) startStatusPolling();
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -1193,6 +1561,23 @@ async function rebuildIndexes() {
         return;
     }
 
+    // Find all rebuild buttons (main one and the one in stats section)
+    const rebuildButtons = document.querySelectorAll('button[onclick*="rebuildIndexes"]');
+    const originalContents = [];
+
+    // Show loading state on all rebuild buttons
+    rebuildButtons.forEach((btn, i) => {
+        originalContents[i] = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `
+            <svg class="animate-spin h-4 w-4 text-white inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Rebuilding...
+        `;
+    });
+
     try {
         const response = await fetch('/api/docs/rebuild-indexes', {
             method: 'POST'
@@ -1201,15 +1586,63 @@ async function rebuildIndexes() {
         const result = await response.json();
 
         if (result.status === 'success') {
-            alert(`Indexes rebuilt successfully!\nType: ${result.index_type}\nEmbeddings indexed: ${result.embeddings_indexed}`);
+            showToast(`Indexes rebuilt successfully! Type: ${result.index_type}, Embeddings indexed: ${result.embeddings_indexed}`, 'success');
             await loadEmbeddingStats();  // Refresh stats after rebuild
         } else if (result.status === 'skipped') {
-            alert(result.message || 'No embeddings to index');
+            showToast(result.message || 'No embeddings to index', 'warning');
         } else {
-            alert('Error rebuilding indexes: ' + (result.error || 'Unknown error'));
+            showToast('Error rebuilding indexes: ' + (result.error || 'Unknown error'), 'error');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
+    } finally {
+        // Restore buttons
+        rebuildButtons.forEach((btn, i) => {
+            btn.disabled = false;
+            btn.innerHTML = originalContents[i];
+        });
+    }
+}
+
+// Reprocess ALL documents (re-chunk with whitespace normalization and re-embed)
+async function reprocessAllDocuments() {
+    if (!confirm('⚠️ REPROCESS ALL DOCUMENTS?\n\nThis will:\n• Delete all existing chunks\n• Re-process with whitespace normalization\n• Queue re-embedding for all chunks\n\nThis may take a while for large document sets.')) {
+        return;
+    }
+
+    const btn = document.querySelector('button[onclick*="reprocessAllDocuments"]');
+    const originalContent = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `
+        <svg class="animate-spin h-4 w-4 text-white inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Queuing...
+    `;
+
+    try {
+        const response = await fetch('/api/docs/reindex-all', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'queued') {
+            showToast(`Queued ${result.queued.length} documents for reprocessing. Check status above.`, 'success');
+            // Start polling for updates
+            const hasProcessing = await loadDocuments();
+            if (hasProcessing) startStatusPolling();
+        } else if (result.status === 'no_documents') {
+            showToast(result.message, 'warning');
+        } else {
+            showToast('Error: ' + (result.error || result.message || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
     }
 }
 
@@ -1230,10 +1663,11 @@ async function reindexDoc(docName) {
             throw new Error(result.detail || 'Reindex failed');
         }
 
-        alert(`Reindexed: ${result.chunks_created} chunks created`);
-        await loadDocuments();
+        showToast(`Reindexed: ${result.chunks_created || 'queued'} chunks`, 'success');
+        const hasProcessing = await loadDocuments();
+        if (hasProcessing) startStatusPolling();
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -1263,11 +1697,11 @@ async function confirmDelete() {
             throw new Error(result.detail || 'Delete failed');
         }
 
-        alert(result.message || 'Deleted');
+        showToast(result.message || 'Document deleted', 'success');
         closeDeleteModal();
         await loadDocuments();
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -1334,6 +1768,50 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Toast Notifications
+function showToast(message, type = 'info', duration = 5000) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+
+    const colors = {
+        success: 'bg-emerald-900/95 border-emerald-600 text-emerald-100',
+        error: 'bg-red-900/95 border-red-600 text-red-100',
+        warning: 'bg-orange-900/95 border-orange-600 text-orange-100',
+        info: 'bg-blue-900/95 border-blue-600 text-blue-100'
+    };
+
+    const icons = {
+        success: '✓',
+        error: '✗',
+        warning: '⚠',
+        info: 'ℹ'
+    };
+
+    toast.className = `px-4 py-3 rounded-lg border shadow-lg ${colors[type]} flex items-start gap-3 min-w-[300px] max-w-md transform transition-all duration-300 translate-x-full`;
+    toast.innerHTML = `
+        <span class="text-lg">${icons[type]}</span>
+        <div class="flex-1 text-sm">${message}</div>
+        <button onclick="this.parentElement.remove()" class="text-lg opacity-60 hover:opacity-100">&times;</button>
+    `;
+
+    container.appendChild(toast);
+
+    // Animate in
+    requestAnimationFrame(() => {
+        toast.classList.remove('translate-x-full');
+    });
+
+    // Auto remove
+    if (duration > 0) {
+        setTimeout(() => {
+            toast.classList.add('translate-x-full');
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+
+    return toast;
 }
 </script>
 {% endblock %}
