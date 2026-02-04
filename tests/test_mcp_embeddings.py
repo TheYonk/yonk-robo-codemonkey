@@ -8,6 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from yonk_code_robomonkey.mcp.tools import hybrid_search, TOOL_REGISTRY
 
+import pytest
+
+@pytest.mark.asyncio
 async def test_hybrid_search():
     """Test hybrid search MCP tool."""
     print("=" * 60)
@@ -96,6 +99,7 @@ async def test_hybrid_search():
     
     return True
 
+@pytest.mark.asyncio
 async def test_all_tools():
     """Test all available MCP tools."""
     print("\n" + "=" * 60)

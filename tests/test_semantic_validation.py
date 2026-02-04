@@ -99,7 +99,7 @@ class TestClaimExtraction:
             }
         ])
 
-        with patch('yonk_code_robomonkey.doc_validity.claim_extractor._call_llm_for_json') as mock_llm:
+        with patch('yonk_code_robomonkey.doc_validity.claim_extractor.call_llm', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_response
 
             result = await extract_behavioral_claims(
@@ -116,7 +116,7 @@ class TestClaimExtraction:
     @pytest.mark.asyncio
     async def test_extraction_empty_response(self):
         """Should handle empty LLM response."""
-        with patch('yonk_code_robomonkey.doc_validity.claim_extractor._call_llm_for_json') as mock_llm:
+        with patch('yonk_code_robomonkey.doc_validity.claim_extractor.call_llm', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = ""
 
             result = await extract_behavioral_claims(
@@ -131,7 +131,7 @@ class TestClaimExtraction:
     @pytest.mark.asyncio
     async def test_extraction_invalid_json(self):
         """Should handle invalid JSON from LLM."""
-        with patch('yonk_code_robomonkey.doc_validity.claim_extractor._call_llm_for_json') as mock_llm:
+        with patch('yonk_code_robomonkey.doc_validity.claim_extractor.call_llm', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "not valid json"
 
             result = await extract_behavioral_claims(
@@ -151,7 +151,7 @@ class TestClaimExtraction:
             {"claim_text": "Low conf", "topic": "test", "confidence": 0.3}
         ])
 
-        with patch('yonk_code_robomonkey.doc_validity.claim_extractor._call_llm_for_json') as mock_llm:
+        with patch('yonk_code_robomonkey.doc_validity.claim_extractor.call_llm', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_response
 
             result = await extract_behavioral_claims(
@@ -177,7 +177,7 @@ class TestClaimExtraction:
             }
         ])
 
-        with patch('yonk_code_robomonkey.doc_validity.claim_extractor._call_llm_for_json') as mock_llm:
+        with patch('yonk_code_robomonkey.doc_validity.claim_extractor.call_llm', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_response
 
             result = await extract_behavioral_claims(
@@ -313,24 +313,16 @@ class TestVerificationResult:
 class TestSemanticValidationIntegration:
     """Integration tests requiring database connection."""
 
-    @pytest.fixture
-    async def db_connection(self, database_url):
-        """Get database connection."""
-        import asyncpg
-        conn = await asyncpg.connect(database_url)
-        yield conn
-        await conn.close()
-
     @pytest.mark.asyncio
-    async def test_claim_extraction_roundtrip(self, db_connection):
+    async def test_claim_extraction_roundtrip(self):
         """Should extract and store claims, then retrieve them."""
         # This test requires a real database with the semantic validation tables
-        pass  # TODO: Implement with test fixtures
+        pytest.skip("TODO: Implement with test fixtures")
 
     @pytest.mark.asyncio
-    async def test_verification_creates_drift_issue(self, db_connection):
+    async def test_verification_creates_drift_issue(self):
         """Mismatch verification should create drift issue."""
-        pass  # TODO: Implement with test fixtures
+        pytest.skip("TODO: Implement with test fixtures")
 
 
 if __name__ == "__main__":

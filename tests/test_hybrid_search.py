@@ -49,21 +49,23 @@ async def indexed_repo(database_url):
             repo_id
         )
 
-        # Create mock embeddings (1024-dimensional - current default)
-        # Each chunk gets a 1024-dimensional embedding based on content features
+        # Create mock embeddings matching DB vector dimension (768)
+        # Each chunk gets a 768-dimensional embedding based on content features
         embeddings = []
         for chunk in chunks:
             content = chunk["content"].lower()
-            # Create a 1024-dimensional embedding with mostly zeros
+            # Create a 768-dimensional embedding with mostly zeros
             # Use first few dimensions to encode content features
-            embedding = [0.0] * 1024
+            embedding = [0.0] * 768
             embedding[0] = 1.0 if "hello" in content else 0.0
             embedding[1] = 1.0 if "calculator" in content or "add" in content else 0.0
             embedding[2] = 1.0 if "multiply" in content else 0.0
             embedding[3] = 1.0 if "class" in content else 0.0
             embeddings.append((chunk["id"], embedding))
 
-        # Insert embeddings
+        # Clear existing embeddings and insert fresh ones
+        await conn.execute("DELETE FROM chunk_embedding WHERE chunk_id = ANY($1::uuid[])",
+                           [e[0] for e in embeddings])
         for chunk_id, embedding in embeddings:
             vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
             await conn.execute(
@@ -81,7 +83,7 @@ async def indexed_repo(database_url):
 async def test_vector_search_basic(database_url, indexed_repo):
     """Test basic vector search returns results ordered by similarity."""
     # Query for "hello" content (embedding with 1.0 in first dimension)
-    query_embedding = [0.0] * 1024
+    query_embedding = [0.0] * 768
     query_embedding[0] = 1.0
 
     results = await vector_search(
@@ -108,7 +110,7 @@ async def test_vector_search_basic(database_url, indexed_repo):
 async def test_vector_search_calculator(database_url, indexed_repo):
     """Test vector search finds calculator-related content."""
     # Query for "calculator" or "add" content (embedding with 1.0 in second dimension)
-    query_embedding = [0.0] * 1024
+    query_embedding = [0.0] * 768
     query_embedding[1] = 1.0
 
     results = await vector_search(
@@ -130,7 +132,7 @@ async def test_vector_search_calculator(database_url, indexed_repo):
 @pytest.mark.asyncio
 async def test_vector_search_without_repo_filter(database_url, indexed_repo):
     """Test vector search without repo_id filter."""
-    query_embedding = [0.0] * 1024
+    query_embedding = [0.0] * 768
     query_embedding[0] = 1.0
 
     results = await vector_search(
@@ -149,7 +151,7 @@ async def test_vector_search_without_repo_filter(database_url, indexed_repo):
 @pytest.mark.asyncio
 async def test_vector_search_top_k_limit(database_url, indexed_repo):
     """Test that top_k limits the number of results."""
-    query_embedding = [0.0] * 1024
+    query_embedding = [0.0] * 768
     query_embedding[0] = 1.0
 
     # Request only 2 results
@@ -169,7 +171,7 @@ async def test_vector_search_top_k_limit(database_url, indexed_repo):
 async def test_vector_search_score_range(database_url, indexed_repo):
     """Test that similarity scores are in valid range [0, 1]."""
     # Use a non-uniform embedding to avoid NaN from zero-variance vectors
-    query_embedding = [0.0] * 1024
+    query_embedding = [0.0] * 768
     query_embedding[0] = 0.5
     query_embedding[1] = 0.5
     query_embedding[2] = 0.3
@@ -194,7 +196,7 @@ async def test_vector_search_score_range(database_url, indexed_repo):
 @pytest.mark.asyncio
 async def test_vector_search_result_fields(database_url, indexed_repo):
     """Test that search results have all required fields."""
-    query_embedding = [0.0] * 1024
+    query_embedding = [0.0] * 768
     query_embedding[0] = 1.0
 
     results = await vector_search(

@@ -343,12 +343,12 @@ async def test_manual_tags_preserved(db_connection, database_url, test_repo):
 
     # Create two tags
     manual_tag_id = await db_connection.fetchval(
-        "INSERT INTO tag (name, description) VALUES ($1, $2) RETURNING id",
+        "INSERT INTO tag (name, description) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description RETURNING id",
         "manual-tag", "A manual tag"
     )
 
     auto_tag_id = await db_connection.fetchval(
-        "INSERT INTO tag (name, description) VALUES ($1, $2) RETURNING id",
+        "INSERT INTO tag (name, description) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description RETURNING id",
         "auto-tag", "An auto tag"
     )
 

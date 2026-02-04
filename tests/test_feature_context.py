@@ -8,6 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from yonk_code_robomonkey.mcp.tools import feature_context
 
+import pytest
+
+@pytest.mark.asyncio
 async def test_feature_context():
     """Test feature_context tool."""
     print("=" * 60)

@@ -32,8 +32,8 @@ async def test_index_test_repo(database_url, test_repo_path):
         database_url
     )
 
-    # Verify files were indexed
-    assert stats["files"] >= 1, "At least 1 file should be indexed"
+    # Verify files were scanned (may be skipped if already indexed and unchanged)
+    assert stats["files_scanned"] >= 1, "At least 1 file should be scanned"
 
     # Verify symbols were extracted
     assert stats["symbols"] >= 5, "Should extract at least 5 symbols (hello_world, add_numbers, Calculator, add, subtract)"

@@ -8,6 +8,7 @@ import json
 import sys
 import subprocess
 from pathlib import Path
+import pytest
 
 
 class MCPClient:
@@ -58,6 +59,7 @@ class MCPClient:
             print("✓ MCP server stopped")
 
 
+@pytest.mark.asyncio
 async def test_mcp_server():
     """Run MCP server tests."""
     print("=" * 80)

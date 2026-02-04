@@ -16,7 +16,7 @@ from yonk_code_robomonkey.db_introspect.app_call_discoverer import discover_db_c
 
 
 # Test database URL - can be overridden with environment variable
-TEST_DB_URL = os.getenv("TEST_DB_URL", "postgresql://postgres:postgres@localhost:5433/codegraph")
+TEST_DB_URL = os.getenv("TEST_DB_URL", "postgresql://postgres:postgres@localhost:5436/robomonkey")
 
 
 @pytest_asyncio.fixture(scope="module")

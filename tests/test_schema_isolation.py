@@ -2,8 +2,10 @@
 """Test schema isolation for migration assessment and hybrid search."""
 import asyncio
 import json
+import pytest
 from yonk_code_robomonkey.mcp.tools import migration_assess, hybrid_search
 
+@pytest.mark.asyncio
 async def test_migration_assess():
     """Test migration_assess on both repos."""
     print("=" * 80)
@@ -68,6 +70,7 @@ async def test_migration_assess():
     return result1, result2
 
 
+@pytest.mark.asyncio
 async def test_hybrid_search():
     """Test hybrid_search for cross-schema isolation."""
     print("\n" + "=" * 80)
@@ -84,7 +87,7 @@ async def test_hybrid_search():
 
     print(f"  Schema: {result1.get('schema_name')}")
     print(f"  Results: {result1.get('total_results')}")
-    if result1.get('total_results') > 0:
+    if (result1.get('total_results') or 0) > 0:
         print(f"  ✗ FAIL: Found {result1.get('total_results')} results (expected 0)")
         for r in result1['results'][:3]:
             print(f"    - {r['file_path']}:{r['start_line']}")
@@ -101,7 +104,7 @@ async def test_hybrid_search():
 
     print(f"  Schema: {result2.get('schema_name')}")
     print(f"  Results: {result2.get('total_results')}")
-    if result2.get('total_results') > 0:
+    if (result2.get('total_results') or 0) > 0:
         print(f"  ✗ FAIL: Found {result2.get('total_results')} results (expected 0)")
         for r in result2['results'][:3]:
             print(f"    - {r['file_path']}:{r['start_line']}")
@@ -118,7 +121,7 @@ async def test_hybrid_search():
 
     print(f"  Schema: {result3.get('schema_name')}")
     print(f"  Results: {result3.get('total_results')}")
-    if result3.get('total_results') > 0:
+    if (result3.get('total_results') or 0) > 0:
         print(f"  ✓ PASS: Found {result3.get('total_results')} results")
         for r in result3['results']:
             print(f"    - {r['file_path']}:{r['start_line']}")
