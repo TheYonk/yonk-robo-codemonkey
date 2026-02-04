@@ -1,0 +1,97 @@
+id: hard-sample-optimize-query
+name: "Optimize the hybrid search database queries for large repositories"
+difficulty: hard
+category: performance
+target_repo: sample
+
+prompt: |
+  The hybrid search in `src/yonk_code_robomonkey/retrieval/hybrid_search.py` has
+  performance issues with large repositories (10,000+ files, 50,000+ chunks).
+  Optimize the database interaction pattern.
+
+  Current performance problems:
+
+  1. **N+1 tag query**: After merging vector and FTS candidates, the function
+     fetches tags for ALL candidates in a single query (step 5), which is fine.
+     But the tag results are then processed in Python with O(n) dict lookups.
+     The real issue is that the tag query uses `ANY($1)` with a potentially large
+     array of UUIDs, which bypasses index usage on large datasets.
+
+  2. **Separate connections**: The function calls `vector_search()` and
+     `fts_search_chunks()` which each create their own database connection
+     (`asyncpg.connect`). This means 3 total connections are opened: one for
+     vector search, one for FTS, and one for tag lookup. Connection creation
+     overhead adds 50-100ms per search.
+
+  3. **Sequential execution**: Vector search and FTS search run sequentially
+     (`await vector_search(...)` then `await fts_search_chunks(...)`), but they
+     are independent and could run concurrently.
+
+  4. **Score normalization**: The max score computation iterates over all
+     candidates twice (once for max_vec_score, once for max_fts_score).
+
+  Optimize by:
+
+  1. **Connection pooling**: Accept an optional `pool: asyncpg.Pool` parameter in
+     `hybrid_search()`. If provided, acquire connections from the pool instead of
+     creating new ones. Update `vector_search()` and `fts_search_chunks()` to also
+     accept an optional connection or pool parameter.
+
+  2. **Concurrent retrieval**: Use `asyncio.gather()` to run vector search and FTS
+     search in parallel. This should roughly halve the total query time.
+
+  3. **Batch tag lookup optimization**: Rewrite the tag query to use a JOIN-based
+     approach instead of `ANY($1)` with a large array. Use a CTE or temporary
+     table for the candidate chunk IDs:
+     ```sql
+     WITH candidate_ids AS (
+         SELECT unnest($1::uuid[]) AS chunk_id
+     )
+     SELECT ci.chunk_id AS entity_id, t.name
+     FROM candidate_ids ci
+     JOIN entity_tag et ON ci.chunk_id = et.entity_id
+     JOIN tag t ON et.tag_id = t.id
+     WHERE et.entity_type = 'CHUNK'
+     ```
+
+  4. **Single-pass normalization**: Compute max scores in a single pass over the
+     candidates instead of using two separate `max()` generator expressions.
+
+  5. **Add timing instrumentation**: Add optional debug logging that records and
+     reports timing for each phase (vector search, FTS search, tag fetch, merge,
+     scoring) using `time.perf_counter()`. Only log when a `debug` parameter is
+     True.
+
+  Files to modify:
+  - `src/yonk_code_robomonkey/retrieval/hybrid_search.py` - Main optimizations
+  - `src/yonk_code_robomonkey/retrieval/vector_search.py` - Accept pool/conn param
+  - `src/yonk_code_robomonkey/retrieval/fts_search.py` - Accept pool/conn param
+  - `src/yonk_code_robomonkey/mcp/tools.py` - Pass pool from MCP tool if available
+  - `tests/test_hybrid_search_perf.py` - Performance regression tests
+
+  Preserve all existing function signatures (new parameters must be optional with
+  backward-compatible defaults).
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_hybrid_search_perf.py"
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "src/yonk_code_robomonkey/retrieval/hybrid_search.py"
+    - "src/yonk_code_robomonkey/retrieval/vector_search.py"
+    - "src/yonk_code_robomonkey/retrieval/fts_search.py"
+  must_not_modify:
+    - "scripts/init_db.sql"
+    - "src/yonk_code_robomonkey/indexer/indexer.py"
+    - "src/yonk_code_robomonkey/cli/commands.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [performance, hard, retrieval, database, optimization, query, async]
+expected_turns_range: [10, 30]

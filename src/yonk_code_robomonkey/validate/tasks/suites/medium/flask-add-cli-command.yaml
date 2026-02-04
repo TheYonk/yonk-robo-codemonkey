@@ -1,0 +1,57 @@
+# suites/medium/flask-add-cli-command.yaml
+id: medium-flask-add-cli-command
+name: "Add a new Flask CLI command"
+difficulty: medium
+category: feature
+target_repo: flask
+
+prompt: |
+  Add a new built-in CLI command `flask config` that displays the current
+  application configuration in a human-readable format.
+
+  Requirements:
+
+  1. In src/flask/cli.py, add a new Click command called `config_command`
+     (registered as "config" on the CLI group) that:
+     a. Prints all uppercase configuration keys and their values, sorted
+        alphabetically by key.
+     b. Accepts an optional `--format` option with choices "table" (default)
+        and "json".
+     c. In "table" format, prints each key-value pair as "KEY = VALUE",
+        one per line.
+     d. In "json" format, prints the entire config as a JSON object with
+        2-space indentation.
+     e. Accepts an optional `--filter` option that takes a prefix string
+        and only shows keys starting with that prefix (case-insensitive).
+     f. The command should run inside the application context (use the
+        `@with_appcontext` decorator).
+
+  2. Register the command in the FlaskGroup or the default commands list
+     so that running `flask config` works out of the box.
+
+  3. Add tests in tests/test_cli_config.py that verify:
+     a. `flask config` outputs known default keys like SECRET_KEY.
+     b. `flask config --format json` produces valid JSON.
+     c. `flask config --filter SESSION` only shows keys starting with
+        "SESSION".
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_cli_config.py"
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify:
+    - "src/flask/cli.py"
+  must_not_modify:
+    - "src/flask/app.py"
+    - "src/flask/config.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, flask, cli, click]
+expected_turns_range: [3, 15]

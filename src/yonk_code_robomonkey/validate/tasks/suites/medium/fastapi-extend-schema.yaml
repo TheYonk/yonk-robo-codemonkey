@@ -1,0 +1,61 @@
+id: medium-fastapi-extend-schema
+name: "Extend OpenAPI schema generation with custom extension fields"
+difficulty: medium
+category: feature
+target_repo: fastapi
+
+prompt: |
+  FastAPI generates OpenAPI schemas automatically. The schema generation logic lives
+  in `fastapi/openapi/utils.py` (the `get_openapi` function). Your task is to create
+  a utility that post-processes the generated OpenAPI schema to add custom extension
+  fields.
+
+  Create a new module `fastapi/openapi/extensions.py` that provides:
+
+  1. A function `add_operation_extensions(openapi_schema: dict, extensions: dict) -> dict`
+     that:
+     - Takes a generated OpenAPI schema dictionary and a mapping of
+       `{operation_id: {extension_key: extension_value}}`
+     - Iterates through all paths and operations in the schema
+     - For each operation whose `operationId` matches a key in `extensions`, adds
+       the extension fields (keys starting with `x-`) to that operation
+     - Returns the modified schema
+     - Raises `ValueError` if any extension key does not start with `x-`
+
+  2. A function `add_global_extensions(openapi_schema: dict, extensions: dict) -> dict`
+     that:
+     - Adds extension fields at the top level of the OpenAPI schema (e.g.,
+       `x-api-version`, `x-generated-by`)
+     - Validates that all keys start with `x-`
+     - Returns the modified schema
+
+  3. A function `add_tag_extensions(openapi_schema: dict, tag_extensions: dict) -> dict`
+     that:
+     - Takes `{tag_name: {extension_key: extension_value}}` and adds extension
+       fields to matching tag objects in the schema's `tags` array
+     - Creates the tag entry if it does not already exist in the tags array
+
+  Also create `tests/test_openapi_extensions.py` with tests that:
+  1. Build a FastAPI app with multiple tagged endpoints
+  2. Generate its OpenAPI schema via `app.openapi()`
+  3. Test `add_operation_extensions` correctly adds `x-` fields to specific operations
+  4. Test `add_global_extensions` adds top-level `x-` fields
+  5. Test `add_tag_extensions` adds extensions to existing and new tags
+  6. Test that non-`x-` prefixed keys raise `ValueError`
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: ["tests/test_openapi_extensions.py"]
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify: []
+  must_not_modify: ["fastapi/openapi/utils.py", "fastapi/applications.py"]
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, openapi, schema, extensions, fastapi]
+expected_turns_range: [3, 15]

@@ -1,0 +1,58 @@
+# suites/medium/flask-extend-schema.yaml
+id: medium-flask-extend-schema
+name: "Add a new configuration option to Flask"
+difficulty: medium
+category: feature
+target_repo: flask
+
+prompt: |
+  Add a new built-in configuration option `MAX_REQUEST_BODY_LOG_SIZE` to
+  Flask that controls how many bytes of a request body are included in
+  debug log messages.
+
+  Requirements:
+
+  1. In src/flask/app.py, add `MAX_REQUEST_BODY_LOG_SIZE` to the
+     `default_config` dictionary on the Flask class with a default value
+     of 500 (bytes).
+
+  2. In src/flask/wrappers.py, add a new property `loggable_data` on the
+     Request class that returns a truncated version of the request body
+     (self.get_data(as_text=True)) up to the configured
+     MAX_REQUEST_BODY_LOG_SIZE characters.  If the body is longer than
+     the limit, append "... [truncated]" to the output.  If there is no
+     application context, fall back to a default of 500.
+
+  3. In src/flask/config.py, add a brief comment in the module docstring
+     (or near the Config class) documenting the new configuration option
+     and its purpose.
+
+  4. Add tests in tests/test_max_body_log.py that verify:
+     a. The default value of MAX_REQUEST_BODY_LOG_SIZE is 500.
+     b. The `loggable_data` property truncates a body of 1000 characters
+        to 500 characters plus "... [truncated]".
+     c. Setting MAX_REQUEST_BODY_LOG_SIZE to 0 returns an empty string.
+     d. A body shorter than the limit is returned in full without the
+        truncation suffix.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_max_body_log.py"
+  lint: true
+  type_check: false
+  max_files_changed: 4
+  must_modify:
+    - "src/flask/app.py"
+    - "src/flask/wrappers.py"
+  must_not_modify:
+    - "src/flask/cli.py"
+    - "src/flask/sessions.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, flask, config, wrappers, schema]
+expected_turns_range: [4, 15]

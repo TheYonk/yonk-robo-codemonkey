@@ -1,0 +1,55 @@
+# suites/medium/flask-fix-search-bug.yaml
+id: medium-flask-fix-search-bug
+name: "Fix a URL routing edge case"
+difficulty: medium
+category: fix
+target_repo: flask
+
+prompt: |
+  Flask's `url_for()` function (in src/flask/helpers.py) raises a
+  `BuildError` when called with an endpoint that contains a dot but no
+  matching blueprint is registered.  However, the error message does not
+  clearly tell the developer whether the issue is a missing blueprint or
+  a misspelled endpoint name.
+
+  Improve the error handling as follows:
+
+  1. In src/flask/helpers.py, modify the `url_for()` function so that
+     when a `BuildError` is raised for a dotted endpoint (e.g.,
+     "admin.dashboard"), the error message includes a hint:
+     'Endpoint "<endpoint>" looks like a blueprint endpoint.  Make sure
+     the blueprint "<blueprint_name>" is registered on the app.'
+     where <blueprint_name> is the portion before the first dot.
+
+  2. In src/flask/sansio/app.py, find the `_check_setup_finished` method
+     (or the nearest equivalent setup-validation logic).  Add a comment
+     explaining that endpoint validation happens at URL build time, not
+     at registration time.
+
+  3. Add a test in tests/test_url_for_hints.py that verifies:
+     a. Calling `url_for("nonexistent_bp.index")` outside of a request
+        context raises a BuildError whose message contains the substring
+        "blueprint" and "nonexistent_bp".
+     b. Calling `url_for("valid_endpoint")` (non-dotted, but unregistered)
+        does NOT include the blueprint hint.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_url_for_hints.py"
+  lint: true
+  type_check: false
+  max_files_changed: 3
+  must_modify:
+    - "src/flask/helpers.py"
+  must_not_modify:
+    - "src/flask/blueprints.py"
+    - "src/flask/sessions.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, medium, flask, routing, url_for, error-handling]
+expected_turns_range: [3, 12]

@@ -1,0 +1,47 @@
+# suites/simple/flask-explain-module.yaml
+id: simple-flask-explain-module
+name: "Explain Flask's blueprint system"
+difficulty: simple
+category: explain
+target_repo: flask
+
+prompt: |
+  Explain how Flask's blueprint system works by examining the source code.
+  Your analysis should cover the following files:
+
+  - src/flask/blueprints.py (the WSGI-layer Blueprint class)
+  - src/flask/sansio/blueprints.py (the sans-I/O base class)
+  - src/flask/sansio/scaffold.py (the Scaffold base that both Flask and
+    Blueprint inherit from)
+
+  In your explanation, address:
+
+  1. What is the class hierarchy?  How does Blueprint relate to Scaffold
+     and the sansio base classes?
+  2. How does a blueprint get registered on a Flask app?  Walk through
+     the register() method and explain what happens at registration time
+     versus at request time.
+  3. What is the difference between blueprint-level before_request handlers
+     and app-level before_request handlers?
+  4. How does the blueprint system support nesting (registering a blueprint
+     on another blueprint)?
+  5. How are blueprint-specific static files and templates resolved?
+
+  Cite specific method names and line references from the source code.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [explain, simple, read-only, flask, blueprints, architecture]
+expected_turns_range: [1, 5]

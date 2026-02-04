@@ -1,0 +1,33 @@
+# suites/simple/django-find-function.yaml
+id: simple-django-find-function
+name: "Find QuerySet.filter() implementation in Django"
+difficulty: simple
+category: find
+target_repo: django
+
+prompt: |
+  In the Django source code, find the implementation of the `filter()` method
+  on the `QuerySet` class. This method is defined in `django/db/models/query.py`.
+
+  Show me the full implementation of the `filter()` method, including any
+  internal helper methods it delegates to (such as `_filter_or_exclude`).
+  Explain how Django translates keyword arguments like `title="hello"` or
+  `author__name__contains="smith"` into SQL WHERE clauses. Identify the key
+  classes and methods involved in that translation chain.
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [find, simple, read-only, django, orm, queryset]
+expected_turns_range: [1, 5]

@@ -1,0 +1,94 @@
+# suites/hard/flask-debug-multifile.yaml
+id: hard-flask-debug-multifile
+name: "Debug session handling across multiple files"
+difficulty: hard
+category: fix
+target_repo: flask
+
+prompt: |
+  Flask's session handling involves coordination across multiple source
+  files.  There is a subtle issue: when a permanent session's lifetime
+  configuration is changed between the time the session cookie is read
+  and the time the response is sent, the session may be saved with an
+  inconsistent expiry.
+
+  Your task is to trace the session lifecycle, identify the race window,
+  and fix it.
+
+  Step 1 -- Trace the flow across files:
+
+  Examine the following files and document how a session moves through
+  each stage:
+  - src/flask/sessions.py: SecureCookieSessionInterface.open_session()
+    and save_session()
+  - src/flask/ctx.py: RequestContext.push() -- where open_session is
+    called
+  - src/flask/app.py: full_dispatch_request() and
+    process_response() -- where save_session is called
+  - src/flask/wrappers.py: Request class (how session is accessed)
+
+  Step 2 -- Identify the problem:
+
+  In save_session() (src/flask/sessions.py), the expiry is calculated
+  from `app.permanent_session_lifetime`.  If a before_request hook or
+  the view itself changes `app.permanent_session_lifetime` at runtime,
+  the session is saved with the new lifetime even though it was opened
+  under the old lifetime.  Document this race condition.
+
+  Step 3 -- Fix:
+
+  Modify the session handling so that the permanent_session_lifetime
+  value is captured at session open time and carried through to
+  save time:
+
+  a. In src/flask/sessions.py, add a `_lifetime_at_open` attribute to
+     `SecureCookieSession` (default None).
+  b. In SecureCookieSessionInterface.open_session(), capture
+     `app.permanent_session_lifetime` and store it on the session
+     object as `_lifetime_at_open`.
+  c. In SecureCookieSessionInterface.save_session(), use
+     `session._lifetime_at_open` if set, falling back to
+     `app.permanent_session_lifetime` for backward compatibility.
+
+  Step 4 -- Update context handling:
+
+  d. In src/flask/ctx.py, add a comment in RequestContext.push()
+     near the open_session() call explaining that the lifetime is
+     now captured at this point.
+
+  Step 5 -- Tests:
+
+  e. Add tests in tests/test_session_lifetime.py:
+     - Test that changing permanent_session_lifetime in a
+       before_request hook does NOT affect the current request's
+       session expiry (the session uses the lifetime from open time).
+     - Test that the default behavior is preserved when
+       _lifetime_at_open is None (backward compat with custom
+       session interfaces).
+     - Test that a session opened with lifetime=3600s saves with
+       that lifetime even if the app config is changed to 7200s
+       mid-request.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_session_lifetime.py"
+    - "tests/test_basic.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "src/flask/sessions.py"
+    - "src/flask/ctx.py"
+  must_not_modify:
+    - "src/flask/cli.py"
+    - "src/flask/templating.py"
+    - "src/flask/config.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, hard, flask, sessions, context, multifile, debugging]
+expected_turns_range: [10, 25]

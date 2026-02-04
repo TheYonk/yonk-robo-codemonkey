@@ -1,0 +1,87 @@
+# suites/hard/flask-optimize-query.yaml
+id: hard-flask-optimize-query
+name: "Optimize template rendering performance"
+difficulty: hard
+category: performance
+target_repo: flask
+
+prompt: |
+  Flask's template rendering has performance overhead from signal
+  dispatching and template loader lookups that run on every render call.
+  Optimize the template rendering pipeline to reduce per-render overhead
+  for production workloads.
+
+  Requirements:
+
+  1. In src/flask/templating.py, optimize the DispatchingJinjaLoader:
+
+     a. The `_iter_loaders()` method rebuilds the loader list on every
+        call by iterating through all registered blueprints.  Add a
+        cached version `_cached_loaders` that is lazily built on first
+        access and invalidated only when a new blueprint is registered.
+        Store the cache on the Environment object.
+
+     b. The `_get_source_fast()` method iterates through all loaders
+        even after finding a match.  Ensure it returns immediately
+        after the first successful loader hit (verify this is already
+        the case or fix it).
+
+  2. In src/flask/app.py, optimize the `update_template_context()`
+     method:
+
+     a. Cache the result of `self.template_context_processors[None]`
+        lookups so that the list of global context processors is not
+        re-fetched from the dict on every render.  Use a simple
+        attribute cache that is invalidated when a new context
+        processor is registered.
+
+     b. Add a `_template_context_cache_valid` flag that is set to
+        False in the `context_processor` decorator and checked in
+        `update_template_context()`.
+
+  3. In src/flask/sansio/scaffold.py, add a method
+     `_invalidate_template_caches()` that subclasses (Flask, Blueprint)
+     call when template-related registrations change.  Call it from
+     the `register_blueprint()` method in src/flask/sansio/app.py.
+
+  4. In src/flask/helpers.py, optimize `get_template_attribute()` to
+     cache the template object lookup when the same template is
+     requested multiple times within the same application context.
+
+  5. Add a performance test file tests/test_template_perf.py:
+     a. Benchmark rendering a simple template 1000 times in a loop
+        using time.perf_counter().
+     b. Benchmark rendering with 10 registered blueprints (each with
+        a template loader) to test loader caching.
+     c. Assert that the cached path is at least 20% faster than a
+        baseline (where caches are explicitly cleared before each
+        render).
+     d. Test that cache invalidation works: after registering a new
+        blueprint, the cached loaders are refreshed.
+
+  6. Ensure no functional regressions -- all existing template-related
+     tests must pass.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_template_perf.py"
+    - "tests/test_templating.py"
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "src/flask/templating.py"
+    - "src/flask/app.py"
+  must_not_modify:
+    - "src/flask/sessions.py"
+    - "src/flask/cli.py"
+    - "src/flask/wrappers.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [performance, hard, flask, templating, caching, optimization]
+expected_turns_range: [10, 30]

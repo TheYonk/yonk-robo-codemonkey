@@ -1,0 +1,53 @@
+# suites/medium/django-add-endpoint.yaml
+id: medium-django-add-endpoint
+name: "Add a new admin action to export selected objects as CSV"
+difficulty: medium
+category: feature
+target_repo: django
+
+prompt: |
+  Add a new built-in admin action to Django's contrib.admin that allows
+  exporting selected objects as a CSV file download. Implement this in the
+  Django admin framework by doing the following:
+
+  1. In `django/contrib/admin/actions.py`, add a new function called
+     `export_as_csv` that:
+     - Takes the modeladmin, request, and queryset as arguments
+     - Generates a CSV response using `django.http.HttpResponse` with
+       content_type 'text/csv'
+     - Sets the Content-Disposition header to
+       'attachment; filename="{model_name}_export.csv"'
+     - Writes a header row using the model's field names
+       (from `queryset.model._meta.fields`)
+     - Writes one row per selected object with field values
+     - Has a short_description attribute set to
+       "Export selected %(verbose_name_plural)s as CSV"
+
+  2. In `django/contrib/admin/sites.py`, register the new action in the
+     `AdminSite.__init__` method by adding it to `self._actions` alongside
+     the existing `delete_selected` action. Use the key name 'export_as_csv'.
+
+  3. In `django/contrib/admin/actions.py`, add the necessary import for
+     Python's `csv` module at the top of the file.
+
+  Ensure the action follows Django's existing patterns for admin actions
+  (see `delete_selected` as a reference).
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify:
+    - "django/contrib/admin/actions.py"
+    - "django/contrib/admin/sites.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, django, admin, csv, endpoint]
+expected_turns_range: [3, 15]

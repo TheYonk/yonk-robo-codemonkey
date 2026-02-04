@@ -1,0 +1,77 @@
+id: hard-fastapi-add-cross-cutting
+name: "Add request tracing across routers with correlation IDs"
+difficulty: hard
+category: feature
+target_repo: fastapi
+
+prompt: |
+  Implement a request tracing system for FastAPI that propagates correlation IDs
+  across routers, dependencies, and background tasks. This is a cross-cutting concern
+  that touches multiple parts of the framework's request lifecycle.
+
+  You need to create the following:
+
+  1. `fastapi/tracing.py` - Core tracing module:
+     - Use Python's `contextvars.ContextVar` to store the current trace context
+     - Define a `TraceContext` dataclass with fields: `trace_id` (str, UUID4),
+       `span_id` (str, UUID4), `parent_span_id` (Optional[str]),
+       `service_name` (str), `start_time` (float), and
+       `attributes` (Dict[str, str])
+     - Provide `get_trace_context() -> Optional[TraceContext]` to retrieve the
+       current context from the ContextVar
+     - Provide `set_trace_context(ctx: TraceContext)` to set it
+     - Provide a `new_span(name: str) -> TraceContext` function that creates a child
+       span from the current context (inheriting trace_id, setting parent_span_id)
+
+  2. `fastapi/middleware/tracing.py` - Tracing middleware:
+     - A Starlette-compatible middleware class `TracingMiddleware` that:
+       - Extracts `X-Trace-ID` and `X-Span-ID` from incoming request headers
+         (or generates new UUIDs if not present)
+       - Creates a `TraceContext` and sets it in the ContextVar
+       - Adds `X-Trace-ID` and `X-Span-ID` to the response headers
+       - Logs the request method, path, status code, and duration using
+         `fastapi.logger`
+     - Accepts `service_name` as a constructor parameter
+
+  3. `fastapi/dependencies/tracing.py` - Dependency-based tracing:
+     - A `trace_dependency(name: str)` function that returns a FastAPI dependency
+       (using `Depends`) which creates a child span for the dependency execution
+     - A `TracedRoute` class extending `fastapi.routing.APIRoute` that automatically
+       wraps the endpoint handler to create a span for each path operation
+
+  4. `tests/test_tracing.py` - Comprehensive tests:
+     - Test that `TracingMiddleware` generates trace IDs for requests without headers
+     - Test that existing `X-Trace-ID` headers are propagated through
+     - Test that response headers contain the trace ID
+     - Test that `get_trace_context()` returns the correct context inside an endpoint
+     - Test that `new_span` creates proper parent-child relationships
+     - Test that `trace_dependency` creates child spans
+     - Test that `TracedRoute` works with `APIRouter(route_class=TracedRoute)`
+     - Test concurrent requests get independent trace contexts
+     - Test that background tasks inherit the trace context
+
+  5. Update `fastapi/middleware/__init__.py` to export `TracingMiddleware`.
+
+  Read `fastapi/routing.py` for how `APIRoute` works, `fastapi/dependencies/utils.py`
+  for the dependency system, `fastapi/concurrency.py` for background task handling,
+  and `fastapi/logger.py` for the logging setup.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: ["tests/test_tracing.py"]
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "fastapi/middleware/__init__.py"
+  must_not_modify:
+    - "fastapi/applications.py"
+    - "fastapi/routing.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, hard, tracing, observability, cross-cutting, middleware, fastapi]
+expected_turns_range: [10, 30]

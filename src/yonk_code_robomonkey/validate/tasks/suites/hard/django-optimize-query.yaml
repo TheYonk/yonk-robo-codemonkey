@@ -1,0 +1,82 @@
+# suites/hard/django-optimize-query.yaml
+id: hard-django-optimize-query
+name: "Optimize N+1 query in prefetch_related for nested relations"
+difficulty: hard
+category: performance
+target_repo: django
+
+prompt: |
+  Django's `prefetch_related` has a performance issue when prefetching
+  deeply nested relations with filtered Prefetch objects. When using
+  multiple levels of `Prefetch` with custom querysets, the ORM can
+  generate redundant queries and fail to batch lookups efficiently.
+
+  For example, the following pattern triggers suboptimal query behavior:
+
+    Author.objects.prefetch_related(
+        Prefetch('books', queryset=Book.objects.filter(published=True)),
+        Prefetch('books__chapters', queryset=Chapter.objects.filter(draft=False)),
+        Prefetch('books__chapters__revisions'),
+    )
+
+  Instead of batching chapter lookups across all prefetched books, Django
+  may issue separate queries for each book's chapters, causing an N+1
+  pattern at the second nesting level.
+
+  Investigate and optimize the following files:
+
+  1. `django/db/models/query.py`:
+     - In `QuerySet.prefetch_related_objects()` and `QuerySet._prefetch_related_objects()`,
+       examine how prefetch lookups are collected and executed.
+     - Identify where the N+1 pattern occurs: each prefetch level should
+       batch all parent IDs together, but nested Prefetch objects may
+       re-query parents individually.
+
+  2. `django/db/models/prefetch_related_lookups.py` (if it exists) or the
+     relevant prefetch logic, which may be in `query.py`:
+     - In the `prefetch_one_level()` function, examine how `all_related_objects_cache`
+       is used to collect related objects across all instances.
+     - Fix the batching logic so that nested prefetch levels accumulate
+       all parent PKs from the preceding level before executing the query.
+
+  3. `django/db/models/sql/compiler.py`:
+     - In `SQLCompiler.get_prefetch_queryset()` or similar methods,
+       examine how the IN clause is constructed for prefetch queries.
+     - Optimize to use a single IN clause with all collected PKs rather
+       than multiple smaller queries.
+
+  4. `django/db/models/fields/related_descriptors.py`:
+     - In `create_forward_many_to_many_manager()` or
+       `create_reverse_many_to_one_manager()`, examine how
+       `get_prefetch_queryset()` constructs the lookup query.
+     - Ensure the queryset returned uses bulk IN lookups.
+
+  5. `django/db/models/manager.py`:
+     - Verify that the default manager's `get_queryset()` does not
+       interfere with prefetch batching.
+
+  The fix should:
+  - Reduce total query count from O(N * levels) to O(levels) for nested
+    prefetch_related calls
+  - Maintain backward compatibility with existing Prefetch object behavior
+  - Add comments explaining the batching optimization
+  - Not break the `to_attr` functionality of Prefetch objects
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "django/db/models/query.py"
+    - "django/db/models/fields/related_descriptors.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [performance, hard, django, orm, prefetch, n-plus-one, query-optimization]
+expected_turns_range: [10, 30]

@@ -1,0 +1,52 @@
+# suites/medium/flask-add-endpoint.yaml
+id: medium-flask-add-endpoint
+name: "Add a health check endpoint to the test app"
+difficulty: medium
+category: feature
+target_repo: flask
+
+prompt: |
+  Add a built-in health check endpoint to Flask so that any Flask
+  application can opt-in to a standard `/_health` route.
+
+  Requirements:
+
+  1. In src/flask/app.py, add a new method `enable_healthcheck()` to the
+     Flask class.  When called, it should register a route at `/_health`
+     that returns a JSON response: `{"status": "ok"}` with HTTP 200 and
+     content-type `application/json`.
+
+  2. The health check route must not appear unless the application
+     explicitly calls `app.enable_healthcheck()`.
+
+  3. Add a test in tests/test_healthcheck.py that:
+     a. Creates a minimal Flask app.
+     b. Calls `app.enable_healthcheck()`.
+     c. Uses the test client to GET `/_health`.
+     d. Asserts the status code is 200.
+     e. Asserts the JSON body equals `{"status": "ok"}`.
+     f. Also tests that without calling enable_healthcheck(), requesting
+        `/_health` returns 404.
+
+  4. Do not modify existing tests or existing route behavior.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_healthcheck.py"
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify:
+    - "src/flask/app.py"
+  must_not_modify:
+    - "src/flask/cli.py"
+    - "src/flask/blueprints.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, flask, endpoint, testing]
+expected_turns_range: [3, 10]

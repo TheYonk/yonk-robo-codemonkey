@@ -1,0 +1,40 @@
+# suites/simple/django-explain-module.yaml
+id: simple-django-explain-module
+name: "Explain Django's middleware system"
+difficulty: simple
+category: explain
+target_repo: django
+
+prompt: |
+  Explain how Django's middleware system works by examining the source code.
+  Focus on the following files:
+
+  1. `django/middleware/common.py` - the CommonMiddleware implementation
+  2. `django/core/handlers/base.py` - where the middleware chain is built
+  3. `django/utils/deprecation.py` - the MiddlewareMixin class
+
+  Answer these questions:
+  - How does Django load and chain middleware classes defined in the
+    MIDDLEWARE setting?
+  - What is the difference between the old-style middleware (using
+    MiddlewareMixin) and the new-style middleware (using __call__)?
+  - In what order are `process_request`, `process_view`, `process_response`,
+    and `process_exception` hooks called during a request/response cycle?
+  - What does CommonMiddleware specifically do (URL normalization, etc.)?
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [explain, simple, read-only, django, middleware, architecture]
+expected_turns_range: [1, 5]

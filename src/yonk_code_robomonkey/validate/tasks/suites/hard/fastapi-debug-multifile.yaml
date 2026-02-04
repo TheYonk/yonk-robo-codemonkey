@@ -1,0 +1,74 @@
+id: hard-fastapi-debug-multifile
+name: "Debug WebSocket handling with dependency injection"
+difficulty: hard
+category: fix
+target_repo: fastapi
+
+prompt: |
+  FastAPI supports WebSocket endpoints with dependency injection, but there are
+  edge cases where WebSocket dependencies interact unexpectedly with the connection
+  lifecycle. Your task is to investigate, document, and create a comprehensive test
+  suite for WebSocket dependency handling.
+
+  The relevant source files are:
+  - `fastapi/routing.py` - Contains `APIWebSocketRoute` and WebSocket route handling
+  - `fastapi/dependencies/utils.py` - Dependency resolution (used by both HTTP and WS)
+  - `fastapi/websockets.py` - WebSocket class definition
+  - `fastapi/params.py` - `Depends`, `Query`, and other parameter types
+  - `fastapi/exception_handlers.py` - Exception handling (may not cover WS properly)
+
+  Your task:
+
+  1. Create `tests/test_websocket_dependencies.py` with test cases covering:
+     - A WebSocket endpoint with a simple dependency that returns a value
+     - A WebSocket endpoint with a generator dependency (yield-based) to test
+       cleanup runs after WebSocket disconnect
+     - A WebSocket endpoint with `Query` parameters extracted from the WS URL
+       (e.g., `ws://localhost/ws?token=abc`)
+     - A WebSocket endpoint with a dependency that raises an exception before
+       `accept()` - verify the connection is properly rejected
+     - A WebSocket endpoint with nested dependencies (dep A depends on dep B)
+     - A WebSocket endpoint with `Depends(use_cache=True)` to verify caching works
+       across multiple dependencies within the same WS connection
+     - A WebSocket endpoint using `APIRouter` with dependencies at the router level
+
+  2. Create `tests/test_websocket_lifecycle.py` with tests for:
+     - Proper cleanup of generator dependencies when client disconnects abruptly
+       (simulate by closing the connection mid-message)
+     - Multiple WebSocket connections to the same endpoint running concurrently
+       with independent dependency instances
+     - WebSocket endpoint that sends and receives JSON data with Pydantic validation
+     - A WebSocket endpoint with a background task dependency
+
+  3. Create a helper module `tests/utils/ws_helpers.py` with:
+     - A reusable `TrackingDependency` class that records when it was called and
+       cleaned up (using a list to track lifecycle events)
+     - A `create_ws_app(*routes)` factory function that creates a FastAPI app with
+       the given WebSocket routes for testing
+     - Common assertion helpers for WebSocket test patterns
+
+  Read the existing WebSocket tests in the `tests/` directory (look for files
+  matching `test_ws*.py` or `test_websocket*.py`) to understand the current test
+  patterns and identify any gaps in coverage.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_websocket_dependencies.py"
+    - "tests/test_websocket_lifecycle.py"
+  lint: true
+  type_check: false
+  max_files_changed: 4
+  must_modify: []
+  must_not_modify:
+    - "fastapi/routing.py"
+    - "fastapi/dependencies/utils.py"
+    - "fastapi/websockets.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, hard, websocket, dependencies, lifecycle, testing, fastapi]
+expected_turns_range: [10, 30]

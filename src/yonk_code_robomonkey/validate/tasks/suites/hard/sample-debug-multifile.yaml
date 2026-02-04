@@ -1,0 +1,78 @@
+id: hard-sample-debug-multifile
+name: "Debug schema context leak across retrieval and embedding modules"
+difficulty: hard
+category: fix
+target_repo: sample
+
+prompt: |
+  There is a bug where the PostgreSQL `search_path` is not properly restored
+  after certain operations, causing cross-schema data leakage. This issue spans
+  multiple files and requires understanding the schema isolation architecture.
+
+  Background: RoboMonkey uses per-repository PostgreSQL schemas for data
+  isolation. The `schema_context` async context manager in
+  `src/yonk_code_robomonkey/db/schema_manager.py` sets `search_path` on entry
+  and should restore it on exit. However, several modules bypass this context
+  manager and set the search path directly using raw SQL:
+
+      await conn.execute(f'SET search_path TO "{schema_name}", public')
+
+  The bug manifests as follows:
+  1. The `embed_chunks` function in `src/yonk_code_robomonkey/embeddings/embedder.py`
+     sets the search_path directly (line ~56) but never restores it.
+  2. The `fts_search_documents` function in `src/yonk_code_robomonkey/retrieval/fts_search.py`
+     also sets search_path directly (line ~307) without restoring it.
+  3. The `vector_search` function in `src/yonk_code_robomonkey/retrieval/vector_search.py`
+     uses `schema_context` properly in some branches but not others.
+
+  Since these functions create their own connections (via `asyncpg.connect`), the
+  search_path leak does not affect other callers directly. However, when a
+  connection is reused (e.g., within `embed_repo` which calls `embed_chunks`,
+  `embed_documents`, and `embed_summaries` sequentially on the same connection),
+  the search_path from one call can persist into the next.
+
+  Fix the issue by:
+  1. Auditing all files that set `search_path` directly and identifying which ones
+     create their own connections vs. reuse passed connections.
+  2. For functions that create their own connection, the search_path is safe (it
+     dies with the connection). Document this clearly with a comment.
+  3. For functions where the connection is passed in or reused, wrap the
+     operations in `schema_context` or add a `finally` block that resets the
+     search_path to `public`.
+  4. In `embed_repo` (the wrapper in `embedder.py`), the connection is created at
+     line ~358 and used for repo lookup, but then `embed_chunks`, `embed_documents`,
+     and `embed_summaries` each create their own connections. This is wasteful.
+     Refactor `embed_repo` to pass its connection to the sub-functions, and ensure
+     schema_context is used consistently.
+  5. Add a regression test in `tests/test_schema_isolation.py` that verifies the
+     search_path is correctly set and restored.
+
+  Files likely needing changes:
+  - `src/yonk_code_robomonkey/embeddings/embedder.py`
+  - `src/yonk_code_robomonkey/retrieval/fts_search.py`
+  - `src/yonk_code_robomonkey/retrieval/vector_search.py`
+  - `src/yonk_code_robomonkey/db/schema_manager.py` (to document the pattern)
+  - `tests/test_schema_isolation.py` (new test file)
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_schema_isolation.py"
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "src/yonk_code_robomonkey/embeddings/embedder.py"
+    - "src/yonk_code_robomonkey/retrieval/fts_search.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/cli/commands.py"
+    - "scripts/init_db.sql"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, hard, debug, schema-isolation, multifile, database]
+expected_turns_range: [10, 30]

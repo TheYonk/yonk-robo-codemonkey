@@ -1,0 +1,37 @@
+# suites/simple/flask-find-function.yaml
+id: simple-flask-find-function
+name: "Find Flask.run() and explain its implementation"
+difficulty: simple
+category: find
+target_repo: flask
+
+prompt: |
+  Locate the `run()` method on the `Flask` application class in the Flask
+  source code (src/flask/app.py).  Show me its full implementation and
+  explain the following:
+
+  1. What parameters does it accept and what are their defaults?
+  2. How does it interact with dotenv loading and the FLASK_DEBUG environment
+     variable?
+  3. What Werkzeug function does it ultimately delegate to for starting the
+     development server?
+  4. Why does the docstring warn against using it in production?
+
+  Include the complete method source in your answer.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [find, simple, read-only, flask, app]
+expected_turns_range: [1, 5]

@@ -1,0 +1,45 @@
+# suites/simple/flask-add-docstring.yaml
+id: simple-flask-add-docstring
+name: "Add docstring to an undocumented helper"
+difficulty: simple
+category: feature
+target_repo: flask
+
+prompt: |
+  In src/flask/helpers.py, find the internal helper function
+  `_split_blueprint_path()`.  This function is decorated with
+  `@lru_cache` but currently has no docstring.
+
+  Add a clear, concise docstring to `_split_blueprint_path()` that
+  explains:
+  1. What the function does (recursively splits a dotted blueprint name
+     into a list of ancestor blueprint names).
+  2. What its parameter `name` represents.
+  3. What it returns (a list of strings representing the blueprint
+     hierarchy from outermost to innermost).
+  4. An example: _split_blueprint_path("grandparent.parent.child")
+     returns ["grandparent", "grandparent.parent",
+     "grandparent.parent.child"].
+
+  Follow the existing docstring style in the file (reStructuredText /
+  Sphinx-compatible).  Do not change any code logic.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 1
+  must_modify:
+    - "src/flask/helpers.py"
+  must_not_modify:
+    - "src/flask/app.py"
+    - "src/flask/cli.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, simple, docstring, flask, helpers]
+expected_turns_range: [1, 3]

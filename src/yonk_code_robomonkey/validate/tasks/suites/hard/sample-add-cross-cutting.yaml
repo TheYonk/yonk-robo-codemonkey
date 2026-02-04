@@ -1,0 +1,76 @@
+id: hard-sample-add-cross-cutting
+name: "Add in-memory caching across retrieval endpoints"
+difficulty: hard
+category: feature
+target_repo: sample
+
+prompt: |
+  Add an in-memory LRU cache layer across the retrieval endpoints to avoid
+  redundant database queries and embedding computations for repeated searches.
+
+  The retrieval layer consists of several modules:
+  - `src/yonk_code_robomonkey/retrieval/hybrid_search.py` - Main hybrid search
+  - `src/yonk_code_robomonkey/retrieval/vector_search.py` - Vector similarity search
+  - `src/yonk_code_robomonkey/retrieval/fts_search.py` - Full-text search
+  - `src/yonk_code_robomonkey/retrieval/graph_traversal.py` - Graph callers/callees
+
+  Implement a shared caching layer:
+
+  1. **Cache module**: Create `src/yonk_code_robomonkey/retrieval/cache.py` with:
+     - A `SearchCache` class using `functools.lru_cache` or a custom LRU dict.
+     - Configurable max size (default 256 entries) and TTL (default 300 seconds).
+     - Cache key generation from search parameters (query, repo_id, filters, top_k).
+     - A `cache_stats()` method returning hit count, miss count, and hit rate.
+     - A `clear()` method to invalidate all cached entries.
+     - Thread-safe implementation (use `asyncio.Lock` for async context).
+
+  2. **Integration**: Wrap the following functions with caching:
+     - `hybrid_search()` in `hybrid_search.py` - Cache the final result list
+     - `vector_search()` in `vector_search.py` - Cache vector search results
+     - `fts_search_chunks()` in `fts_search.py` - Cache FTS results
+     - `get_callers()` and `get_callees()` in `graph_traversal.py` - Cache graph results
+
+  3. **Cache invalidation**: Add a mechanism to invalidate cache entries for a
+     specific `repo_id` when reindexing occurs. Add a `invalidate_repo(repo_id)`
+     method to `SearchCache`.
+
+  4. **Configuration**: Add cache settings to `src/yonk_code_robomonkey/config.py`:
+     - `CACHE_ENABLED` (bool, default True)
+     - `CACHE_MAX_SIZE` (int, default 256)
+     - `CACHE_TTL_SECONDS` (int, default 300)
+
+  5. **MCP tool**: Add a `cache_stats` MCP tool in `src/yonk_code_robomonkey/mcp/tools.py`
+     that returns current cache statistics (hits, misses, hit rate, size).
+
+  6. **Tests**: Add `tests/test_retrieval_cache.py` with tests for:
+     - Cache hit/miss behavior
+     - TTL expiration
+     - Per-repo invalidation
+     - Cache stats accuracy
+
+  Ensure the cache is a singleton shared across all retrieval calls within a
+  process. Do not cache results when `CACHE_ENABLED` is False.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_retrieval_cache.py"
+  lint: true
+  type_check: false
+  max_files_changed: 8
+  must_modify:
+    - "src/yonk_code_robomonkey/retrieval/cache.py"
+    - "src/yonk_code_robomonkey/retrieval/hybrid_search.py"
+    - "src/yonk_code_robomonkey/config.py"
+    - "src/yonk_code_robomonkey/mcp/tools.py"
+  must_not_modify:
+    - "scripts/init_db.sql"
+    - "src/yonk_code_robomonkey/indexer/indexer.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, hard, caching, retrieval, cross-cutting, performance]
+expected_turns_range: [10, 30]

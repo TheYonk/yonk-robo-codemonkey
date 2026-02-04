@@ -1,0 +1,41 @@
+id: simple-fastapi-add-docstring
+name: "Add docstring to an undocumented utility function"
+difficulty: simple
+category: feature
+target_repo: fastapi
+
+prompt: |
+  In the file `fastapi/utils.py`, there are several utility functions used internally
+  by FastAPI. Some of these functions lack comprehensive docstrings.
+
+  Your task:
+  1. Open `fastapi/utils.py` and identify functions that either have no docstring or
+     have only a minimal one-line docstring without parameter descriptions.
+  2. Pick the function `generate_unique_id` (used to generate unique operation IDs
+     for OpenAPI path operations). Add a complete docstring to it that includes:
+     - A summary line describing what the function does.
+     - An explanation of how it generates the unique ID (from the route name or
+       endpoint function name).
+     - Parameter descriptions using Google-style docstring format (Args section).
+     - A Returns section describing the return value.
+  3. Ensure the docstring is accurate by reading how `generate_unique_id` is actually
+     called in `fastapi/routing.py`.
+
+  Only modify `fastapi/utils.py`. Do not change any function signatures or logic.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 1
+  must_modify: ["fastapi/utils.py"]
+  must_not_modify: ["fastapi/routing.py", "fastapi/applications.py"]
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, simple, docstring, fastapi, utils]
+expected_turns_range: [1, 5]

@@ -1,0 +1,35 @@
+id: simple-sample-find-caller
+name: "Find all callers of the embed_chunks function"
+difficulty: simple
+category: find
+target_repo: sample
+
+prompt: |
+  Find all locations in the RoboMonkey codebase that call the `embed_chunks` function defined in `src/yonk_code_robomonkey/embeddings/embedder.py`.
+
+  For each call site, report:
+  1. The file path where the call occurs.
+  2. The function or method that contains the call.
+  3. The approximate line number.
+  4. Whether the call passes a `schema_name` argument.
+
+  Also identify whether `embed_chunks` is ever called directly from a CLI command handler, or only indirectly through the `embed_repo` wrapper function.
+
+  Do not modify any files. Provide a structured summary of all callers.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [find, simple, read-only, embeddings, call-graph]
+expected_turns_range: [1, 5]

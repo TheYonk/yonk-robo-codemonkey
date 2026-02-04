@@ -1,0 +1,40 @@
+id: simple-sample-fix-typo
+name: "Fix a misspelling in a docstring"
+difficulty: simple
+category: fix
+target_repo: sample
+
+prompt: |
+  In the file `src/yonk_code_robomonkey/embeddings/embedder.py`, the function `embed_chunks` has a docstring that lists the valid provider options. The docstring says:
+
+      provider: "ollama", "vllm", or "openai" (includes local embedding service)
+
+  However, the error message raised inside the function body when an invalid provider is given reads:
+
+      Invalid provider: {provider}. Must be 'ollama', 'vllm', or 'openai'
+
+  The same pattern is duplicated in `embed_documents` and `embed_summaries`.
+
+  There is a subtle inconsistency: the docstring for `embed_repo` says the provider parameter is `"ollama" or "vllm"` (missing "openai"), even though the function passes through to `embed_chunks` which accepts all three providers.
+
+  Fix the `embed_repo` docstring so that the `embeddings_provider` parameter description correctly lists all three valid provider values: "ollama", "vllm", or "openai".
+
+  Only modify `src/yonk_code_robomonkey/embeddings/embedder.py`. Do not change any logic, only fix the docstring.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 1
+  must_modify:
+    - "src/yonk_code_robomonkey/embeddings/embedder.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, simple, docstring, embeddings]
+expected_turns_range: [1, 5]

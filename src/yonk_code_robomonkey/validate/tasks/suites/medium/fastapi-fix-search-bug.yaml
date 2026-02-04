@@ -1,0 +1,47 @@
+id: medium-fastapi-fix-search-bug
+name: "Fix query parameter parsing for list types"
+difficulty: medium
+category: fix
+target_repo: fastapi
+
+prompt: |
+  There is a subtle behavior in how FastAPI handles query parameters with list types
+  that can surprise developers. When a query parameter is declared as `List[str]`
+  using `Query()`, and the client sends a single value (not repeated), the parameter
+  is still correctly parsed. However, when using `Optional[List[str]]` with a default
+  of `None`, and the client sends an empty string, the behavior can be unexpected.
+
+  Your task:
+  1. Read `fastapi/params.py` to understand how `Query` is defined and what parameters
+     it accepts (particularly `default`, `alias`, and list-related handling).
+  2. Read `fastapi/dependencies/utils.py` to understand how query parameters are
+     extracted in the `request_params_to_args` function (or similar extraction logic).
+  3. Create a test file `tests/test_query_list_edge_cases.py` that demonstrates and
+     tests the following edge cases:
+     - A `GET /items` endpoint with `q: Optional[List[str]] = Query(default=None)`
+     - Test that sending `?q=foo&q=bar` returns `["foo", "bar"]`
+     - Test that sending no `q` parameter returns `None`
+     - Test that sending `?q=` (empty string) returns `[""]` (a list with one empty string)
+     - Test that sending `?q=foo` (single value) returns `["foo"]`
+  4. If any of these test cases fail against the current FastAPI behavior, document the
+     failure in a comment and adjust the test expectation to match actual behavior.
+
+  Use `TestClient` and follow patterns from `tests/test_query.py`. Create the test
+  file and ensure all tests pass.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: ["tests/test_query_list_edge_cases.py"]
+  lint: true
+  type_check: false
+  max_files_changed: 1
+  must_modify: []
+  must_not_modify: ["fastapi/params.py", "fastapi/dependencies/utils.py"]
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, medium, query-params, edge-cases, testing, fastapi]
+expected_turns_range: [3, 15]

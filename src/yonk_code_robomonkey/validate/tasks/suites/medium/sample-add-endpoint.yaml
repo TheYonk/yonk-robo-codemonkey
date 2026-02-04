@@ -1,0 +1,49 @@
+id: medium-sample-add-endpoint
+name: "Add a health check API endpoint to the web UI"
+difficulty: medium
+category: feature
+target_repo: sample
+
+prompt: |
+  Add a new health check endpoint to the RoboMonkey web UI at `GET /api/health`.
+
+  The web UI uses FastAPI and is organized with route modules under
+  `src/yonk_code_robomonkey/web/routes/`. Each route module defines an `APIRouter`
+  and is registered in the main FastAPI app.
+
+  The health check endpoint should:
+  1. Return a JSON response with the following fields:
+     - `status`: "healthy" or "unhealthy"
+     - `version`: The package version (read from `importlib.metadata.version("yonk-code-robomonkey")`, or "unknown" if not installed)
+     - `database`: "connected" or "unreachable" (test connectivity by attempting a simple query like `SELECT 1` against the configured DATABASE_URL)
+     - `embeddings_provider`: The configured embeddings provider name from settings (e.g., "ollama", "vllm", "openai")
+     - `timestamp`: Current UTC timestamp in ISO 8601 format
+  2. Return HTTP 200 even when the database is unreachable (the `status` field should indicate "unhealthy" instead).
+  3. Catch and handle any exceptions from the database check gracefully.
+
+  Implementation steps:
+  - Create a new route file `src/yonk_code_robomonkey/web/routes/health.py` with an APIRouter.
+  - Register the router in the main app (check `src/yonk_code_robomonkey/web/routes/__init__.py` or wherever routers are included).
+  - Use `asyncpg.connect` for the database check, importing `Settings` from `yonk_code_robomonkey.config`.
+
+  Add a basic test in `tests/test_health_endpoint.py` that verifies the endpoint returns the expected JSON structure.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_health_endpoint.py"
+  lint: true
+  type_check: false
+  max_files_changed: 3
+  must_modify:
+    - "src/yonk_code_robomonkey/web/routes/health.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, web, api, health-check]
+expected_turns_range: [3, 15]

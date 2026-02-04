@@ -1,0 +1,41 @@
+# suites/simple/django-fix-typo.yaml
+id: simple-django-fix-typo
+name: "Fix a docstring typo in Django's cache framework"
+difficulty: simple
+category: fix
+target_repo: django
+
+prompt: |
+  In the Django source file `django/core/cache/backends/base.py`, the
+  `BaseCache` class has a method called `get_or_set`. Examine its docstring.
+
+  The docstring for `get_or_set` should clearly explain that the method
+  fetches a key from the cache, and if the key is not found, it sets the
+  key to the provided default value and returns it. If the current docstring
+  is missing, incomplete, or contains inaccuracies, fix it.
+
+  Ensure the docstring:
+  - Describes the method's purpose in a single opening line
+  - Documents the `key`, `default`, and `timeout` parameters
+  - Notes that `default` can be a callable
+  - Mentions the return value behavior (returns existing value or the default)
+
+  Only modify the docstring, not the method logic.
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 1
+  must_modify:
+    - "django/core/cache/backends/base.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, simple, docstring, django, cache]
+expected_turns_range: [1, 5]

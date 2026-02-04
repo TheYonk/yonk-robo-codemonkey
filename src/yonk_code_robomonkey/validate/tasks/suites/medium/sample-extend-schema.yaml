@@ -1,0 +1,60 @@
+id: medium-sample-extend-schema
+name: "Add a last_embedded_at timestamp field to the chunk table"
+difficulty: medium
+category: feature
+target_repo: sample
+
+prompt: |
+  Add a `last_embedded_at` timestamp field to track when each chunk was last
+  embedded. This will help identify stale embeddings that need regeneration.
+
+  The database schema is defined in `scripts/init_db.sql` and uses raw SQL
+  (no ORM). The application uses asyncpg for all database operations.
+
+  Changes required:
+  1. **Schema (`scripts/init_db.sql`)**: Add a `last_embedded_at TIMESTAMPTZ`
+     column to the `chunk` table, defaulting to NULL (meaning never embedded).
+
+  2. **Embedder (`src/yonk_code_robomonkey/embeddings/embedder.py`)**: In the
+     `embed_chunks` function, after successfully storing each chunk's embedding
+     in `chunk_embedding`, also update the chunk's `last_embedded_at` field to
+     `NOW()`. Use a single UPDATE statement:
+     ```sql
+     UPDATE chunk SET last_embedded_at = NOW() WHERE id = $1
+     ```
+
+  3. **Status command (`src/yonk_code_robomonkey/cli/commands.py`)**: In the
+     `show_status` function, add a query to show how many chunks have stale
+     embeddings (where `last_embedded_at` is NULL or older than 7 days). Display
+     this as an additional line in the "Embeddings:" section output:
+     ```
+     Stale (>7 days):    {count}
+     ```
+
+  4. **Migration**: Add a migration SQL file at `scripts/migrations/add_last_embedded_at.sql`
+     containing the ALTER TABLE statement to add the column to existing databases.
+
+  Do not change any other files. Ensure backward compatibility (the column
+  defaults to NULL so existing data is unaffected).
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 4
+  must_modify:
+    - "scripts/init_db.sql"
+    - "src/yonk_code_robomonkey/embeddings/embedder.py"
+    - "src/yonk_code_robomonkey/cli/commands.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/retrieval/hybrid_search.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, schema, database, embeddings, migration]
+expected_turns_range: [3, 15]

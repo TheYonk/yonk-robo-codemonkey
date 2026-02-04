@@ -1,0 +1,61 @@
+id: medium-sample-add-cli-command
+name: "Add a CLI command to export repository statistics as JSON"
+difficulty: medium
+category: feature
+target_repo: sample
+
+prompt: |
+  Add a new CLI subcommand `robomonkey export-stats` that exports repository
+  indexing statistics as a JSON file.
+
+  The CLI is implemented in `src/yonk_code_robomonkey/cli/commands.py` using
+  argparse. The `run()` function defines all subparsers and dispatches to async
+  handler functions.
+
+  The new command should:
+  1. Accept arguments:
+     - `--name` (required): Repository name
+     - `--output` (optional, default stdout): Output file path for the JSON
+     - `--pretty` (optional flag): Pretty-print the JSON with 2-space indentation
+  2. Connect to the database using the configured `DATABASE_URL` from settings.
+  3. Resolve the repository to its schema using `resolve_repo_to_schema` from
+     `yonk_code_robomonkey.db.schema_manager`.
+  4. Within the schema context, query and collect:
+     - `file_count`: Total files indexed
+     - `symbol_count`: Total symbols extracted
+     - `chunk_count`: Total chunks created
+     - `edge_count`: Total edges (call graph edges)
+     - `chunk_embedding_count`: Number of chunks with embeddings
+     - `document_count`: Total documents indexed
+     - `tag_count`: Total unique tags
+  5. Output the statistics as a JSON object. If `--output` is provided, write to
+     file; otherwise print to stdout.
+
+  Implementation:
+  - Add the subparser in the `run()` function in `commands.py`.
+  - Add the async handler function `export_stats_cmd()` in the same file.
+  - Follow the existing patterns (e.g., `show_status`, `list_repos`) for database
+    connection handling, schema resolution, and error reporting.
+
+  Add a basic test in `tests/test_export_stats_cli.py`.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_export_stats_cli.py"
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify:
+    - "src/yonk_code_robomonkey/cli/commands.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/web/routes/stats.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, cli, export, json]
+expected_turns_range: [3, 15]

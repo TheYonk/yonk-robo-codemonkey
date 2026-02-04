@@ -1,0 +1,46 @@
+id: simple-sample-add-docstring
+name: "Add a docstring to an undocumented function"
+difficulty: simple
+category: fix
+target_repo: sample
+
+prompt: |
+  In the file `src/yonk_code_robomonkey/mcp/tools.py`, there is a helper function called `get_repo_or_default` that lacks a proper docstring explaining its full behavior.
+
+  The current docstring is minimal:
+
+      def get_repo_or_default(repo: str | None) -> str | None:
+          """Get repo parameter or use default from settings.
+
+          Args:
+              repo: Explicit repo name or None
+
+          Returns:
+              Repo name to use (explicit or default)
+          """
+
+  Improve this docstring to be more descriptive. The updated docstring should:
+  1. Explain that this function resolves which repository to operate on, preferring the explicitly provided `repo` argument.
+  2. Describe the fallback behavior: if `repo` is None or empty, it reads `DEFAULT_REPO` from the application settings (configured via `.env`).
+  3. Note that it returns None if neither an explicit repo nor a default is configured, which callers should handle.
+  4. Keep the existing Args and Returns sections but make them more descriptive.
+
+  Only modify `src/yonk_code_robomonkey/mcp/tools.py`. Do not change any logic, only improve the docstring.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 1
+  must_modify:
+    - "src/yonk_code_robomonkey/mcp/tools.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, simple, docstring, mcp]
+expected_turns_range: [1, 5]

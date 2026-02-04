@@ -1,0 +1,85 @@
+# suites/hard/flask-refactor-pipeline.yaml
+id: hard-flask-refactor-pipeline
+name: "Refactor Flask's request dispatching"
+difficulty: hard
+category: refactor
+target_repo: flask
+
+prompt: |
+  Refactor Flask's request dispatching pipeline to introduce a formal
+  middleware-style hook system between the WSGI entry point and the view
+  function.
+
+  Currently, request dispatching flows through these methods in
+  src/flask/app.py:
+    wsgi_app() -> full_dispatch_request() -> dispatch_request()
+
+  With before_request / after_request hooks called inline.
+
+  Refactor as follows:
+
+  1. Create a new file src/flask/middleware.py that defines:
+     a. An abstract base class `Middleware` with methods:
+        - `before_dispatch(self, request)` -> Optional[Response]
+           Called before the view.  If it returns a Response, short-
+           circuit and skip the view.
+        - `after_dispatch(self, request, response)` -> Response
+           Called after the view, can modify the response.
+     b. A `MiddlewareStack` class that holds an ordered list of
+        Middleware instances and provides `run_before(request)` and
+        `run_after(request, response)` methods that iterate through
+        the stack in order (before) and reverse order (after).
+
+  2. In src/flask/app.py:
+     a. Add a `middleware_stack` attribute (MiddlewareStack instance)
+        to the Flask class, initialized in __init__.
+     b. Add a public method `add_middleware(self, middleware)` that
+        appends to the stack.
+     c. Modify `full_dispatch_request()` to invoke the middleware
+        stack's `run_before()` before `dispatch_request()` and
+        `run_after()` after getting the response.  The existing
+        before_request / after_request hooks must continue to work
+        as before -- the middleware runs around them.
+
+  3. In src/flask/sansio/app.py, add a comment block explaining that
+     middleware ordering is FIFO for before_dispatch and LIFO for
+     after_dispatch.
+
+  4. Update src/flask/__init__.py to export the `Middleware` base class.
+
+  5. Add comprehensive tests in tests/test_middleware.py:
+     a. Test that a middleware's before_dispatch can short-circuit a
+        request and return a custom response.
+     b. Test that a middleware's after_dispatch can modify the response
+        (e.g., add a custom header).
+     c. Test ordering: register two middlewares and verify before runs
+        in FIFO order and after runs in LIFO order.
+     d. Test that existing before_request / after_request decorators
+        still work alongside the new middleware stack.
+     e. Test that middleware works with blueprints (a request to a
+        blueprint endpoint still triggers app-level middleware).
+
+  6. Ensure all existing tests in tests/ continue to pass.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_middleware.py"
+    - "tests/test_basic.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "src/flask/app.py"
+    - "src/flask/__init__.py"
+  must_not_modify:
+    - "src/flask/sessions.py"
+    - "src/flask/config.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [refactor, hard, flask, middleware, dispatch, architecture]
+expected_turns_range: [10, 30]

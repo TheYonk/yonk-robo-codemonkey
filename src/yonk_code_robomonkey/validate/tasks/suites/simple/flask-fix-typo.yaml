@@ -1,0 +1,36 @@
+# suites/simple/flask-fix-typo.yaml
+id: simple-flask-fix-typo
+name: "Fix a docstring typo in a Flask module"
+difficulty: simple
+category: fix
+target_repo: flask
+
+prompt: |
+  In src/flask/helpers.py, the `stream_with_context()` function's docstring
+  contains the phrase "the generators are not considered being part of the
+  request handling".  This sentence is grammatically awkward.
+
+  Fix it to read: "the generators are not considered to be part of the
+  request handling".
+
+  Only change the docstring text -- do not modify any code behavior.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 1
+  must_modify:
+    - "src/flask/helpers.py"
+  must_not_modify:
+    - "src/flask/app.py"
+    - "src/flask/cli.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, simple, docstring, flask, helpers]
+expected_turns_range: [1, 3]

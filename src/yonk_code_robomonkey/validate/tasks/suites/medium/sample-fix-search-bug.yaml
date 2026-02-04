@@ -1,0 +1,55 @@
+id: medium-sample-fix-search-bug
+name: "Fix hybrid search returning duplicate results when tag filters are used"
+difficulty: medium
+category: fix
+target_repo: sample
+
+prompt: |
+  There is a bug in the hybrid search implementation in
+  `src/yonk_code_robomonkey/retrieval/hybrid_search.py`.
+
+  When `tags_any` or `tags_all` filters are specified, the function fetches tags
+  from the database for all candidate chunks (step 5), then applies tag filtering
+  in step 6. However, there is a subtle issue: the tag fetching query uses
+  `chunk_ids` which is built from `candidates.keys()` -- but `candidates` is a
+  dict keyed by `str(chunk_id)`. The database query passes these string UUIDs to
+  `ANY($1)`, but the `entity_tag.entity_id` column stores actual UUID types.
+
+  When the database performs implicit type casting, this usually works. But the
+  real bug is in how `chunk_tags` are grouped: the tag lookup results use
+  `str(row["entity_id"])` to build the `chunk_tags` dict, but the UUID-to-string
+  conversion may produce a different format than the original `str(vr.chunk_id)`
+  used as the dict key (e.g., with or without hyphens).
+
+  Fix this by ensuring consistent UUID string formatting throughout the function.
+  Specifically:
+  1. Normalize all chunk_id keys to use a consistent string format (e.g., always
+     use `str(uuid)` which produces hyphenated format).
+  2. Ensure the tag lookup results are matched back to candidates using the same
+     normalization.
+
+  Only modify `src/yonk_code_robomonkey/retrieval/hybrid_search.py`.
+
+  Also add a unit test in `tests/test_hybrid_search_uuid.py` that verifies UUID
+  keys are consistently formatted when merging vector and FTS results.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_hybrid_search_uuid.py"
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify:
+    - "src/yonk_code_robomonkey/retrieval/hybrid_search.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/cli/commands.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, medium, retrieval, hybrid-search, uuid, bug]
+expected_turns_range: [3, 15]

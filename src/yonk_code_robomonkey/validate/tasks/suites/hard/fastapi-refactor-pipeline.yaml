@@ -1,0 +1,69 @@
+id: hard-fastapi-refactor-pipeline
+name: "Refactor the middleware stack to support prioritized ordering"
+difficulty: hard
+category: refactor
+target_repo: fastapi
+
+prompt: |
+  FastAPI inherits its middleware system from Starlette. Middleware is added via
+  `app.add_middleware()` in `fastapi/applications.py`, and the built-in middleware
+  modules live in `fastapi/middleware/` (cors.py, gzip.py, httpsredirect.py,
+  trustedhost.py, wsgi.py).
+
+  Currently, middleware executes in the reverse order it was added (last added runs
+  first, wrapping the one before it). This makes ordering fragile and error-prone for
+  users with many middleware layers.
+
+  Your task is to create a middleware ordering utility:
+
+  1. Create `fastapi/middleware/ordering.py` with:
+     - A `MiddlewareEntry` dataclass with fields: `cls` (the middleware class),
+       `kwargs` (dict of constructor kwargs), `priority` (int, lower runs first,
+       default 100), and `name` (optional string identifier).
+     - A `MiddlewareStack` class that:
+       - Has an `add(cls, priority=100, name=None, **kwargs)` method
+       - Has a `sorted_entries() -> List[MiddlewareEntry]` method that returns
+         entries sorted by priority (ascending), with stable ordering for equal
+         priorities (insertion order preserved)
+       - Has a `apply_to(app: FastAPI)` method that calls `app.add_middleware()`
+         for each entry in the correct order (accounting for Starlette's reverse
+         application, so the highest-priority middleware actually wraps outermost)
+       - Has a `remove(name: str)` method to remove a middleware by name
+       - Has a `describe() -> str` method that returns a formatted string showing
+         the middleware execution order with priorities
+
+  2. Create `tests/test_middleware_ordering.py` with tests that:
+     - Verify middleware executes in priority order by using a simple middleware that
+       appends to a shared list on request/response
+     - Test that equal-priority middleware preserves insertion order
+     - Test the `remove` method
+     - Test the `describe` method output format
+     - Test `apply_to` with a real FastAPI app and TestClient to verify the
+       execution order end-to-end
+     - Test edge cases: empty stack, single middleware, duplicate names
+
+  3. Update `fastapi/middleware/__init__.py` to export `MiddlewareStack` and
+     `MiddlewareEntry`.
+
+  4. Create a usage example in `docs_src/middleware_ordering.py` showing how to use
+     `MiddlewareStack` with CORSMiddleware and GZipMiddleware with explicit priorities.
+
+  Read `fastapi/applications.py` to understand how `add_middleware` works, and read
+  the existing middleware modules in `fastapi/middleware/` for context.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: ["tests/test_middleware_ordering.py"]
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify: ["fastapi/middleware/__init__.py"]
+  must_not_modify: ["fastapi/applications.py"]
+  hallucination_check: true
+  llm_judge: true
+
+tags: [refactor, hard, middleware, architecture, fastapi]
+expected_turns_range: [10, 30]

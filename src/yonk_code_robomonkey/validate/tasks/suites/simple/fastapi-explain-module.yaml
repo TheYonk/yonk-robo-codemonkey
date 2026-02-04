@@ -1,0 +1,43 @@
+id: simple-fastapi-explain-module
+name: "Explain FastAPI's dependency injection system"
+difficulty: simple
+category: explain
+target_repo: fastapi
+
+prompt: |
+  Explain how FastAPI's dependency injection system works by reading the source code.
+  Focus on the following files in the FastAPI framework source:
+
+  - `fastapi/dependencies/utils.py` - The core dependency resolution logic
+  - `fastapi/dependencies/models.py` - The data models used for dependency tracking
+  - `fastapi/params.py` - The `Depends` class definition
+
+  In your explanation, cover:
+
+  1. How the `Depends` class is defined and what parameters it accepts (e.g., the
+     `dependency` callable and `use_cache` flag).
+  2. How `get_dependant` in `fastapi/dependencies/utils.py` recursively resolves
+     the dependency tree from a path operation function's signature.
+  3. How sub-dependencies are discovered and how the caching mechanism
+     (`use_cache=True` by default) prevents redundant calls within a single request.
+  4. How dependencies interact with the request lifecycle and how they receive
+     parameters like `Request`, `Response`, path params, query params, etc.
+
+  Reference specific functions and classes from the source code in your explanation.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [explain, simple, read-only, fastapi, dependency-injection]
+expected_turns_range: [1, 5]

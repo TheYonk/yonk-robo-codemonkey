@@ -1,0 +1,53 @@
+id: medium-fastapi-add-cli-command
+name: "Add a route listing management command"
+difficulty: medium
+category: feature
+target_repo: fastapi
+
+prompt: |
+  Add a utility module `fastapi/cli_utils.py` that provides a function to inspect
+  and list all registered routes in a FastAPI application, similar to Django's
+  `showurls` or Flask's `routes` command.
+
+  The module should contain:
+
+  1. A function `list_routes(app: FastAPI) -> List[dict]` that:
+     - Iterates over `app.routes` (from Starlette's routing)
+     - For each `APIRoute`, extracts: `path`, `name`, `methods` (as sorted list),
+       `endpoint` (the function name as string), and `tags` (if any)
+     - Skips non-APIRoute entries (like Mount or static file routes)
+     - Returns a list of dictionaries sorted by path
+
+  2. A function `format_routes_table(routes: List[dict]) -> str` that:
+     - Takes the output of `list_routes` and formats it as an aligned text table
+     - Columns: METHOD(S), PATH, NAME, TAGS
+     - Methods should be comma-joined (e.g., "GET, POST")
+     - Tags should be comma-joined or "-" if empty
+     - Pads columns to align properly
+
+  Also create a test file `tests/test_cli_utils.py` that:
+  1. Creates a FastAPI app with at least 3 routes (GET, POST, PUT) using different
+     path patterns and tags
+  2. Tests `list_routes` returns correct route information for each endpoint
+  3. Tests `format_routes_table` produces correctly formatted output
+  4. Tests that routes from `include_router` with prefix are properly listed
+  5. Tests that non-APIRoute entries (e.g., Mount for static files) are excluded
+
+  Import the FastAPI class from `fastapi` and `APIRouter` from `fastapi.routing`.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: ["tests/test_cli_utils.py"]
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify: []
+  must_not_modify: ["fastapi/applications.py", "fastapi/routing.py"]
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, cli, inspection, fastapi]
+expected_turns_range: [3, 15]

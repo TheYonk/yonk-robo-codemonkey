@@ -1,0 +1,52 @@
+# suites/medium/django-extend-schema.yaml
+id: medium-django-extend-schema
+name: "Add a new MoneyField model field type to Django"
+difficulty: medium
+category: feature
+target_repo: django
+
+prompt: |
+  Add a new model field type called `MoneyField` to Django's ORM that stores
+  monetary values with currency. Implement this by modifying the following files:
+
+  1. Create `django/db/models/fields/money.py` with a `MoneyField` class that:
+     - Extends `django.db.models.fields.DecimalField`
+     - Adds a `currency` parameter (default `'USD'`) that is stored as field
+       metadata but does NOT create a separate database column
+     - Overrides `deconstruct()` to include the `currency` kwarg for migrations
+     - Overrides `from_db_value()` to return a `Money` namedtuple
+       (amount, currency) instead of a plain Decimal
+     - Overrides `get_prep_value()` to extract the Decimal amount when saving
+     - Includes a `Money` namedtuple definition at the module level:
+       `Money = namedtuple('Money', ['amount', 'currency'])`
+     - Has a proper `description` class attribute
+
+  2. In `django/db/models/fields/__init__.py`, add an import of `MoneyField`
+     from the new module so it can be used as
+     `from django.db.models import MoneyField`.
+
+  3. In `django/db/models/__init__.py`, add `MoneyField` to the `__all__`
+     list and import it so it is accessible as `django.db.models.MoneyField`.
+
+  Follow the patterns established by existing field types like `DecimalField`
+  and `JSONField`. Ensure the field works with Django's migration framework
+  by implementing `deconstruct()` correctly.
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 3
+  must_modify:
+    - "django/db/models/fields/__init__.py"
+    - "django/db/models/__init__.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, django, orm, model-field, schema]
+expected_turns_range: [3, 15]

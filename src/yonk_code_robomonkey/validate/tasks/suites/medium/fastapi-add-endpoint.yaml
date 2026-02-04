@@ -1,0 +1,57 @@
+id: medium-fastapi-add-endpoint
+name: "Add a new API endpoint with request validation to the test app"
+difficulty: medium
+category: feature
+target_repo: fastapi
+
+prompt: |
+  Add a new health-check endpoint to FastAPI's test application that demonstrates
+  request validation using Pydantic models.
+
+  Create a new test module `tests/test_health_endpoint.py` that:
+
+  1. Defines a Pydantic model `HealthCheckRequest` with the following fields:
+     - `service_name: str` (required, min_length=1, max_length=100)
+     - `include_details: bool` (optional, default False)
+     - `timeout_seconds: float` (optional, default 5.0, ge=0.1, le=60.0)
+
+  2. Defines a Pydantic response model `HealthCheckResponse` with:
+     - `status: str` (one of "healthy", "degraded", "unhealthy")
+     - `service_name: str`
+     - `timestamp: str` (ISO format)
+     - `details: Optional[dict]` (only populated when `include_details=True`)
+
+  3. Creates a FastAPI app instance and adds a `POST /health` endpoint that:
+     - Accepts a `HealthCheckRequest` body
+     - Returns a `HealthCheckResponse` with `status="healthy"`
+     - Populates `details` with `{"version": "0.110.0", "uptime": "OK"}` only
+       when `include_details` is `True`
+     - Sets `timestamp` to the current UTC time in ISO format
+
+  4. Writes tests using `TestClient` from `fastapi.testclient` that verify:
+     - A valid POST returns 200 with correct response structure
+     - Missing `service_name` returns 422 validation error
+     - `timeout_seconds` below 0.1 returns 422 validation error
+     - `include_details=True` populates the details field
+     - `include_details=False` returns details as None
+
+  Follow the existing test patterns in `tests/test_application.py` for how to
+  structure the test file. Use `from fastapi import FastAPI` and
+  `from fastapi.testclient import TestClient`.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: ["tests/test_health_endpoint.py"]
+  lint: true
+  type_check: false
+  max_files_changed: 1
+  must_modify: []
+  must_not_modify: ["fastapi/applications.py", "fastapi/routing.py"]
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, endpoint, validation, pydantic, fastapi]
+expected_turns_range: [3, 15]

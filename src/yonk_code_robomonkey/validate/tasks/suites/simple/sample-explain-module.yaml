@@ -1,0 +1,35 @@
+id: simple-sample-explain-module
+name: "Explain the hybrid_search module"
+difficulty: simple
+category: explain
+target_repo: sample
+
+prompt: |
+  Explain what the hybrid_search module in `src/yonk_code_robomonkey/retrieval/hybrid_search.py` does.
+
+  In your explanation, cover:
+  1. The purpose of the module and the problem it solves.
+  2. How it combines vector similarity search, full-text search (FTS), and tag filtering into a single merged result set.
+  3. The scoring formula used to compute the combined score (including the default weights: 0.55 vector, 0.35 FTS, 0.10 tag boost).
+  4. What the `require_text_match` parameter does and when it is useful.
+  5. The role of the `HybridSearchResult` dataclass and its explainability fields (vec_rank, vec_score, fts_rank, fts_score, matched_tags, tag_boost).
+  6. How deduplication works when the same chunk appears in both vector and FTS results.
+
+  Do not modify any files. Provide a clear, structured explanation.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [explain, simple, read-only, retrieval, hybrid-search]
+expected_turns_range: [1, 5]

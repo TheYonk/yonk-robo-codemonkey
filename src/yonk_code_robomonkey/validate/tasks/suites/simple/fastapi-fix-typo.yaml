@@ -1,0 +1,44 @@
+id: simple-fastapi-fix-typo
+name: "Fix a docstring typo in FastAPI routing module"
+difficulty: simple
+category: fix
+target_repo: fastapi
+
+prompt: |
+  In the file `fastapi/routing.py`, the `APIRoute` class has a docstring or inline
+  comments that describe how path operations are registered and validated. Review the
+  class and its methods carefully.
+
+  Find the `APIRoute.__init__` method. In the docstring or parameter documentation for
+  the `response_model_exclude_unset` parameter (or nearby parameters like
+  `response_model_exclude_defaults` and `response_model_exclude_none`), there may be
+  inconsistencies in how these boolean parameters are documented compared to how they
+  are actually used in the `get_request_handler` function later in the same file.
+
+  Your task:
+  1. Review the `APIRoute` class constructor and identify any parameter whose inline
+     documentation or docstring does not accurately describe its behavior.
+  2. If you find a genuine typo or documentation inaccuracy, fix it.
+  3. If all documentation is accurate, add a clarifying docstring to the
+     `response_model_exclude_unset` parameter explaining that when set to `True`,
+     fields with default values that were not explicitly set will be excluded from
+     the response.
+
+  Only modify `fastapi/routing.py`. Make the minimal change needed.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 1
+  must_modify: ["fastapi/routing.py"]
+  must_not_modify: ["fastapi/applications.py", "fastapi/__init__.py"]
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, simple, docstring, fastapi, routing]
+expected_turns_range: [1, 5]

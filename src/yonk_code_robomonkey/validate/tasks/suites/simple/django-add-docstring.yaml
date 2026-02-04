@@ -1,0 +1,41 @@
+# suites/simple/django-add-docstring.yaml
+id: simple-django-add-docstring
+name: "Add docstring to an undocumented utility function"
+difficulty: simple
+category: fix
+target_repo: django
+
+prompt: |
+  In the Django source file `django/utils/text.py`, find the function
+  `slugify`. Examine its current docstring.
+
+  If the docstring is missing or minimal, add or improve it to include:
+  - A one-line summary of what the function does
+  - A description of the `value` parameter (the string to convert)
+  - A description of the `allow_unicode` parameter and its effect
+  - The return type (a slug string)
+  - An example usage showing input and output, e.g.:
+    >>> slugify("Hello World")
+    'hello-world'
+
+  Follow Django's existing docstring conventions (use triple double-quotes,
+  imperative mood for the summary line). Only modify the docstring of the
+  `slugify` function; do not change any logic.
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 1
+  must_modify:
+    - "django/utils/text.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, simple, docstring, django, utils]
+expected_turns_range: [1, 5]

@@ -1,0 +1,79 @@
+# suites/hard/django-add-cross-cutting.yaml
+id: hard-django-add-cross-cutting
+name: "Add audit logging across ORM operations"
+difficulty: hard
+category: feature
+target_repo: django
+
+prompt: |
+  Add a cross-cutting audit logging system to Django's ORM that automatically
+  records create, update, and delete operations on any model that opts in.
+  This requires changes across multiple modules in the Django codebase.
+
+  Implement the following:
+
+  1. Create `django/db/models/audit.py` with:
+     - An `AuditLog` model with fields: `id` (AutoField), `table_name`
+       (CharField), `object_id` (CharField), `action` (CharField with choices
+       CREATE/UPDATE/DELETE), `changes` (JSONField storing old/new values),
+       `user` (CharField, nullable, for the acting user), `timestamp`
+       (DateTimeField auto_now_add=True).
+     - A mixin class `AuditMixin` that models can inherit from to opt in.
+     - A `get_changes()` utility function that diffs old and new field values
+       and returns a dict of `{field_name: {old: ..., new: ...}}`.
+
+  2. Modify `django/db/models/base.py`:
+     - In the `Model.save()` method, after a successful save, check if the
+       model class uses `AuditMixin`. If so, create an `AuditLog` entry
+       with action CREATE (for new objects) or UPDATE (for existing objects).
+     - For UPDATE actions, capture the old values by querying the database
+       before the save and computing the diff using `get_changes()`.
+
+  3. Modify `django/db/models/query.py`:
+     - In `QuerySet.delete()`, before executing the delete, check if the
+       model uses `AuditMixin`. If so, iterate over the queryset and create
+       AuditLog entries with action DELETE for each object.
+     - In `QuerySet.update()`, before executing the update, check if the
+       model uses `AuditMixin`. If so, capture old values and create
+       AuditLog entries with action UPDATE.
+
+  4. Modify `django/db/models/__init__.py`:
+     - Export `AuditMixin` and `AuditLog` so they are importable from
+       `django.db.models`.
+
+  5. Create `django/db/models/audit_middleware.py` with:
+     - An `AuditMiddleware` class that extracts the current user from the
+       request and stores it in a thread-local variable.
+     - A `get_current_user()` function that retrieves the user from
+       thread-local storage, used by the audit system to populate the
+       `user` field.
+
+  6. Modify `django/contrib/admin/options.py`:
+     - In `ModelAdmin.save_model()` and `ModelAdmin.delete_model()`, ensure
+       the audit middleware user context is set before the ORM operation.
+
+  Ensure the audit system:
+  - Is opt-in (only models using AuditMixin are tracked)
+  - Has minimal performance impact (no extra queries unless auditing is active)
+  - Works with both `Model.save()` and `QuerySet.update()/delete()`
+  - Captures the acting user when AuditMiddleware is installed
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "django/db/models/base.py"
+    - "django/db/models/query.py"
+    - "django/db/models/__init__.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, hard, django, orm, audit, cross-cutting, middleware]
+expected_turns_range: [10, 30]

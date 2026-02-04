@@ -1,0 +1,73 @@
+id: hard-sample-refactor-pipeline
+name: "Refactor the indexing pipeline to support parallel file processing"
+difficulty: hard
+category: refactor
+target_repo: sample
+
+prompt: |
+  Refactor the indexing pipeline in `src/yonk_code_robomonkey/indexer/indexer.py`
+  to support parallel file processing using asyncio concurrency.
+
+  Currently, the `index_repository` function processes files sequentially in a
+  for loop:
+
+      for file_path, language in scan_repo(repo_root):
+          stats["files_scanned"] += 1
+          try:
+              indexed = await _index_file(conn, repo_id, file_path, language, repo_root, max_file_size_mb)
+              ...
+
+  This is slow for large repositories because each file is parsed, chunked, and
+  written to the database one at a time.
+
+  Refactor the pipeline to:
+
+  1. **Batch collection phase**: Collect all files from `scan_repo()` into a list
+     first, then process them in batches.
+
+  2. **Parallel parsing**: Use `asyncio.Semaphore` to limit concurrency (default
+     max 8 concurrent files). Add a `--concurrency` argument to the `index`
+     CLI command in `src/yonk_code_robomonkey/cli/commands.py` (default: 8).
+
+  3. **Connection pooling**: Replace the single `asyncpg.connect()` with
+     `asyncpg.create_pool()` so parallel workers each get their own connection.
+     The pool should be created in `index_repository` and passed to `_index_file`.
+
+  4. **Progress reporting**: Add a progress counter that prints every 50 files:
+     `Indexed 50/1234 files...`
+
+  5. **Error isolation**: Ensure that a failure in one file does not abort the
+     entire batch. Collect errors into a list and report them at the end.
+
+  6. **Preserve transactional safety**: Each file must still be processed in its
+     own transaction (the current per-file delete+insert pattern must be preserved).
+
+  Files to modify:
+  - `src/yonk_code_robomonkey/indexer/indexer.py` - Core refactoring
+  - `src/yonk_code_robomonkey/cli/commands.py` - Add `--concurrency` argument
+  - `tests/test_indexer_parallel.py` - Add tests verifying parallel behavior
+
+  Preserve all existing function signatures as public API. The `index_repository`
+  function should accept an optional `concurrency: int = 8` parameter.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_indexer_parallel.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "src/yonk_code_robomonkey/indexer/indexer.py"
+    - "src/yonk_code_robomonkey/cli/commands.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/retrieval/hybrid_search.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [refactor, hard, indexer, concurrency, asyncio, pipeline]
+expected_turns_range: [10, 30]

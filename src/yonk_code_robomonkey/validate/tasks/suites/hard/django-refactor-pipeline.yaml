@@ -1,0 +1,76 @@
+# suites/hard/django-refactor-pipeline.yaml
+id: hard-django-refactor-pipeline
+name: "Refactor the middleware pipeline to support async middleware priority"
+difficulty: hard
+category: refactor
+target_repo: django
+
+prompt: |
+  Refactor Django's middleware pipeline in the request/response handler to
+  support a priority-based ordering system alongside the existing sequential
+  MIDDLEWARE list. Currently, middleware is processed strictly in the order
+  defined in settings.MIDDLEWARE. This refactoring should allow middleware
+  classes to optionally declare a priority that influences their position
+  in the chain.
+
+  Modify the following files:
+
+  1. `django/core/handlers/base.py`:
+     - In the `BaseHandler` class, refactor `adapt_method_mode()` and
+       `load_middleware()` to support a new optional `priority` attribute
+       on middleware classes.
+     - Middleware with a `priority` attribute (integer, lower = earlier)
+       should be sorted by priority within the chain. Middleware without
+       a `priority` attribute retains its original position from MIDDLEWARE.
+     - Add a new method `_sort_middleware_by_priority()` that takes the
+       loaded middleware list and re-orders it, keeping non-prioritized
+       middleware in their original relative order (stable sort).
+     - Ensure both sync and async middleware paths are handled.
+
+  2. `django/core/handlers/asgi.py`:
+     - Update `ASGIHandler` to use the refactored middleware loading from
+       `BaseHandler`. Ensure async middleware chains respect the new priority
+       ordering.
+
+  3. `django/core/handlers/wsgi.py`:
+     - Update `WSGIHandler` similarly to ensure sync middleware chains
+       respect priority ordering.
+
+  4. `django/utils/deprecation.py`:
+     - Add a `priority` class attribute (default `None`) to `MiddlewareMixin`
+       so that legacy middleware can opt into priority ordering.
+
+  5. `django/middleware/security.py`:
+     - Set `priority = 10` on `SecurityMiddleware` as an example, ensuring
+       security checks always run early regardless of MIDDLEWARE order.
+
+  6. `django/middleware/common.py`:
+     - Set `priority = 50` on `CommonMiddleware` to demonstrate mid-priority.
+
+  7. Add docstrings explaining the priority system in `base.py` and
+     `deprecation.py`.
+
+  Ensure backward compatibility: if no middleware declares a priority, the
+  behavior must be identical to the current implementation. Write clear
+  comments explaining the sorting algorithm.
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "django/core/handlers/base.py"
+    - "django/utils/deprecation.py"
+    - "django/middleware/security.py"
+    - "django/middleware/common.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [refactor, hard, django, middleware, pipeline, async, architecture]
+expected_turns_range: [10, 30]

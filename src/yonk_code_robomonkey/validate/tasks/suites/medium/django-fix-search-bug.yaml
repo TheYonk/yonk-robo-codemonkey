@@ -1,0 +1,50 @@
+# suites/medium/django-fix-search-bug.yaml
+id: medium-django-fix-search-bug
+name: "Fix a queryset filtering edge case with isnull and exclude"
+difficulty: medium
+category: fix
+target_repo: django
+
+prompt: |
+  There is a known edge case in Django's ORM where combining `exclude()`
+  with `isnull=True` on a foreign key field can produce unexpected results
+  when the foreign key is nullable. For example:
+
+    Book.objects.exclude(author__profile__isnull=True)
+
+  This should return books whose author has a non-null profile, but it can
+  incorrectly exclude books whose author is NULL as well, depending on how
+  the SQL JOINs are constructed.
+
+  Investigate the queryset filtering logic in:
+  1. `django/db/models/sql/query.py` - the `Query` class, specifically the
+     `build_filter` and `_add_q` methods
+  2. `django/db/models/sql/where.py` - the `WhereNode` class and how
+     negation is handled
+  3. `django/db/models/query.py` - the `exclude()` method on `QuerySet`
+
+  Identify how the negation logic interacts with outer joins on nullable
+  foreign keys. Write a fix that ensures `exclude(field__isnull=True)` on
+  a nullable FK correctly uses a LEFT OUTER JOIN and only excludes rows
+  where the field is genuinely NULL (not rows where the join itself produces
+  NULL due to a missing related object).
+
+  Document your findings in code comments explaining the edge case.
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 3
+  must_modify:
+    - "django/db/models/sql/query.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [fix, medium, django, orm, queryset, sql, edge-case]
+expected_turns_range: [3, 15]

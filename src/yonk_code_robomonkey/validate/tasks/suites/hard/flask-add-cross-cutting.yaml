@@ -1,0 +1,85 @@
+# suites/hard/flask-add-cross-cutting.yaml
+id: hard-flask-add-cross-cutting
+name: "Add rate limiting middleware across blueprints"
+difficulty: hard
+category: feature
+target_repo: flask
+
+prompt: |
+  Implement a built-in, per-endpoint rate limiting system for Flask that
+  works across blueprints.  This should be a first-class feature, not an
+  extension.
+
+  Requirements:
+
+  1. Create src/flask/ratelimit.py with the following:
+     a. A `RateLimiter` class that accepts:
+        - `default_limit` (int): max requests per window (default 60).
+        - `window_seconds` (int): time window in seconds (default 60).
+        - `key_func` (callable): extracts the rate-limit key from a
+          request.  Default: `lambda request: request.remote_addr`.
+        - `storage` (dict-like): an in-memory dict by default, keyed by
+          (rate_limit_key, endpoint) -> list of timestamps.
+     b. A `limit` decorator method on RateLimiter that can be applied to
+        view functions:
+          @limiter.limit(max_requests=10, per_seconds=30)
+          def my_view(): ...
+        When the limit is exceeded, return HTTP 429 with a JSON body
+        `{"error": "rate limit exceeded", "retry_after": <seconds>}`
+        and set the `Retry-After` header.
+     c. A `check_rate_limit()` method that RateLimiter can register as
+        a before_request hook via `app.before_request(limiter.check_rate_limit)`.
+        This enforces the `default_limit` on all endpoints that do not
+        have a custom `@limiter.limit()` decorator.
+     d. An `init_app(app)` method that registers the before_request hook
+        and stores the limiter on `app.extensions["ratelimit"]`.
+
+  2. In src/flask/app.py, import RateLimiter and document it in the
+     class docstring as an optional built-in feature.
+
+  3. In src/flask/__init__.py, export `RateLimiter`.
+
+  4. In src/flask/wrappers.py, add a property `is_rate_limited` on the
+     Request class that checks `g` for a rate-limit flag set by the
+     limiter.
+
+  5. Add tests in tests/test_ratelimit.py:
+     a. Test default rate limiting (60 requests per 60s).
+     b. Test per-endpoint override with @limiter.limit().
+     c. Test that exceeding the limit returns 429 with correct JSON
+        body and Retry-After header.
+     d. Test rate limiting with blueprint endpoints.
+     e. Test custom key_func (e.g., rate limit by API key header).
+     f. Test that the rate limit window resets correctly after the
+        window expires (mock time.time).
+
+  6. In src/flask/helpers.py, add a helper function
+     `get_rate_limit_status()` that returns a dict with keys
+     `remaining`, `limit`, `reset` for the current request's endpoint.
+
+  Ensure that existing tests continue to pass.
+
+setup:
+  commit: "3.0.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_ratelimit.py"
+    - "tests/test_basic.py"
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "src/flask/__init__.py"
+    - "src/flask/app.py"
+    - "src/flask/wrappers.py"
+    - "src/flask/helpers.py"
+  must_not_modify:
+    - "src/flask/sessions.py"
+    - "src/flask/templating.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, hard, flask, ratelimit, middleware, blueprints, cross-cutting]
+expected_turns_range: [10, 30]

@@ -1,0 +1,35 @@
+id: simple-fastapi-find-function
+name: "Find the FastAPI class constructor and explain its parameters"
+difficulty: simple
+category: find
+target_repo: fastapi
+
+prompt: |
+  Find the FastAPI application class constructor in the FastAPI framework source code.
+  The main FastAPI class is defined in `fastapi/applications.py`. Locate the `__init__`
+  method of the `FastAPI` class and provide:
+
+  1. The complete list of constructor parameters with their types and default values.
+  2. A brief explanation of what each parameter controls (e.g., `title`, `version`,
+     `openapi_url`, `docs_url`, `redoc_url`, `dependencies`, `default_response_class`,
+     `lifespan`).
+  3. Which class FastAPI inherits from and why that matters for ASGI compatibility.
+
+  Show the full constructor signature in your response.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [find, simple, read-only, fastapi, constructor]
+expected_turns_range: [1, 5]

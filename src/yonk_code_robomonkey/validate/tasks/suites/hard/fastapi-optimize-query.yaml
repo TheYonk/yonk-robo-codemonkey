@@ -1,0 +1,93 @@
+id: hard-fastapi-optimize-query
+name: "Optimize response serialization with caching and lazy evaluation"
+difficulty: hard
+category: performance
+target_repo: fastapi
+
+prompt: |
+  FastAPI's response serialization pipeline converts Pydantic models to JSON via
+  several steps. The relevant code paths are:
+
+  - `fastapi/routing.py` - The `serialize_response` function and
+    `get_request_handler` which calls it
+  - `fastapi/encoders.py` - The `jsonable_encoder` function that recursively
+    converts objects to JSON-serializable types
+  - `fastapi/_compat.py` - Pydantic v1/v2 compatibility layer
+  - `fastapi/responses.py` - Response classes (JSONResponse, etc.)
+
+  For endpoints that return the same response model repeatedly (e.g., configuration
+  endpoints, cached data), the serialization work is duplicated on every request.
+  Your task is to create an optimized serialization layer.
+
+  1. Create `fastapi/serialization.py` with:
+     - A `CachedSerializer` class that:
+       - Takes a `response_model` type and serialization options
+         (`exclude_unset`, `exclude_defaults`, `exclude_none`, `by_alias`)
+       - Pre-computes the model's JSON schema and field metadata once at init time
+       - Provides a `serialize(obj)` method that converts a model instance to a
+         JSON-serializable dict
+       - Implements an LRU cache (configurable max_size, default 128) keyed by
+         the hash of the model instance's field values for idempotent responses
+       - Provides `cache_stats() -> dict` returning hit/miss/size metrics
+       - Has a `clear_cache()` method
+
+     - A `LazyResponse` class that:
+       - Wraps a callable that produces the response data
+       - Only evaluates the callable when the response is actually consumed
+       - Integrates with FastAPI's `JSONResponse` to defer serialization
+       - Supports async callables
+
+     - A `@cached_response(max_size=128, ttl_seconds=60)` decorator that:
+       - Can be applied to FastAPI endpoint functions
+       - Caches the serialized response based on the request path and query params
+       - Respects TTL for cache expiration
+       - Adds `X-Cache-Hit: true/false` response header
+       - Provides a `.cache_info()` method on the decorated function
+
+  2. Create `tests/test_serialization_performance.py` with:
+     - Benchmark tests comparing standard `jsonable_encoder` vs `CachedSerializer`
+       for a complex nested Pydantic model (at least 3 levels of nesting with
+       lists and optional fields)
+     - Tests verifying `CachedSerializer` produces identical output to the standard
+       serialization path
+     - Tests for LRU eviction when cache exceeds max_size
+     - Tests for `LazyResponse` with sync and async callables
+     - Tests for `@cached_response` decorator with TTL expiration
+     - Tests for cache hit/miss headers
+     - Tests verifying thread safety of the cache under concurrent access
+
+  3. Create `tests/test_serialization_compat.py` with:
+     - Tests ensuring `CachedSerializer` handles all the edge cases that
+       `jsonable_encoder` handles: datetime objects, Decimal, UUID, Enum values,
+       bytes, custom objects with `__json__` methods, SQLAlchemy-like objects with
+       `__dict__`
+     - Tests for `exclude_unset`, `exclude_defaults`, `exclude_none` options
+     - Tests for `by_alias` with Pydantic models that have field aliases
+     - Tests with Pydantic v2 model features (if applicable at this version)
+
+  Read `fastapi/encoders.py` carefully to understand all the type handling in
+  `jsonable_encoder` before implementing `CachedSerializer`. Your implementation
+  should not break any existing functionality.
+
+setup:
+  commit: "0.110.0"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_serialization_performance.py"
+    - "tests/test_serialization_compat.py"
+  lint: true
+  type_check: false
+  max_files_changed: 4
+  must_modify: []
+  must_not_modify:
+    - "fastapi/encoders.py"
+    - "fastapi/routing.py"
+    - "fastapi/responses.py"
+    - "fastapi/_compat.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [performance, hard, serialization, caching, optimization, fastapi]
+expected_turns_range: [10, 30]

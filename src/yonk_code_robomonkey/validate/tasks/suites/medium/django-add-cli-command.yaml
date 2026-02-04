@@ -1,0 +1,55 @@
+# suites/medium/django-add-cli-command.yaml
+id: medium-django-add-cli-command
+name: "Add a new management command to list all URL patterns"
+difficulty: medium
+category: feature
+target_repo: django
+
+prompt: |
+  Add a new Django management command called `showurls` that lists all
+  registered URL patterns in the project. This is similar to the popular
+  django-extensions `show_urls` command but built into Django core.
+
+  Create the command in `django/core/management/commands/showurls.py`
+  with the following behavior:
+
+  1. The command should resolve the root URLconf (from `settings.ROOT_URLCONF`)
+     and recursively walk all URL patterns, including nested `include()` patterns.
+
+  2. For each URL pattern, print a table row with:
+     - The full URL pattern (e.g., `/admin/`, `/api/users/<int:pk>/`)
+     - The view function or class name (e.g., `django.contrib.admin.sites.AdminSite`)
+     - The URL name if one is set (e.g., `admin:index`)
+
+  3. Support the following command-line options:
+     - `--format` with choices `table` (default), `json`, and `csv`
+     - `--filter` to filter patterns by substring match on the URL pattern
+     - `--unsorted` flag to skip alphabetical sorting (default is sorted)
+
+  4. The `handle()` method should use `django.urls.resolvers.URLResolver` and
+     `URLPattern` to walk the URL tree. Import `get_resolver` from
+     `django.urls` to get the root resolver.
+
+  5. Add appropriate help text to the command class.
+
+  Follow the conventions of existing management commands in
+  `django/core/management/commands/` (see `showmigrations.py` or
+  `check.py` as examples).
+
+setup:
+  commit: "5.0"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: true
+  type_check: false
+  max_files_changed: 2
+  must_modify:
+    - "django/core/management/commands/showurls.py"
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [feature, medium, django, management-command, cli, urls]
+expected_turns_range: [3, 15]
