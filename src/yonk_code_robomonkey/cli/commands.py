@@ -112,6 +112,32 @@ def run() -> None:
     summaries_generate.add_argument("--limit", type=int, default=None,
                                     help="Limit number of entities to summarize")
 
+    # Validate command
+    validate = sub.add_parser("validate", help="Run A/B validation benchmarks")
+    validate_sub = validate.add_subparsers(dest="validate_cmd", required=True)
+
+    validate_sub.add_parser("setup").add_argument("--repos", default="all")
+    run_p = validate_sub.add_parser("run")
+    run_p.add_argument("--task", default=None)
+    run_p.add_argument("--suite", choices=["simple", "medium", "hard", "all"], default=None)
+    run_p.add_argument("--repo", default=None)
+    run_p.add_argument("--runs", type=int, default=3)
+    run_p.add_argument("--condition", choices=["both", "with", "without"], default="both")
+
+    report_p = validate_sub.add_parser("report")
+    report_p.add_argument("--format", choices=["cli", "markdown", "json", "all"], default="cli")
+    report_p.add_argument("--output", default=None)
+
+    list_p = validate_sub.add_parser("list")
+    list_p.add_argument("--repo", default=None)
+    list_p.add_argument("--difficulty", default=None)
+
+    clean_p = validate_sub.add_parser("clean")
+    clean_p.add_argument("--repo", default=None)
+    clean_p.add_argument("--all", action="store_true")
+
+    validate_sub.add_parser("status")
+
     # Daemon command
     daemon = sub.add_parser("daemon", help="Daemon management commands")
     daemon_sub = daemon.add_subparsers(dest="daemon_cmd", required=True)
@@ -220,6 +246,20 @@ def run() -> None:
                     args.prefix,
                     args.limit
                 ))
+        elif args.cmd == "validate":
+            from yonk_code_robomonkey.validate import cli as vcli
+            if args.validate_cmd == "setup":
+                asyncio.run(vcli.validate_setup(args.repos))
+            elif args.validate_cmd == "run":
+                asyncio.run(vcli.validate_run(args.task, args.suite, args.repo, args.runs, args.condition))
+            elif args.validate_cmd == "report":
+                asyncio.run(vcli.validate_report(args.format, args.output))
+            elif args.validate_cmd == "list":
+                asyncio.run(vcli.validate_list(args.repo, args.difficulty))
+            elif args.validate_cmd == "clean":
+                asyncio.run(vcli.validate_clean(args.repo, getattr(args, 'all', False)))
+            elif args.validate_cmd == "status":
+                asyncio.run(vcli.validate_status())
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
         sys.exit(130)
