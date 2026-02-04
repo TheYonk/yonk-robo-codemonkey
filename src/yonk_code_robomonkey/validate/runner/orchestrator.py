@@ -1,0 +1,128 @@
+from __future__ import annotations
+import asyncio
+import logging
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from ..tasks.task_model import TaskDefinition
+from .base_driver import BaseDriver, DriverResult
+from .git_manager import GitManager
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RunConfig:
+    """Configuration for a validation run."""
+    runs_per_condition: int = 3
+    conditions: list[str] = field(default_factory=lambda: ["with_robomonkey", "without_robomonkey"])
+    mcp_config_path: str | None = None   # Path for "with" condition
+    timeout_seconds: int = 300
+    max_turns: int = 30
+    max_budget_usd: float = 5.0
+
+
+@dataclass
+class SingleRunResult:
+    """Result of one execution of one task under one condition."""
+    task_id: str
+    condition: str               # "with_robomonkey" | "without_robomonkey"
+    run_number: int              # 1-indexed
+    driver_result: DriverResult
+    diff_stats: dict[str, Any]
+    diff_text: str = ""          # Full git diff (for hallucination detection + judge)
+    valid: bool = True           # False if cleanup failed
+    invalidation_reason: str = ""
+
+
+class Orchestrator:
+    """Runs A/B experiments: same task, with vs without RoboMonkey."""
+
+    def __init__(self, driver: BaseDriver, config: RunConfig):
+        self.driver = driver
+        self.config = config
+
+    async def run_task(
+        self,
+        task: TaskDefinition,
+        repo_dir: Path,
+        on_progress: callable | None = None,
+    ) -> list[SingleRunResult]:
+        """Run a task under all conditions with repetitions."""
+        git = GitManager(repo_dir)
+        results = []
+        total = len(self.config.conditions) * self.config.runs_per_condition
+        current = 0
+
+        for condition in self.config.conditions:
+            mcp = self.config.mcp_config_path if condition == "with_robomonkey" else None
+
+            for run_num in range(1, self.config.runs_per_condition + 1):
+                current += 1
+                if on_progress:
+                    on_progress(task.id, condition, run_num, current, total)
+
+                result = await self._execute_single_run(
+                    task, git, condition, mcp, run_num
+                )
+                results.append(result)
+
+        return results
+
+    async def _execute_single_run(
+        self,
+        task: TaskDefinition,
+        git: GitManager,
+        condition: str,
+        mcp_config: str | None,
+        run_number: int,
+    ) -> SingleRunResult:
+        """Execute one run with cleanup."""
+        # Pre-clean
+        try:
+            await git.reset_to_commit(task.setup.commit)
+            await git.verify_clean()
+        except RuntimeError as e:
+            return SingleRunResult(
+                task_id=task.id, condition=condition, run_number=run_number,
+                driver_result=DriverResult(response_text="", success=False, error=str(e)),
+                diff_stats={}, valid=False, invalidation_reason=f"Pre-clean failed: {e}",
+            )
+
+        # Run
+        driver_result = await self.driver.run(
+            prompt=task.prompt,
+            working_dir=str(git.repo_dir),
+            mcp_config=mcp_config,
+            max_turns=self.config.max_turns,
+            max_budget_usd=self.config.max_budget_usd,
+            timeout_seconds=self.config.timeout_seconds,
+        )
+
+        # Capture diff before cleanup (both stats and full text)
+        diff_stats = await git.get_diff_stats()
+        _, diff_text, _ = await git._run_git("diff")
+
+        # Post-clean
+        valid = True
+        invalidation_reason = ""
+        try:
+            await git.reset_to_commit(task.setup.commit)
+            await git.verify_clean()
+        except RuntimeError as e:
+            valid = False
+            invalidation_reason = f"Post-clean failed: {e}"
+            logger.warning("Run %s/%s/%d marked invalid: %s", task.id, condition, run_number, e)
+
+        return SingleRunResult(
+            task_id=task.id,
+            condition=condition,
+            run_number=run_number,
+            driver_result=driver_result,
+            diff_stats=diff_stats,
+            diff_text=diff_text,
+            valid=valid,
+            invalidation_reason=invalidation_reason,
+        )
