@@ -1651,6 +1651,135 @@ POST /api/mcp/tools/read_file
 }
 ```
 
+### Ask Codebase Tool
+
+Ask a natural language question about an indexed codebase and get an AI-generated answer. This tool performs hybrid search across documentation, code files, and symbols, then uses an LLM to synthesize a comprehensive answer.
+
+```
+POST /api/mcp/tools/ask_codebase
+```
+
+**Request Body:**
+```json
+{
+  "params": {
+    "question": "How does the authentication system work?",
+    "repo": "my-project",
+    "summary_format": "both",
+    "top_k": 10
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `question` | string | Yes | - | Natural language question about the codebase |
+| `repo` | string | No | DEFAULT_REPO | Repository name |
+| `summary_format` | string | No | `files` | Output format: `files`, `prose`, or `both` |
+| `top_k` | integer | No | 10 | Number of results to retrieve per category |
+
+**Summary Formats:**
+| Format | Description |
+|--------|-------------|
+| `files` | Structured file list showing document names, code files with context (class/method names), and symbols. Default and fastest. |
+| `prose` | LLM-generated narrative with two sections: **Summary** (describes what was found) and **Answer** (direct answer to the question). |
+| `both` | Combines prose narrative followed by structured file list. Most comprehensive but slowest. |
+
+**Response (files format):**
+```json
+{
+  "tool": "ask_codebase",
+  "params": {"question": "How does authentication work?", "repo": "my-project"},
+  "result": {
+    "question": "How does authentication work?",
+    "summary": "📄 Documentation (2 files):\n  • auth-guide.md\n  • security-overview.md\n\n📁 Code Files (5 files):\n  • src/auth/middleware.py — AuthMiddleware.validate_token, AuthMiddleware.check_permissions\n  • src/auth/handlers.py — login_handler, logout_handler\n  ...",
+    "answer": "",
+    "documentation": [
+      {"name": "auth-guide.md", "title": "Authentication Guide", "score": 0.92}
+    ],
+    "code_files": [
+      {
+        "path": "src/auth/middleware.py",
+        "language": "python",
+        "score": 0.88,
+        "symbols": ["AuthMiddleware", "validate_token", "check_permissions"]
+      }
+    ],
+    "symbols": [
+      {
+        "name": "AuthMiddleware",
+        "fqn": "src.auth.middleware.AuthMiddleware",
+        "kind": "class",
+        "file_path": "src/auth/middleware.py",
+        "score": 0.85
+      }
+    ],
+    "key_files": ["src/auth/middleware.py", "src/auth/handlers.py"],
+    "execution_time_ms": 234.5,
+    "model_used": null
+  },
+  "success": true
+}
+```
+
+**Response (prose format):**
+```json
+{
+  "result": {
+    "question": "How does authentication work?",
+    "summary": "**Summary:**\nThe codebase contains comprehensive authentication documentation in auth-guide.md and implements authentication through the AuthMiddleware class in src/auth/middleware.py. Key components include JWT token validation, permission checking, and login/logout handlers.\n\n**Answer:**\nThe authentication system uses JWT tokens validated by AuthMiddleware. When a request arrives, the middleware extracts the token from the Authorization header, validates it using the configured secret, and checks user permissions against the requested resource. Login is handled by login_handler which verifies credentials and issues tokens, while logout_handler invalidates the current session.",
+    "answer": "The authentication system uses JWT tokens validated by AuthMiddleware...",
+    "documentation": [...],
+    "code_files": [...],
+    "symbols": [...],
+    "key_files": [...],
+    "execution_time_ms": 2340.5,
+    "model_used": "gpt-5.2-codex"
+  }
+}
+```
+
+**Response (both format):**
+The `both` format returns the prose summary/answer followed by the structured file list, separated by a horizontal rule.
+
+**Response Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `question` | string | The original question asked |
+| `summary` | string | Formatted summary based on `summary_format` |
+| `answer` | string | LLM-generated answer (empty string when format is `files`) |
+| `documentation` | array | Relevant documentation files with names, titles, and scores |
+| `code_files` | array | Relevant code files with paths, languages, scores, and symbol names |
+| `symbols` | array | Relevant symbols with names, FQNs, kinds, file paths, and scores |
+| `key_files` | array | Top files most relevant to the question |
+| `execution_time_ms` | float | Total execution time in milliseconds |
+| `model_used` | string | LLM model used (null when format is `files`) |
+
+**How It Works:**
+
+1. **Hybrid Search**: The tool searches across three entity types:
+   - **Documentation**: README, markdown files, docs (using doc_search)
+   - **Code Files**: Source files with content matching (using hybrid_search)
+   - **Symbols**: Functions, classes, methods (using symbol search)
+
+2. **Result Aggregation**: Results from all three searches are merged, deduplicated, and ranked by relevance score.
+
+3. **Summary Generation**: Based on `summary_format`:
+   - `files`: Generates structured lists showing file names and associated symbols
+   - `prose`: Uses the "deep" LLM model to synthesize a narrative answer
+   - `both`: Combines both approaches
+
+4. **LLM Integration**: When using `prose` or `both`, the tool:
+   - Uses the "deep" LLM (configured in `config/robomonkey-daemon.yaml`) for answer generation
+   - Uses the "small" LLM for summary generation
+   - Provides code/doc context to the LLM for accurate answers
+
+**Use Cases:**
+- Understanding how specific features are implemented
+- Finding where certain functionality exists in the codebase
+- Getting explanations of code patterns and architecture
+- Answering questions about APIs, data flow, or system design
+
 ---
 
 ## Knowledge Base (Document Indexing)
@@ -1938,6 +2067,7 @@ Ask a natural language question and get an LLM-generated answer synthesized from
   "question": "How does EPAS handle Oracle's XMLParse function?",
   "answer": "EPAS provides compatibility for Oracle's XMLParse function through its XML handling capabilities [1]. The function accepts...\n\nFor migration, you can use the following approach [2]...",
   "confidence": "high",
+  "sources_summary": "Found relevant information in the EPAS Compatibility Guide covering XML Functions (pages 143-147) and the Oracle Migration Guide's Data Type Mapping section. Both sources directly address XMLParse usage and migration patterns.",
   "sources": [
     {
       "index": 1,
@@ -1970,6 +2100,7 @@ Ask a natural language question and get an LLM-generated answer synthesized from
 | `question` | string | The original question asked |
 | `answer` | string | LLM-generated answer with inline citations `[1]`, `[2]`, etc. |
 | `confidence` | string | Confidence level: `high`, `medium`, `low`, or `no_answer` |
+| `sources_summary` | string | LLM-generated summary describing what sources were found and their relevance |
 | `sources` | array | List of sources used, with index matching citations |
 | `chunks_used` | int | Number of documentation chunks used for context |
 | `execution_time_ms` | float | Total execution time in milliseconds |
@@ -1989,6 +2120,7 @@ Ask a natural language question and get an LLM-generated answer synthesized from
   "question": "What is the capital of France?",
   "answer": "I could not find enough information in the documentation to answer this question.",
   "confidence": "no_answer",
+  "sources_summary": "No relevant sources were found for this question.",
   "sources": [],
   "chunks_used": 0,
   "execution_time_ms": 450.2,

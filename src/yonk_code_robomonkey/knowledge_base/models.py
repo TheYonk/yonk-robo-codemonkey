@@ -251,6 +251,10 @@ class DocAskResult(BaseModel):
     question: str = Field(..., description="The original question")
     answer: str = Field(..., description="LLM-generated answer with inline citations [1], [2]")
     confidence: str = Field(..., description="Confidence level: high, medium, low, no_answer")
+    sources_summary: str = Field(
+        default="",
+        description="LLM-generated summary describing what sources were found and their relevance"
+    )
     sources: list[DocAskSource] = Field(default_factory=list, description="Sources used in the answer")
     chunks_used: int = Field(..., description="Number of chunks used for context")
     execution_time_ms: float = Field(..., description="Total execution time in milliseconds")

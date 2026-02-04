@@ -27,6 +27,22 @@ from .search import doc_search
 logger = logging.getLogger(__name__)
 
 # System prompt for RAG Q&A
+SOURCES_SUMMARY_PROMPT = """Summarize what sources were found for the user's question.
+
+Question: {question}
+
+Sources found:
+{sources_list}
+
+Write 2-3 concise sentences describing:
+1. The types and names of documents found (group similar ones)
+2. What topics or sections these sources cover
+3. How relevant they appear to be for answering the question
+
+Be specific about document names and topics. Don't say "various documents" - name them.
+Keep it brief and informative. No bullet points, just flowing prose."""
+
+
 SYSTEM_PROMPT = """You are a technical documentation assistant specializing in database migration and compatibility.
 
 Your task is to answer questions based ONLY on the provided documentation context. Follow these rules:
@@ -109,6 +125,83 @@ DOCUMENTATION CONTEXT:
 {context}
 
 Based on the documentation context above, answer the question with inline citations [1], [2], etc."""
+
+
+async def _generate_sources_summary(question: str, sources_info: list[dict]) -> str:
+    """Generate an LLM summary of the sources found.
+
+    Uses the small/fast model to quickly describe what sources were found
+    and their relevance to the question.
+
+    Args:
+        question: The user's question
+        sources_info: List of source dicts with document, section, page, preview
+
+    Returns:
+        A 2-3 sentence summary of the sources
+    """
+    if not sources_info:
+        return "No relevant sources were found."
+
+    # Group sources by document for a cleaner summary
+    docs_seen = {}
+    for s in sources_info:
+        doc = s.get("document", "Unknown")
+        if doc not in docs_seen:
+            docs_seen[doc] = {
+                "sections": [],
+                "pages": [],
+            }
+        if s.get("section"):
+            docs_seen[doc]["sections"].append(s["section"])
+        if s.get("page"):
+            docs_seen[doc]["pages"].append(s["page"])
+
+    # Build sources list for prompt
+    sources_lines = []
+    for doc, info in docs_seen.items():
+        parts = [f"- {doc}"]
+        if info["sections"]:
+            unique_sections = list(dict.fromkeys(info["sections"]))[:3]  # First 3 unique
+            parts.append(f"(sections: {', '.join(unique_sections)})")
+        if info["pages"]:
+            unique_pages = sorted(set(info["pages"]))[:5]  # First 5 unique pages
+            parts.append(f"(pages: {', '.join(map(str, unique_pages))})")
+        sources_lines.append(" ".join(parts))
+
+    sources_list = "\n".join(sources_lines)
+
+    # Call small LLM for quick summary
+    from ..llm.client import call_llm
+
+    prompt = SOURCES_SUMMARY_PROMPT.format(
+        question=question,
+        sources_list=sources_list
+    )
+
+    try:
+        summary = await call_llm(
+            prompt=prompt,
+            task_type="small",  # Use fast model
+            timeout=30.0,  # Quick timeout
+        )
+        if summary and summary.strip():
+            logger.debug(f"Generated sources summary: {summary[:100]}...")
+            return summary.strip()
+        else:
+            logger.warning("Sources summary LLM returned empty response, using fallback")
+    except Exception as e:
+        logger.warning(f"Failed to generate sources summary: {e}")
+
+    # Fallback to simple summary (also used when LLM fails)
+    doc_count = len(docs_seen)
+    chunk_count = len(sources_info)
+    doc_names = ", ".join(list(docs_seen.keys())[:3])
+    if doc_count > 3:
+        doc_names += f" and {doc_count - 3} more"
+    fallback_summary = f"Found {chunk_count} relevant chunks from {doc_count} documents: {doc_names}."
+    logger.info(f"Using fallback sources summary: {fallback_summary}")
+    return fallback_summary
 
 
 def _assess_confidence(answer: str, sources_count: int) -> str:
@@ -218,6 +311,7 @@ async def ask_docs(
             question=request.question,
             answer="I could not find any relevant documentation to answer this question. Please try rephrasing your question or check if the relevant documents have been indexed.",
             confidence="no_answer",
+            sources_summary="No relevant sources were found for this question.",
             sources=[],
             chunks_used=0,
             execution_time_ms=execution_time_ms,
@@ -230,6 +324,9 @@ async def ask_docs(
         chunks_as_dicts,
         request.max_context_tokens
     )
+
+    # Step 2.5: Generate sources summary (runs in parallel conceptually, but we await)
+    sources_summary = await _generate_sources_summary(request.question, sources_info)
 
     # Step 3: Build prompts
     user_prompt = _build_user_prompt(request.question, context)
@@ -259,6 +356,7 @@ async def ask_docs(
             question=request.question,
             answer="I encountered an error while generating the answer. Please try again or check if the LLM service is available.",
             confidence="no_answer",
+            sources_summary=sources_summary,
             sources=[],
             chunks_used=len(sources_info),
             execution_time_ms=execution_time_ms,
@@ -288,6 +386,7 @@ async def ask_docs(
         question=request.question,
         answer=answer,
         confidence=confidence,
+        sources_summary=sources_summary,
         sources=sources,
         chunks_used=len(sources),
         execution_time_ms=execution_time_ms,

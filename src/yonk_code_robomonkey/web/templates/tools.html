@@ -408,6 +408,22 @@ function renderToolForm(schema) {
                     class="mt-1 block w-full rounded-md bg-slate-700 border-slate-600 text-slate-100 shadow-sm focus:border-blue-500 focus:ring-blue-500/50 sm:text-sm"
                 >
             `;
+        } else if (param.enum && Array.isArray(param.enum)) {
+            // Enum type - render as dropdown
+            const options = param.enum.map(val => {
+                const selected = (param.default === val) ? 'selected' : '';
+                return `<option value="${val}" ${selected}>${val}</option>`;
+            }).join('');
+            inputHtml = `
+                <select
+                    id="${inputId}"
+                    name="${param.name}"
+                    ${param.required ? 'required' : ''}
+                    class="mt-1 block w-full rounded-md bg-slate-700 border-slate-600 text-slate-100 shadow-sm focus:border-blue-500 focus:ring-blue-500/50 sm:text-sm"
+                >
+                    ${options}
+                </select>
+            `;
         } else {
             // Text input for strings and others
             inputHtml = `

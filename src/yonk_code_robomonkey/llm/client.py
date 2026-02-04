@@ -200,14 +200,21 @@ async def call_llm(
                     # OpenAI now uses max_completion_tokens for all newer models
                     model_lower = (model or "").lower()
 
-                    # Reasoning models (o1*, o3*) don't support temperature
-                    is_reasoning_model = model_lower.startswith("o1") or model_lower.startswith("o3")
+                    # Models that don't support custom temperature:
+                    # - Reasoning models (o1*, o3*)
+                    # - Some mini models (gpt-5-mini, gpt-5-nano) only support temperature=1
+                    is_fixed_temp_model = (
+                        model_lower.startswith("o1") or
+                        model_lower.startswith("o3") or
+                        "gpt-5-mini" in model_lower or
+                        "gpt-5-nano" in model_lower
+                    )
 
                     # Use max_completion_tokens for all OpenAI models (new standard)
                     request_body["max_completion_tokens"] = max_tokens
 
-                    # Only add temperature for non-reasoning models
-                    if not is_reasoning_model:
+                    # Only add temperature for models that support it
+                    if not is_fixed_temp_model:
                         request_body["temperature"] = temperature
                 else:
                     # OpenAI-compatible APIs (vLLM, local servers, etc.)
@@ -219,6 +226,8 @@ async def call_llm(
                     headers={"Authorization": f"Bearer {api_key}"},
                     json=request_body
                 )
+                if response.status_code >= 400:
+                    logger.error(f"OpenAI API error {response.status_code}: {response.text}")
                 response.raise_for_status()
                 choices = response.json().get("choices", [])
                 if choices:

@@ -838,6 +838,7 @@ async def ask_documents(request: DocAskRequest) -> dict[str, Any]:
             "question": result.question,
             "answer": result.answer,
             "confidence": result.confidence,
+            "sources_summary": result.sources_summary,
             "sources": [
                 {
                     "index": s.index,

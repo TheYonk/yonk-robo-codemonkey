@@ -3,6 +3,7 @@
 Orchestrates multiple search strategies and formats results for LLM consumption.
 """
 from __future__ import annotations
+import asyncio
 import asyncpg
 from dataclasses import dataclass
 from typing import Optional
@@ -71,8 +72,10 @@ class CodebaseAnswer:
     module_summaries: list[SummaryResult]
     symbol_summaries: list[SummaryResult]
 
-    # Synthesized summary
+    # Synthesized summary of what was found
     summary: str
+    # Natural language answer to the question (LLM-generated)
+    answer: str
     key_files: list[str]  # Most relevant files to examine
     suggested_actions: list[str]  # What to do next
 
@@ -94,7 +97,8 @@ async def ask_codebase(
     top_code: int = 5,
     top_symbols: int = 5,
     use_llm_summary: bool = True,
-    use_vector_search: bool = True
+    use_vector_search: bool = True,
+    summary_format: str = "files"  # "files", "prose", or "both"
 ) -> CodebaseAnswer:
     """Answer a natural language question about the codebase.
 
@@ -155,12 +159,27 @@ async def ask_codebase(
         # Step 5: Extract key files (from all result sources)
         key_files = _extract_key_files(doc_results, code_results, symbol_results)
 
-        # Step 6: Generate summary (if LLM enabled)
+        # Step 6: Generate summary and answer (if LLM enabled)
         if use_llm_summary:
-            summary = await _generate_summary(question, doc_results, code_results, symbol_results)
+            # Generate file list (sync) and LLM calls (async, in parallel)
+            file_list = _create_basic_summary(doc_results, code_results, symbol_results)
+            prose_summary, answer = await asyncio.gather(
+                _generate_summary(question, doc_results, code_results, symbol_results),
+                _generate_answer(question, doc_results, code_results, symbol_results),
+            )
             suggested_actions = _suggest_actions(question, doc_results, code_results, symbol_results)
+
+            # Build summary based on format preference
+            if summary_format == "files":
+                summary = file_list
+            elif summary_format == "prose":
+                # Include both prose summary and answer with labels
+                summary = f"**Summary:**\n{prose_summary}\n\n**Answer:**\n{answer}"
+            else:  # "both"
+                summary = f"**Summary:**\n{prose_summary}\n\n**Answer:**\n{answer}\n\n---\n\n{file_list}"
         else:
             summary = _create_basic_summary(doc_results, code_results, symbol_results)
+            answer = f"Found {len(doc_results)} docs, {len(code_results)} code files, {len(symbol_results)} symbols. See results for details."
             suggested_actions = []
 
         total_results = (len(doc_results) + len(code_results) + len(symbol_results) +
@@ -185,6 +204,7 @@ async def ask_codebase(
             module_summaries=module_summaries,
             symbol_summaries=symbol_summaries,
             summary=summary,
+            answer=answer,
             key_files=key_files[:10],  # Top 10 most relevant files
             suggested_actions=suggested_actions,
             total_results_found=total_results,
@@ -650,7 +670,8 @@ async def _generate_summary(
 ) -> str:
     """Generate LLM-based summary of findings.
 
-    TODO: Integrate with Ollama/vLLM to generate natural language summary
+    Uses the LLM to create a natural language summary describing what
+    was found and how it relates to the question.
 
     Args:
         question: Original question
@@ -661,9 +682,137 @@ async def _generate_summary(
     Returns:
         Natural language summary
     """
-    # For now, return a structured text summary
-    # Later: call LLM with context
+    if not docs and not code and not symbols:
+        return "No relevant results found in the codebase."
+
+    # Build context for LLM
+    context_parts = []
+
+    if docs:
+        context_parts.append("Documentation found:")
+        for doc in docs[:3]:
+            title = doc.title or doc.file_path.split('/')[-1]
+            preview = doc.summary[:150] if doc.summary else ""
+            context_parts.append(f"- {title}: {preview}")
+
+    if code:
+        context_parts.append("\nCode files found:")
+        for cf in code[:5]:
+            filename = cf.file_path.split('/')[-1]
+            context_parts.append(f"- {filename}: {cf.context or 'code snippet'}")
+
+    if symbols:
+        context_parts.append("\nSymbols found:")
+        for sym in symbols[:4]:
+            context_parts.append(f"- {sym.kind} {sym.name}: {sym.description or sym.signature or ''}")
+
+    context = "\n".join(context_parts)
+
+    prompt = f"""Summarize what was found in this codebase search. Be concise (2-3 sentences).
+
+Question: {question}
+
+Search Results:
+{context}
+
+Write a brief summary describing what sources were found and how they relate to the question. Focus on the key documents, files, and symbols that are most relevant."""
+
+    try:
+        from yonk_code_robomonkey.llm.client import call_llm
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Generating LLM summary for ask_codebase...")
+        summary = await call_llm(prompt, task_type="small", timeout=30.0)
+        if summary and summary.strip():
+            logger.info(f"LLM summary generated: {summary[:100]}...")
+            return summary.strip()
+        else:
+            logger.warning("LLM returned empty response for ask_codebase summary, using fallback")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"LLM summary generation failed: {e}")
+
+    # Fallback to basic summary
     return _create_basic_summary(docs, code, symbols)
+
+
+async def _generate_answer(
+    question: str,
+    docs: list[DocumentResult],
+    code: list[CodeResult],
+    symbols: list[SymbolResult]
+) -> str:
+    """Generate a natural language answer to the question using LLM.
+
+    Uses the search results as context to synthesize an actual answer
+    to the user's question.
+
+    Args:
+        question: The user's question
+        docs: Documentation results
+        code: Code results
+        symbols: Symbol results
+
+    Returns:
+        Natural language answer to the question
+    """
+    if not docs and not code and not symbols:
+        return "I could not find relevant information in the codebase to answer this question."
+
+    # Build context for LLM
+    context_parts = []
+
+    if docs:
+        context_parts.append("## Documentation")
+        for doc in docs[:3]:
+            title = doc.title or doc.file_path.split('/')[-1]
+            content = doc.summary[:500] if doc.summary else ""
+            context_parts.append(f"### {title}\n{content}")
+
+    if code:
+        context_parts.append("\n## Code")
+        for cf in code[:4]:
+            filename = cf.file_path.split('/')[-1]
+            snippet = cf.snippet[:400] if cf.snippet else ""
+            context_parts.append(f"### {filename} ({cf.context or 'code'})\n```\n{snippet}\n```")
+
+    if symbols:
+        context_parts.append("\n## Key Functions/Classes")
+        for sym in symbols[:3]:
+            sig = sym.signature or ""
+            desc = sym.description or ""
+            context_parts.append(f"- **{sym.kind} {sym.name}**: {sig}\n  {desc}")
+
+    context = "\n\n".join(context_parts)
+
+    prompt = f"""Based on the codebase context below, answer the user's question.
+
+QUESTION: {question}
+
+CONTEXT FROM CODEBASE:
+{context}
+
+Provide a clear, helpful answer based on the code and documentation shown.
+If the context doesn't fully answer the question, explain what you found and what might be missing.
+Keep the answer concise but complete (2-4 paragraphs)."""
+
+    try:
+        from yonk_code_robomonkey.llm.client import call_llm
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Generating LLM answer for ask_codebase...")
+        answer = await call_llm(prompt, task_type="deep", timeout=60.0)
+        if answer and answer.strip():
+            logger.info(f"LLM answer generated: {answer[:100]}...")
+            return answer.strip()
+        else:
+            logger.warning("LLM returned empty response for ask_codebase answer")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"LLM answer generation failed: {e}")
+
+    # Fallback - simple message
+    return f"Found {len(docs)} documentation files, {len(code)} code files, and {len(symbols)} symbols related to your question. Review the results for details."
 
 
 def _create_basic_summary(
@@ -671,7 +820,7 @@ def _create_basic_summary(
     code: list[CodeResult],
     symbols: list[SymbolResult]
 ) -> str:
-    """Create basic text summary without LLM.
+    """Create detailed text summary describing what sources were found.
 
     Args:
         docs: Documentation results
@@ -679,31 +828,43 @@ def _create_basic_summary(
         symbols: Symbol results
 
     Returns:
-        Basic text summary
+        Descriptive text summary of sources
     """
-    parts = []
-
-    if docs:
-        parts.append(f"Found {len(docs)} relevant documentation files")
-    if code:
-        parts.append(f"{len(code)} code files")
-    if symbols:
-        parts.append(f"{len(symbols)} relevant symbols (functions/classes)")
-
-    if not parts:
+    if not docs and not code and not symbols:
         return "No relevant results found in the codebase."
 
-    summary = "Found " + ", ".join(parts) + "."
+    lines = []
 
-    # Add top doc if available
+    # Documentation section - describe each doc
     if docs:
-        summary += f" Key documentation: {docs[0].title}"
+        lines.append(f"**Documentation ({len(docs)} files):**")
+        for doc in docs[:3]:  # Top 3 docs
+            title = doc.title or doc.file_path.split('/')[-1]
+            # Extract first meaningful line from summary
+            preview = doc.summary.split('\n')[0][:80] if doc.summary else ""
+            if preview:
+                lines.append(f"  • {title}: {preview}...")
+            else:
+                lines.append(f"  • {title}")
 
-    # Add top symbol if available
+    # Code files section - describe each with context
+    if code:
+        lines.append(f"**Code ({len(code)} files):**")
+        for cf in code[:5]:  # Top 5 code files
+            filename = cf.file_path.split('/')[-1]
+            if cf.context:
+                lines.append(f"  • {filename} - {cf.context} (lines {cf.line_range[0]}-{cf.line_range[1]})")
+            else:
+                lines.append(f"  • {filename} (lines {cf.line_range[0]}-{cf.line_range[1]})")
+
+    # Symbols section - list key functions/classes
     if symbols:
-        summary += f" Main implementation: {symbols[0].kind} {symbols[0].name}"
+        lines.append(f"**Key symbols ({len(symbols)}):**")
+        for sym in symbols[:4]:  # Top 4 symbols
+            desc = f" - {sym.description}" if sym.description else ""
+            lines.append(f"  • {sym.kind} `{sym.name}`{desc}")
 
-    return summary
+    return "\n".join(lines)
 
 
 def _suggest_actions(
@@ -759,6 +920,12 @@ def format_answer_for_display(answer: CodebaseAnswer) -> str:
     lines.append("## Summary")
     lines.append(answer.summary)
     lines.append("")
+
+    # Answer
+    if answer.answer:
+        lines.append("## Answer")
+        lines.append(answer.answer)
+        lines.append("")
 
     # Documentation
     if answer.documentation:

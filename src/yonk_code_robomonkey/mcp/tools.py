@@ -3123,7 +3123,8 @@ async def ask_codebase_tool(
     top_symbols: int = 5,
     format_as_markdown: bool = True,
     min_validity_score: int | None = None,
-    require_text_match: bool = False
+    require_text_match: bool = False,
+    summary_format: str = "files"
 ) -> dict[str, Any]:
     """Ask a natural language question about the codebase and get comprehensive answers.
 
@@ -3147,6 +3148,9 @@ async def ask_codebase_tool(
                            Default None means no filtering. Set to 50 to skip stale docs.
         require_text_match: If True, filter out results that don't contain the query
             text (case-insensitive). Use for exact construct matching.
+        summary_format: What to include in summary - "files" (structured file list, default),
+            "prose" (LLM narrative), or "both". "both" shows prose summary
+            followed by the file list.
 
     Returns:
         Comprehensive answer with documentation, code, symbols, and summary
@@ -3193,8 +3197,9 @@ async def ask_codebase_tool(
             top_docs=docs_to_request,
             top_code=code_to_request,
             top_symbols=symbols_to_request,
-            use_llm_summary=False,  # For now, basic summary
-            use_vector_search=True  # Enable semantic search!
+            use_llm_summary=True,  # Generate LLM summary and answer
+            use_vector_search=True,  # Enable semantic search!
+            summary_format=summary_format
         )
 
         # Apply text match filter if requested
@@ -3307,6 +3312,7 @@ async def ask_codebase_tool(
                     for sym in filtered_symbols
                 ],
                 "summary": answer.summary,
+                "answer": answer.answer,
                 "key_files": answer.key_files,
                 "suggested_actions": answer.suggested_actions,
                 "total_results": answer.total_results_found,
@@ -3328,6 +3334,7 @@ async def ask_codebase_tool(
                 "code_files": [code.__dict__ for code in filtered_code],
                 "symbols": [sym.__dict__ for sym in filtered_symbols],
                 "summary": answer.summary,
+                "answer": answer.answer,
                 "key_files": answer.key_files,
                 "suggested_actions": answer.suggested_actions,
                 "total_results": answer.total_results_found,

@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, create_model
 
 from yonk_code_robomonkey.mcp.tools import TOOL_REGISTRY
+from yonk_code_robomonkey.mcp.schemas import TOOL_SCHEMAS
 
 router = APIRouter()
 
@@ -48,6 +49,15 @@ async def list_mcp_tools() -> dict[str, Any]:
                     param_info["type"] = param_type.__name__ if hasattr(param_type, '__name__') else str(param_type)
             else:
                 param_info["type"] = "any"
+
+            # Check for enum values in MCP schema
+            if tool_name in TOOL_SCHEMAS:
+                mcp_schema = TOOL_SCHEMAS[tool_name].get("inputSchema", {})
+                mcp_props = mcp_schema.get("properties", {})
+                if param_name in mcp_props:
+                    mcp_param = mcp_props[param_name]
+                    if "enum" in mcp_param:
+                        param_info["enum"] = mcp_param["enum"]
 
             params.append(param_info)
 
@@ -204,6 +214,15 @@ async def get_tool_schema(tool_name: str) -> dict[str, Any]:
                 param_schema["type"] = param_type.__name__ if hasattr(param_type, '__name__') else str(param_type)
         else:
             param_schema["type"] = "any"
+
+        # Check for enum values in MCP schema
+        if tool_name in TOOL_SCHEMAS:
+            mcp_schema = TOOL_SCHEMAS[tool_name].get("inputSchema", {})
+            mcp_props = mcp_schema.get("properties", {})
+            if param_name in mcp_props:
+                mcp_param = mcp_props[param_name]
+                if "enum" in mcp_param:
+                    param_schema["enum"] = mcp_param["enum"]
 
         parameters.append(param_schema)
 

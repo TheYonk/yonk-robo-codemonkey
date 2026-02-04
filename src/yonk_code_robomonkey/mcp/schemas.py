@@ -836,6 +836,12 @@ RETURNS: Structured answer with: top documentation results with summaries, top c
                     "type": "boolean",
                     "description": "If true, filter out results that don't contain the query text (case-insensitive). Use for exact construct matching. Default false.",
                     "default": False
+                },
+                "summary_format": {
+                    "type": "string",
+                    "enum": ["files", "prose", "both"],
+                    "description": "Summary format: 'files' (structured file list, default), 'prose' (LLM narrative), or 'both' (prose followed by file list)",
+                    "default": "files"
                 }
             },
             "required": ["question", "repo"]

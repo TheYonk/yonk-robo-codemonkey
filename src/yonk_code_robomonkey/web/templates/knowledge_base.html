@@ -743,6 +743,14 @@ function renderAskResult(data) {
                 </div>
             </div>
 
+            <!-- Sources Summary -->
+            ${data.sources_summary ? `
+                <div class="p-3 bg-slate-800/30 border border-slate-600/50 rounded-lg">
+                    <h4 class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Summary</h4>
+                    <p class="text-sm text-slate-300">${escapeHtml(data.sources_summary)}</p>
+                </div>
+            ` : ''}
+
             <!-- Sources Section -->
             ${data.sources && data.sources.length > 0 ? `
                 <div class="p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
