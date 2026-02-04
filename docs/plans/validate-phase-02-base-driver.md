@@ -266,11 +266,11 @@ def test_parse_output_invalid_json():
 async def test_run_timeout():
     """Return timed_out result when Claude takes too long."""
     driver = ClaudeCodeDriver()
-    mock_proc = MagicMock()
-    mock_proc.kill = MagicMock()
+    mock_proc = AsyncMock()  # Use AsyncMock for the entire process
+    mock_proc.kill = MagicMock()  # kill() is sync
     mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
 
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
         result = await driver.run("prompt", "/work", timeout_seconds=1)
     assert result.timed_out is True
     assert result.success is False

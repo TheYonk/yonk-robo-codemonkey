@@ -384,13 +384,18 @@ async def evaluate_run(
         result.hallucinated_imports = hall_report.hallucinated_imports
         result.hallucination_count = hall_report.total
 
-    # Step 5: LLM judge (optional, slowest step)
+    # Step 5: LLM judge (optional, slowest step, Phase 7)
     if run_judge and eval_criteria.llm_judge:
-        from .llm_judge import judge_run
-        test_summary = f"{result.tests_passed} passed, {result.tests_failed} failed, {result.tests_error} errors"
-        judge_result = await judge_run(task.prompt, diff_text, test_summary)
-        result.llm_judge_score = judge_result.score
-        result.llm_judge_reasoning = judge_result.reasoning
+        try:
+            from .llm_judge import judge_run
+            test_summary = f"{result.tests_passed} passed, {result.tests_failed} failed, {result.tests_error} errors"
+            judge_result = await judge_run(task.prompt, diff_text, test_summary)
+            result.llm_judge_score = judge_result.score
+            result.llm_judge_reasoning = judge_result.reasoning
+        except ImportError:
+            logger.warning("LLM judge not available (Phase 7 not yet implemented)")
+            result.llm_judge_score = 5.0
+            result.llm_judge_reasoning = "Judge not available"
 
     # Step 6: Composite scoring (always runs last, uses all signals)
     score = score_run(result, baseline_tokens=baseline_tokens, baseline_turns=baseline_turns)
@@ -492,13 +497,21 @@ async def test_evaluate_pipeline_populates_fields(tmp_path):
         target_repo="sample", target_repo_size=30,
         files_modified=["a.py"], diff_lines_added=5, diff_lines_removed=2,
     )
-    (tmp_path / "a.py").write_text("x = 1\n")
+    # Create repo_dir subdirectory to isolate test files
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "a.py").write_text("x = 1\n")
 
+    # Mock both lint and hallucination checks
     with patch("yonk_code_robomonkey.validate.evaluate.pipeline.run_lint_checks",
                new_callable=AsyncMock) as mock_lint:
-        from yonk_code_robomonkey.validate.evaluate.lint_checker import LintResult
-        mock_lint.return_value = LintResult(lint_errors=2, type_errors=1)
-        enriched = await evaluate_run(result, task, tmp_path, run_judge=False)
+        with patch("yonk_code_robomonkey.validate.evaluate.pipeline.check_hallucinations",
+                   new_callable=AsyncMock) as mock_hall:
+            from yonk_code_robomonkey.validate.evaluate.lint_checker import LintResult
+            from yonk_code_robomonkey.validate.capture.hallucination import HallucinationReport
+            mock_lint.return_value = LintResult(lint_errors=2, type_errors=1)
+            mock_hall.return_value = HallucinationReport()
+            enriched = await evaluate_run(result, task, repo_dir, run_judge=False)
 
     assert enriched.lint_errors == 2
     assert enriched.type_errors == 1

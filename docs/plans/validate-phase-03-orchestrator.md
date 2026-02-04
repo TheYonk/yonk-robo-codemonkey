@@ -243,8 +243,12 @@ def _make_task():
     )
 
 def _make_driver_result(**overrides):
-    defaults = dict(response_text="answer", tokens_input=100, tokens_output=50,
-                    num_turns=3, success=True)
+    defaults = dict(
+        response_text="answer", tokens_input=100, tokens_output=50,
+        total_cost_usd=0.01, num_turns=3, duration_ms=5000,
+        session_id="test-session", tool_calls=[], files_read=[], files_written=[],
+        raw_output={}, transcript_path="", success=True, error="", timed_out=False,
+    )
     defaults.update(overrides)
     return DriverResult(**defaults)
 

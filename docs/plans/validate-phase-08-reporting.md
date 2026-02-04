@@ -242,13 +242,26 @@ from yonk_code_robomonkey.validate.report.report_gen import (
 from yonk_code_robomonkey.validate.capture.run_result import RunResult
 
 def _run(condition, tokens=1000, turns=5, hallucs=0, score=0.8, **kw):
-    return RunResult(
-        run_id="r1", task_id="simple-test", condition=condition, run_number=1,
-        target_repo="sample", target_repo_size=30,
-        tokens_total=tokens, conversation_turns=turns,
-        wall_clock_seconds=30.0, hallucination_count=hallucs,
-        composite_score=score, valid=True, **kw,
-    )
+    """Create a complete RunResult with sensible defaults."""
+    defaults = {
+        "run_id": "r1", "task_id": "simple-test", "condition": condition,
+        "run_number": 1, "target_repo": "sample", "target_repo_size": 30,
+        "tokens_input": tokens // 2, "tokens_output": tokens // 2,
+        "tokens_total": tokens, "estimated_cost_usd": tokens * 0.00002,
+        "conversation_turns": turns, "wall_clock_seconds": 30.0,
+        "files_read": [], "files_read_count": 0, "files_modified": [],
+        "files_created": [], "tool_calls": [], "tool_call_count": 0,
+        "redundant_reads": 0, "search_queries": 0, "diff_lines_added": 0,
+        "diff_lines_removed": 0, "tests_passed": 0, "tests_failed": 0,
+        "tests_error": 0, "lint_errors": 0, "type_errors": 0,
+        "correct_files_modified": True, "no_forbidden_files": True,
+        "hallucinated_files": [], "hallucinated_symbols": [],
+        "hallucinated_imports": [], "hallucination_count": hallucs,
+        "llm_judge_score": 5.0, "llm_judge_reasoning": "",
+        "composite_score": score, "valid": True, "invalidation_reason": "",
+    }
+    defaults.update(kw)
+    return RunResult(**defaults)
 
 def test_safe_pct_normal():
     assert _safe_pct(600, 1000) == 40.0

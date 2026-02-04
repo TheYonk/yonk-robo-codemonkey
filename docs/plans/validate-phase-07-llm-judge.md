@@ -178,7 +178,8 @@ def test_parse_completely_invalid():
 @pytest.mark.asyncio
 async def test_judge_run_success():
     """Full judge run with mocked LLM."""
-    with patch("yonk_code_robomonkey.validate.evaluate.llm_judge.call_llm",
+    # Patch at the source module where call_llm is defined
+    with patch("yonk_code_robomonkey.llm.client.call_llm",
                new_callable=AsyncMock,
                return_value='{"score": 9, "reasoning": "Excellent work"}'):
         result = await judge_run("Add a feature", "+def new():\n+    pass", "3 passed")

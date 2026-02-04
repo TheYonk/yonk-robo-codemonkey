@@ -292,6 +292,7 @@ Add to dispatch section:
 
 ```python
 elif args.cmd == "validate":
+    # Lazy import to avoid ImportError if validate module doesn't exist yet
     from yonk_code_robomonkey.validate import cli as vcli
     if args.validate_cmd == "setup":
         asyncio.run(vcli.validate_setup(args.repos))
@@ -312,10 +313,22 @@ elif args.cmd == "validate":
 ```python
 # tests/test_validate_cli.py
 import pytest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 from yonk_code_robomonkey.validate.cli import (
     validate_list, validate_status, validate_clean
 )
+
+@pytest.fixture
+def isolated_home(tmp_path, monkeypatch):
+    """Redirect home directory to tmp_path for CLI test isolation."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    validate_dir = tmp_path / ".robomonkey" / "validate"
+    validate_dir.mkdir(parents=True)
+    return tmp_path
+
+# Apply isolated_home to all CLI tests
+pytestmark = pytest.mark.usefixtures("isolated_home")
 
 @pytest.mark.asyncio
 async def test_validate_list_shows_tasks(capsys):
@@ -340,14 +353,13 @@ async def test_validate_status(capsys):
     assert "VALIDATION STATUS" in captured.out
 
 @pytest.mark.asyncio
-async def test_validate_clean_all(tmp_path):
+async def test_validate_clean_all(isolated_home):
     """validate clean --all removes everything."""
-    with patch("yonk_code_robomonkey.validate.cli.Path") as MockPath:
-        mock_base = MagicMock()
-        mock_base.exists.return_value = True
-        MockPath.home.return_value.__truediv__ = MagicMock(return_value=mock_base)
-        # Just verify it doesn't crash
-        # Full integration test would need real dirs
+    validate_base = isolated_home / ".robomonkey" / "validate"
+    assert validate_base.exists()  # Created by fixture
+    await validate_clean(all=True)
+    # Verify the directory tree was removed
+    assert not validate_base.exists()
 ```
 
 ## Done When

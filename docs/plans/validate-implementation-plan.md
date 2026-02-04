@@ -261,6 +261,53 @@ Modified:
 
 ---
 
+## Test Execution Strategy
+
+All tests follow pytest conventions and can run in parallel:
+
+```bash
+# Run all validation tests
+pytest tests/test_validate*.py -v
+
+# Run specific phase tests
+pytest tests/test_validate_tasks.py -v
+
+# Run with parallel execution (requires pytest-xdist)
+pytest tests/test_validate*.py -n auto -v
+
+# Run async tests (requires pytest-asyncio)
+pytest tests/test_validate*.py -v --asyncio-mode=auto
+```
+
+### Test Isolation Guarantees
+
+1. **Temp directories:** All tests use `tmp_path` fixture for file operations
+2. **Home directory isolation:** CLI tests use `isolated_home` fixture to redirect `~/.robomonkey` to tmp
+3. **Async safety:** All async functions use `AsyncMock`, all tests marked with `@pytest.mark.asyncio`
+4. **Mock cleanup:** All patches use `with` statements or decorators for automatic teardown
+5. **No external dependencies:** Tests mock Claude Code CLI, LLM calls, and network operations
+
+### Running Tests During Development
+
+After implementing each phase:
+
+```bash
+# Phase 1
+pytest tests/test_validate_tasks.py -v
+
+# Phase 2
+pytest tests/test_validate_driver.py -v
+
+# Phase 3 (requires Phase 1, 2)
+pytest tests/test_validate_orchestrator.py -v
+
+# ... and so on
+```
+
+Tests are designed to run **independently per phase** — Phase N tests don't require Phase M implementation (M > N), except where explicitly documented (e.g., Phase 6 pipeline gracefully handles missing Phase 7 LLM judge).
+
+---
+
 ## Anti-Stall Design
 
 Why this plan won't stall like previous attempts:

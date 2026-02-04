@@ -265,25 +265,36 @@ def _make_single_result(**overrides):
 
 def test_collect_metrics_basic(tmp_path):
     """Collector builds RunResult with correct token counts."""
-    (tmp_path / "file1.py").touch()
-    (tmp_path / "file2.py").touch()
-    single = _make_single_result()
-    result = collect_metrics(single, "sample", tmp_path)
-    assert result.tokens_input == 1000
-    assert result.tokens_output == 500
-    assert result.tokens_total == 1500
-    assert result.estimated_cost_usd == 0.05
-    assert result.conversation_turns == 5
-    assert result.wall_clock_seconds == 10.0
+    # Create isolated repo directory
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "file1.py").touch()
+    (repo_dir / "file2.py").touch()
+
+    # Mock transcript parsing to avoid filesystem dependencies
+    with patch("yonk_code_robomonkey.validate.capture.collector.parse_transcript_file", return_value=[]):
+        single = _make_single_result()
+        result = collect_metrics(single, "sample", repo_dir)
+        assert result.tokens_input == 1000
+        assert result.tokens_output == 500
+        assert result.tokens_total == 1500
+        assert result.estimated_cost_usd == 0.05
+        assert result.conversation_turns == 5
+        assert result.wall_clock_seconds == 10.0
+        assert result.target_repo_size == 2  # Counts only repo files
 
 def test_collect_metrics_diff_stats(tmp_path):
     """Collector captures diff stats."""
-    (tmp_path / "f.py").touch()
-    single = _make_single_result()
-    result = collect_metrics(single, "sample", tmp_path)
-    assert result.diff_lines_added == 10
-    assert result.diff_lines_removed == 3
-    assert result.files_modified == ["a.py", "b.py"]
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "f.py").touch()
+
+    with patch("yonk_code_robomonkey.validate.capture.collector.parse_transcript_file", return_value=[]):
+        single = _make_single_result()
+        result = collect_metrics(single, "sample", repo_dir)
+        assert result.diff_lines_added == 10
+        assert result.diff_lines_removed == 3
+        assert result.files_modified == ["a.py", "b.py"]
 
 def test_parse_transcript_file(tmp_path):
     """Parse JSONL transcript with tool calls."""
