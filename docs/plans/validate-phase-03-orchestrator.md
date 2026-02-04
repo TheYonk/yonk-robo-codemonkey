@@ -124,6 +124,7 @@ class SingleRunResult:
     run_number: int              # 1-indexed
     driver_result: DriverResult
     diff_stats: dict[str, Any]
+    diff_text: str = ""          # Full git diff (for hallucination detection + judge)
     valid: bool = True           # False if cleanup failed
     invalidation_reason: str = ""
 
@@ -191,8 +192,9 @@ class Orchestrator:
             timeout_seconds=self.config.timeout_seconds,
         )
 
-        # Capture diff before cleanup
+        # Capture diff before cleanup (both stats and full text)
         diff_stats = await git.get_diff_stats()
+        _, diff_text, _ = await git._run_git("diff")
 
         # Post-clean
         valid = True
@@ -211,6 +213,7 @@ class Orchestrator:
             run_number=run_number,
             driver_result=driver_result,
             diff_stats=diff_stats,
+            diff_text=diff_text,
             valid=valid,
             invalidation_reason=invalidation_reason,
         )
@@ -258,6 +261,7 @@ async def test_orchestrator_runs_both_conditions():
         git_instance.reset_to_commit = AsyncMock()
         git_instance.verify_clean = AsyncMock()
         git_instance.get_diff_stats = AsyncMock(return_value={"lines_added": 0, "lines_removed": 0, "files_changed": []})
+        git_instance._run_git = AsyncMock(return_value=(0, "", ""))
 
         results = await orch.run_task(_make_task(), Path("/fake"))
 

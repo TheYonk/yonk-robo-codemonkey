@@ -43,6 +43,7 @@ from .tasks.task_model import TaskDifficulty
 from .runner.orchestrator import Orchestrator, RunConfig
 from .runner.claude_code import ClaudeCodeDriver
 from .capture.collector import collect_metrics
+from .evaluate.pipeline import evaluate_run
 from .report.comparator import compare_task, compare_suite
 from .report.report_gen import generate_cli_report, generate_markdown_report, generate_json_export
 
@@ -142,7 +143,18 @@ async def validate_run(
 
         single_results = await orch.run_task(task, repo_dir, on_progress=progress)
         for sr in single_results:
-            all_results.append(collect_metrics(sr, task.target_repo, repo_dir))
+            run_result = collect_metrics(sr, task.target_repo, repo_dir)
+
+            # Run evaluation pipeline (tests, lint, hallucination, judge, scorer)
+            # diff_text is captured by orchestrator before git reset
+            run_result = await evaluate_run(
+                result=run_result,
+                task=task,
+                repo_dir=repo_dir,
+                diff_text=sr.diff_text,
+                conversation_text=sr.driver_result.response_text,
+            )
+            all_results.append(run_result)
 
     # Save results
     results_file = RESULTS_DIR / "latest.json"
@@ -161,13 +173,25 @@ async def validate_report(format: str = "cli", output_dir: str | None = None) ->
     data = json.loads(results_file.read_text())
     # Reconstruct RunResults and group by task
     from .capture.run_result import RunResult
+    from datetime import datetime
+
     runs_by_task: dict[str, dict[str, list]] = {}
     for d in data:
         tid = d["task_id"]
         cond = d["condition"]
         runs_by_task.setdefault(tid, {"with_robomonkey": [], "without_robomonkey": []})
-        # Simplified reconstruction
-        runs_by_task[tid][cond].append(RunResult(**{k: v for k, v in d.items() if k in RunResult.__dataclass_fields__}))
+        # Reconstruct with type coercion for non-primitive fields
+        fields = {}
+        for k, v in d.items():
+            if k not in RunResult.__dataclass_fields__:
+                continue
+            if k == "timestamp" and isinstance(v, str):
+                try:
+                    v = datetime.fromisoformat(v)
+                except ValueError:
+                    v = datetime.utcnow()
+            fields[k] = v
+        runs_by_task[tid][cond].append(RunResult(**fields))
 
     comparisons = [
         compare_task(tid, groups.get("with_robomonkey", []), groups.get("without_robomonkey", []))

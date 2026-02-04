@@ -146,36 +146,58 @@ Write actual task definitions for each target repo (sample, Flask, FastAPI, Djan
 | **3** | Orchestrator | A/B run engine with git isolation | `orchestrator.py` | Phase 1, 2 |
 | **4** | Metric Collection | RunResult, token/IO extraction, session parsing | `collector.py`, `token_counter.py`, `session_parser.py` | Phase 2 |
 | **5** | Hallucination Detection | File/symbol/import verification | `hallucination.py` | Phase 4 |
-| **6** | Evaluation Pipeline | Test runner, lint, type check, scorer | `scorer.py`, `test_runner.py`, `lint_checker.py`, `diff_analyzer.py` | Phase 4 |
+| **6** | Evaluation Pipeline | Test runner, lint, type check, scorer, **pipeline orchestrator** | `scorer.py`, `test_runner.py`, `lint_checker.py`, `diff_analyzer.py`, **`pipeline.py`** | Phase 4, **Phase 5** |
 | **7** | LLM Judge | Qualitative scoring via LLM | `llm_judge.py` | Phase 6 |
 | **8** | Reporting | Comparator, report generator, templates | `comparator.py`, `report_gen.py`, templates | Phase 6, 7 |
-| **9** | CLI | Wire all commands | `cli.py`, modify `cli/commands.py` | Phase 3, 8 |
+| **9** | CLI | Wire all commands (calls evaluate pipeline) | `cli.py`, modify `cli/commands.py` | Phase 3, **Phase 6**, Phase 8 |
 | **10** | Task YAMLs | Full task suite for all repos | YAML files in `suites/` | Phase 1 |
 
 ### Dependency Graph
 
 ```
 Phase 1 (tasks) ──────┐
-                       ├── Phase 3 (orchestrator) ── Phase 9 (CLI)
-Phase 2 (driver) ─────┤                                  │
-                       ├── Phase 4 (metrics) ─────────────┤
-                       │       │                          │
-                       │       ├── Phase 5 (hallucination)│
-                       │       │                          │
-                       │       └── Phase 6 (eval) ────────┤
-                       │               │                  │
-                       │               └── Phase 7 (judge)│
-                       │                       │          │
+                       ├── Phase 3 (orchestrator) ─────────── Phase 9 (CLI)
+Phase 2 (driver) ─────┤                                        ↑
+                       ├── Phase 4 (metrics)                    │
+                       │       │                                │
+                       │       └── Phase 5 (hallucination)      │
+                       │               │                        │
+                       │               └── Phase 6 (eval+pipeline)
+                       │                       │                │
+                       │                       ├── Phase 7 (judge)
+                       │                       │        │
                        │                       └── Phase 8 (report)
                        │
 Phase 10 (YAMLs) ─────┘ (can start anytime after Phase 1)
+```
+
+### Data Flow (the pipeline)
+
+```
+CLI validate_run
+  → Orchestrator.run_task()     → SingleRunResult (per run)
+  → collect_metrics()           → RunResult (tokens, IO, diff stats)
+  → evaluate_run()              → RunResult enriched with:
+      ├─ run_tests()               tests_passed/failed/error
+      ├─ run_lint_checks()         lint_errors, type_errors
+      ├─ analyze_diff()            correct_files_modified, no_forbidden_files
+      ├─ check_hallucinations()    hallucinated_files/symbols/imports
+      ├─ judge_run()               llm_judge_score, llm_judge_reasoning
+      └─ score_run()               composite_score
+  → save to JSON
+
+CLI validate_report
+  → load saved RunResults
+  → compare_task() / compare_suite()
+  → generate reports (CLI / Markdown / JSON)
 ```
 
 ### Parallelizable Work
 
 - Phase 1 and Phase 2 are fully independent — do them in parallel
 - Phase 10 can start as soon as Phase 1 is done
-- Phase 5 and Phase 6 are independent of each other (both need Phase 4)
+- Phase 5 must complete before Phase 6 (pipeline imports hallucination detection)
+- Within Phase 6's pipeline, tests + lint run in parallel via asyncio.gather
 
 ---
 

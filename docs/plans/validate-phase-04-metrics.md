@@ -100,7 +100,7 @@ from pathlib import Path
 from ..runner.base_driver import DriverResult
 from ..runner.orchestrator import SingleRunResult
 from .run_result import RunResult
-from .session_parser import parse_tool_calls
+from .session_parser import parse_tool_calls, parse_transcript_file
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +113,12 @@ def collect_metrics(
     dr = single.driver_result
     repo_size = sum(1 for _ in repo_dir.rglob("*") if _.is_file())
 
-    # Parse tool calls from raw output if available
-    tool_calls = parse_tool_calls(dr.raw_output) if dr.raw_output else []
+    # Parse tool calls: prefer transcript file, fall back to raw output
+    tool_calls = []
+    if dr.transcript_path:
+        tool_calls = parse_transcript_file(dr.transcript_path)
+    if not tool_calls and dr.raw_output:
+        tool_calls = parse_tool_calls(dr.raw_output)
 
     # Count file reads and detect redundancy
     read_files = [tc["path"] for tc in tool_calls if tc["type"] == "Read"]

@@ -217,12 +217,9 @@ def test_detect_fake_symbol(tmp_path):
     assert "FakeModel" in result
 
 def test_clean_code_zero_hallucinations(tmp_path):
-    """Zero hallucinations for correct code."""
+    """Zero hallucinations for correct code referencing real files."""
     (tmp_path / "app.py").write_text("class App:\n    pass\n")
-    diff = "+import os\n+a = App()"
     text = "The App class in app.py handles this."
-    report = pytest.get_event_loop = None  # placeholder
-    # Use sync wrapper for testing
     result = detect_file_hallucinations(text, tmp_path)
     assert result == []
 

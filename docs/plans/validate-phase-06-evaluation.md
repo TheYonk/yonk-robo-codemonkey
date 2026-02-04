@@ -1,8 +1,8 @@
 # Phase 6: Evaluation Pipeline
 
 > **Pre-read:** `docs/plans/validate-codebase-reference.md`, `docs/plans/validate-features-overview.md`
-> **Depends on:** Phase 4 (RunResult)
-> **Produces:** Test runner, lint checker, diff analyzer, composite scorer
+> **Depends on:** Phase 4 (RunResult), Phase 5 (hallucination), Phase 7 (LLM judge) for full pipeline
+> **Produces:** Test runner, lint checker, diff analyzer, composite scorer, **evaluation pipeline orchestrator**
 
 ---
 
@@ -15,6 +15,7 @@
 | `src/yonk_code_robomonkey/validate/evaluate/lint_checker.py` | Run ruff + mypy |
 | `src/yonk_code_robomonkey/validate/evaluate/diff_analyzer.py` | Analyze code changes |
 | `src/yonk_code_robomonkey/validate/evaluate/scorer.py` | Weighted composite scoring |
+| `src/yonk_code_robomonkey/validate/evaluate/pipeline.py` | **Orchestrates all evaluation steps on a RunResult** |
 | `tests/test_validate_evaluation.py` | Tests for this phase |
 
 ---
@@ -279,6 +280,125 @@ def score_run(
     return ScoreBreakdown(signals=signals, composite=composite)
 ```
 
+## Evaluation Pipeline (the glue)
+
+This is the critical missing piece: a single function that takes a `RunResult` and
+a `TaskDefinition`, runs all evaluation steps, and writes results back to the `RunResult`.
+
+```python
+# pipeline.py
+from __future__ import annotations
+import asyncio
+import logging
+from pathlib import Path
+
+from ..tasks.task_model import TaskDefinition
+from ..capture.run_result import RunResult
+from ..capture.hallucination import check_hallucinations
+from .test_runner import run_tests
+from .lint_checker import run_lint_checks
+from .diff_analyzer import analyze_diff
+from .scorer import score_run
+
+logger = logging.getLogger(__name__)
+
+async def evaluate_run(
+    result: RunResult,
+    task: TaskDefinition,
+    repo_dir: Path,
+    diff_text: str = "",
+    conversation_text: str = "",
+    baseline_tokens: int | None = None,
+    baseline_turns: int | None = None,
+    run_judge: bool = True,
+) -> RunResult:
+    """Run all evaluation steps and update RunResult in place.
+
+    This is the pipeline that wires together:
+    1. Test runner (pytest on task-specific tests)
+    2. Lint + type checker (ruff + mypy on changed files)
+    3. Diff analyzer (must_modify, must_not_modify, max_files_changed)
+    4. Hallucination detection (files, imports, symbols)
+    5. LLM judge (optional, qualitative scoring)
+    6. Composite scorer (weighted aggregate of all signals)
+
+    Args:
+        result: RunResult to enrich (mutated in place)
+        task: Task definition with eval criteria
+        repo_dir: Target repository directory
+        diff_text: Git diff text (for hallucination + judge)
+        conversation_text: AI response text (for hallucination detection)
+        baseline_tokens: Paired condition's token count (for efficiency scoring)
+        baseline_turns: Paired condition's turn count (for efficiency scoring)
+        run_judge: Whether to run LLM judge (skip for speed during dev)
+
+    Returns:
+        The same RunResult, now with evaluation fields populated
+    """
+    eval_criteria = task.eval
+
+    # Steps 1-3 can run in parallel
+    test_coro = run_tests(eval_criteria.tests, repo_dir) if eval_criteria.tests else None
+    lint_coro = run_lint_checks(result.files_modified, repo_dir) if (eval_criteria.lint or eval_criteria.type_check) else None
+
+    # Run parallel tasks
+    tasks = []
+    if test_coro:
+        tasks.append(("tests", test_coro))
+    if lint_coro:
+        tasks.append(("lint", lint_coro))
+
+    if tasks:
+        coros = [t[1] for t in tasks]
+        results_list = await asyncio.gather(*coros, return_exceptions=True)
+        for (name, _), res in zip(tasks, results_list):
+            if isinstance(res, Exception):
+                logger.warning("Evaluation step %s failed: %s", name, res)
+                continue
+            if name == "tests":
+                result.tests_passed = res.passed
+                result.tests_failed = res.failed
+                result.tests_error = res.errors
+            elif name == "lint":
+                result.lint_errors = res.lint_errors
+                result.type_errors = res.type_errors
+
+    # Step 3: Diff analysis (sync, fast)
+    diff_analysis = analyze_diff(
+        files_changed=result.files_modified,
+        lines_added=result.diff_lines_added,
+        lines_removed=result.diff_lines_removed,
+        must_modify=eval_criteria.must_modify,
+        must_not_modify=eval_criteria.must_not_modify,
+        max_files_changed=eval_criteria.max_files_changed,
+        difficulty=task.difficulty.value,
+    )
+    result.correct_files_modified = diff_analysis.correct_files_modified
+    result.no_forbidden_files = diff_analysis.no_forbidden_files
+
+    # Step 4: Hallucination detection
+    if eval_criteria.hallucination_check:
+        hall_report = await check_hallucinations(diff_text, conversation_text, repo_dir)
+        result.hallucinated_files = hall_report.hallucinated_files
+        result.hallucinated_symbols = hall_report.hallucinated_symbols
+        result.hallucinated_imports = hall_report.hallucinated_imports
+        result.hallucination_count = hall_report.total
+
+    # Step 5: LLM judge (optional, slowest step)
+    if run_judge and eval_criteria.llm_judge:
+        from .llm_judge import judge_run
+        test_summary = f"{result.tests_passed} passed, {result.tests_failed} failed, {result.tests_error} errors"
+        judge_result = await judge_run(task.prompt, diff_text, test_summary)
+        result.llm_judge_score = judge_result.score
+        result.llm_judge_reasoning = judge_result.reasoning
+
+    # Step 6: Composite scoring (always runs last, uses all signals)
+    score = score_run(result, baseline_tokens=baseline_tokens, baseline_turns=baseline_turns)
+    result.composite_score = score.composite
+
+    return result
+```
+
 ## Tests
 
 ```python
@@ -352,6 +472,37 @@ def test_scorer_with_hallucinations():
     )
     score = score_run(result)
     assert score.signals["no_hallucinations"] < 0.5
+
+@pytest.mark.asyncio
+async def test_evaluate_pipeline_populates_fields(tmp_path):
+    """evaluate_run enriches RunResult with eval/hallucination/score fields."""
+    from unittest.mock import AsyncMock, patch
+    from yonk_code_robomonkey.validate.evaluate.pipeline import evaluate_run
+    from yonk_code_robomonkey.validate.tasks.task_model import (
+        TaskDefinition, TaskDifficulty, TaskCategory, TaskSetup, TaskEval
+    )
+    task = TaskDefinition(
+        id="t1", name="Test", difficulty=TaskDifficulty.SIMPLE,
+        category=TaskCategory.FIND, target_repo="sample", prompt="Do it",
+        setup=TaskSetup(commit="HEAD"),
+        eval=TaskEval(lint=True, hallucination_check=True, llm_judge=False),
+    )
+    result = RunResult(
+        run_id="r1", task_id="t1", condition="with", run_number=1,
+        target_repo="sample", target_repo_size=30,
+        files_modified=["a.py"], diff_lines_added=5, diff_lines_removed=2,
+    )
+    (tmp_path / "a.py").write_text("x = 1\n")
+
+    with patch("yonk_code_robomonkey.validate.evaluate.pipeline.run_lint_checks",
+               new_callable=AsyncMock) as mock_lint:
+        from yonk_code_robomonkey.validate.evaluate.lint_checker import LintResult
+        mock_lint.return_value = LintResult(lint_errors=2, type_errors=1)
+        enriched = await evaluate_run(result, task, tmp_path, run_judge=False)
+
+    assert enriched.lint_errors == 2
+    assert enriched.type_errors == 1
+    assert enriched.composite_score > 0  # Scorer ran
 ```
 
 ## Done When
@@ -361,5 +512,7 @@ def test_scorer_with_hallucinations():
 - [ ] `analyze_diff()` checks must_modify, must_not_modify, max_files_changed
 - [ ] `score_run()` computes weighted composite matching SCORE_WEIGHTS
 - [ ] Decay function handles zero and high error counts correctly
+- [ ] `evaluate_run()` pipeline orchestrates all steps and populates RunResult fields
+- [ ] Pipeline runs tests+lint in parallel, then hallucination, then judge, then scorer
 - [ ] All tests pass: `pytest tests/test_validate_evaluation.py -v`
 - [ ] Commit: `feat(validate): add evaluation pipeline with test runner, lint, and scorer`

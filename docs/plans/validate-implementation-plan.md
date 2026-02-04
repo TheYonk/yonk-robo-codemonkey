@@ -84,11 +84,12 @@ Each session implementing a task MUST read these first:
 
 ---
 
-### Batch 3: Analysis (after Batch 2 — these two are parallel)
+### Batch 3: Analysis (after Batch 2)
 
 #### Task 5: Hallucination Detection (Phase 5)
 **Phase doc:** `docs/plans/validate-phase-05-hallucination.md`
 **Requires:** Task 4
+**Note:** Must complete before Task 6 (pipeline imports hallucination detection)
 
 **Steps:**
 1. Write test: `tests/test_validate_hallucination.py` — test file, import, symbol detection
@@ -99,22 +100,31 @@ Each session implementing a task MUST read these first:
 
 #### Task 6: Evaluation Pipeline (Phase 6)
 **Phase doc:** `docs/plans/validate-phase-06-evaluation.md`
-**Requires:** Task 4
+**Requires:** Task 4, Task 5 (hallucination)
 
 **Steps:**
 1. Create `src/yonk_code_robomonkey/validate/evaluate/__init__.py`
-2. Write test: `tests/test_validate_evaluation.py` — test decay, diff analysis, scoring
+2. Write test: `tests/test_validate_evaluation.py` — test decay, diff analysis, scoring, pipeline
 3. Run test, verify it fails
 4. Write `src/yonk_code_robomonkey/validate/evaluate/test_runner.py` — run_tests
 5. Write `src/yonk_code_robomonkey/validate/evaluate/lint_checker.py` — check_lint, check_types, run_lint_checks
 6. Write `src/yonk_code_robomonkey/validate/evaluate/diff_analyzer.py` — analyze_diff
 7. Write `src/yonk_code_robomonkey/validate/evaluate/scorer.py` — score_run, SCORE_WEIGHTS
-8. Run test, verify pass
-9. Commit: `feat(validate): add evaluation pipeline with test runner, lint, and scorer`
+8. Write `src/yonk_code_robomonkey/validate/evaluate/pipeline.py` — **evaluate_run()** orchestrates all steps
+9. Run test, verify pass
+10. Commit: `feat(validate): add evaluation pipeline with test runner, lint, and scorer`
+
+**Note:** `pipeline.py` is the glue that wires together test_runner → lint_checker → diff_analyzer → hallucination (Phase 5) → llm_judge (Phase 7, lazy import) → scorer. It imports from Phase 5 directly, and does a lazy import of Phase 7's `judge_run` so it still works before Phase 7 is built (just skips judging).
 
 ---
 
-### Batch 4: Judge + Reporting (after Batch 3)
+### Batch 3b: Evaluation Pipeline (after Task 5)
+
+Task 6 depends on Task 5 (hallucination) because `pipeline.py` imports `check_hallucinations`. Task 5 and Task 6's non-pipeline files (test_runner, lint_checker, diff_analyzer, scorer) CAN be written in parallel with Task 5, but pipeline.py needs Task 5 done.
+
+---
+
+### Batch 4: Judge + Reporting (after Batch 3b)
 
 #### Task 7: LLM Judge (Phase 7)
 **Phase doc:** `docs/plans/validate-phase-07-llm-judge.md`
@@ -146,12 +156,12 @@ Each session implementing a task MUST read these first:
 
 #### Task 9: CLI Interface (Phase 9)
 **Phase doc:** `docs/plans/validate-phase-09-cli.md`
-**Requires:** Task 3, Task 8
+**Requires:** Task 3, Task 6 (pipeline), Task 8
 
 **Steps:**
 1. Write test: `tests/test_validate_cli.py` — test list, status, clean
 2. Run test, verify it fails
-3. Write `src/yonk_code_robomonkey/validate/cli.py` — all validate_* functions
+3. Write `src/yonk_code_robomonkey/validate/cli.py` — all validate_* functions (validate_run calls evaluate_run pipeline after collect_metrics)
 4. Modify `src/yonk_code_robomonkey/cli/commands.py` — add validate subparser and dispatch
 5. Run test, verify pass
 6. Manual smoke test: `robomonkey validate status`, `robomonkey validate list`
@@ -180,15 +190,17 @@ Each session implementing a task MUST read these first:
 ## Execution Timeline
 
 ```
-Session 1:  Task 1 + Task 2 (parallel)         ~20 min
-Session 2:  Task 3 + Task 4 (parallel)         ~20 min
-Session 3:  Task 5 + Task 6 (parallel)         ~20 min
-Session 4:  Task 7 + Task 8 (parallel)         ~20 min
-Session 5:  Task 9                              ~15 min
-Session 6:  Task 10                             ~30 min (content authoring)
+Session 1:  Task 1 + Task 2 (parallel)         — foundations, no deps
+Session 2:  Task 3 + Task 4 (parallel)         — orchestrator + metrics
+Session 3:  Task 5, then Task 6                — hallucination, then eval pipeline
+Session 4:  Task 7 + Task 8 (parallel)         — judge + reporting
+Session 5:  Task 9                              — CLI wiring
+Session 6:  Task 10                             — YAML content authoring
 ```
 
 Each session reads only: codebase reference + features overview + relevant phase doc(s). This keeps context under control.
+
+**Important:** In Session 3, Task 5 (hallucination) must finish before Task 6's `pipeline.py` is written, because pipeline imports `check_hallucinations`. The other Phase 6 files (test_runner, lint_checker, diff_analyzer, scorer) can be written in parallel with Task 5.
 
 ---
 
@@ -224,6 +236,7 @@ src/yonk_code_robomonkey/validate/
 │   ├── lint_checker.py
 │   ├── diff_analyzer.py
 │   ├── scorer.py
+│   ├── pipeline.py
 │   └── llm_judge.py
 └── report/
     ├── __init__.py

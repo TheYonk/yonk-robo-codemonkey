@@ -44,6 +44,9 @@ class DriverResult:
     files_written: list[str] = field(default_factory=list)
     raw_output: dict[str, Any] = field(default_factory=dict)
 
+    # Transcript location (for detailed tool-call parsing)
+    transcript_path: str = ""   # ~/.claude/projects/<name>/<session_id>.jsonl
+
     # Status
     success: bool = True
     error: str = ""
@@ -179,6 +182,19 @@ class ClaudeCodeDriver(BaseDriver):
             )
 
         usage = data.get("usage", {})
+
+        # Derive transcript path from session_id
+        # Claude stores transcripts at ~/.claude/projects/<project>/<session_id>.jsonl
+        session_id = data.get("session_id", "")
+        transcript_path = ""
+        if session_id:
+            from pathlib import Path
+            claude_dir = Path.home() / ".claude"
+            # Search for the transcript file by session ID
+            candidates = list(claude_dir.rglob(f"{session_id}.jsonl"))
+            if candidates:
+                transcript_path = str(candidates[0])
+
         return DriverResult(
             response_text=data.get("result", ""),
             tokens_input=usage.get("input_tokens", 0),
@@ -188,6 +204,7 @@ class ClaudeCodeDriver(BaseDriver):
             duration_ms=data.get("duration_ms", 0),
             session_id=data.get("session_id", ""),
             raw_output=data,
+            transcript_path=transcript_path,
             success=not data.get("is_error", False),
             error=data.get("error", ""),
         )
