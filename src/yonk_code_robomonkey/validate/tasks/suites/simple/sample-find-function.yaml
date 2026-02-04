@@ -1,0 +1,27 @@
+# suites/simple/sample-find-function.yaml
+id: simple-sample-find-function
+name: "Find a function by name in the sample project"
+difficulty: simple
+category: find
+target_repo: sample
+
+prompt: |
+  Find the function called `calculate_total` in this project.
+  Show me its full implementation and explain what it does.
+
+setup:
+  commit: "HEAD"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+
+tags: [find, simple, read-only]
+expected_turns_range: [1, 5]
