@@ -62,6 +62,8 @@ class DocSearchRequest(BaseModel):
     context_chunks: int = Field(default=0, ge=0, le=3, description="Number of chunks before/after each result to include (0-3). 0 returns just the matched chunk.")
     summarize: bool = Field(default=False, description="If true, use LLM to summarize each result with context to answer the query")
     use_llm_keywords: bool = Field(default=False, description="If true, use LLM to extract better search keywords (improves FTS accuracy for complex questions)")
+    repo: Optional[str] = Field(default=None, description="Filter to repo name. None = all docs.")
+    include_global: bool = Field(default=True, description="Include global docs when repo is set")
 
 
 class DocContextRequest(BaseModel):
@@ -79,6 +81,7 @@ class DocUploadRequest(BaseModel):
     doc_type: str = Field(default="general")
     version: Optional[str] = None
     description: Optional[str] = None
+    repo: Optional[str] = Field(default=None, description="Associate document with a repo name")
 
 
 # ============ Helper Functions ============
@@ -107,7 +110,7 @@ async def get_embedding_func():
                 texts=[text],
                 model=settings.embeddings_model,
                 base_url=settings.embeddings_base_url,
-                api_key=getattr(settings, 'vllm_api_key', None) or '',
+                api_key=getattr(settings, 'embeddings_api_key', '') or '',
             )
         return embeddings[0] if embeddings else []
 
@@ -129,8 +132,12 @@ async def get_kb_queue() -> KBJobQueue:
 # ============ API Endpoints ============
 
 @router.get("/")
-async def list_documents() -> dict[str, Any]:
-    """List all indexed documents with stats."""
+async def list_documents(repo: Optional[str] = None) -> dict[str, Any]:
+    """List all indexed documents with stats.
+
+    Args:
+        repo: Optional repo name to filter by. "global" or "all" returns all docs.
+    """
     import time
     start_time = time.time()
     settings = Settings()
@@ -159,15 +166,45 @@ async def list_documents() -> dict[str, Any]:
                 "message": "Document schema not initialized. Run 'robomonkey db init-docs' first."
             }
 
-        # Simple query first - get basic columns that should always exist
-        rows = await conn.fetch("""
-            SELECT
-                id, name, doc_type, total_chunks, total_pages,
-                status, version, indexed_at, file_size_bytes,
-                description, file_path, error_message
-            FROM robomonkey_docs.doc_source
-            ORDER BY indexed_at DESC NULLS LAST
+        # Check if repo_name column exists
+        has_repo_name_col = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'robomonkey_docs'
+                AND table_name = 'doc_source'
+                AND column_name = 'repo_name'
+            )
         """)
+
+        # Build repo filter
+        repo_filter = ""
+        bind_params = []
+
+        if has_repo_name_col and repo and repo.lower() not in ("global", "all"):
+            repo_filter = "WHERE ds.repo_name = $1"
+            bind_params.append(repo)
+
+        # Simple query first - get basic columns that should always exist
+        if has_repo_name_col:
+            rows = await conn.fetch(f"""
+                SELECT
+                    ds.id, ds.name, ds.doc_type, ds.total_chunks, ds.total_pages,
+                    ds.status, ds.version, ds.indexed_at, ds.file_size_bytes,
+                    ds.description, ds.file_path, ds.error_message,
+                    COALESCE(ds.repo_name, 'global') as repo_name
+                FROM robomonkey_docs.doc_source ds
+                {repo_filter}
+                ORDER BY ds.indexed_at DESC NULLS LAST
+            """, *bind_params)
+        else:
+            rows = await conn.fetch("""
+                SELECT
+                    id, name, doc_type, total_chunks, total_pages,
+                    status, version, indexed_at, file_size_bytes,
+                    description, file_path, error_message
+                FROM robomonkey_docs.doc_source
+                ORDER BY indexed_at DESC NULLS LAST
+            """)
 
         # Check if new columns exist
         has_new_cols = await conn.fetchval("""
@@ -209,6 +246,7 @@ async def list_documents() -> dict[str, Any]:
                 "error_message": row["error_message"],
                 "chunks_expected": new_col_data.get(doc_id, {}).get("chunks_expected"),
                 "stop_requested": new_col_data.get(doc_id, {}).get("stop_requested", False),
+                "repo_name": row.get("repo_name", "global") if has_repo_name_col else "global",
             }
             documents.append(doc)
 
@@ -701,6 +739,8 @@ async def search_documents(request: DocSearchRequest) -> dict[str, Any]:
             epas_features=request.epas_features,
             top_k=request.top_k,
             search_mode=request.search_mode,
+            repo_name=request.repo,
+            include_global=request.include_global,
         )
 
         embedding_func = await get_embedding_func()
@@ -2002,7 +2042,7 @@ async def _generate_chunk_embeddings(
                     texts=texts,
                     model=settings.embeddings_model,
                     base_url=settings.embeddings_base_url,
-                    api_key=getattr(settings, 'vllm_api_key', '') or '',
+                    api_key=getattr(settings, 'embeddings_api_key', '') or '',
                 )
 
             # Insert embeddings (convert list to string format for pgvector)
