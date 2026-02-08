@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS robomonkey_docs.doc_source (
     error_message TEXT,
     indexed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    repo_name TEXT REFERENCES robomonkey_control.repo_registry(name) ON DELETE SET NULL
 );
 
 -- Document chunks with semantic structure
@@ -172,6 +173,7 @@ ON CONFLICT (name) DO NOTHING;
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_doc_source_doc_type ON robomonkey_docs.doc_source(doc_type);
 CREATE INDEX IF NOT EXISTS idx_doc_source_status ON robomonkey_docs.doc_source(status);
+CREATE INDEX IF NOT EXISTS idx_doc_source_repo ON robomonkey_docs.doc_source(repo_name);
 
 CREATE INDEX IF NOT EXISTS idx_doc_chunk_source_id ON robomonkey_docs.doc_chunk(source_id);
 CREATE INDEX IF NOT EXISTS idx_doc_chunk_page ON robomonkey_docs.doc_chunk(page_number);
