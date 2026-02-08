@@ -152,6 +152,8 @@ def run() -> None:
                        help="Custom name for the repo (used with --dir or --github)")
     run_p.add_argument("--prep", action="store_true",
                        help="Run LLM prep phase to generate dynamic tasks")
+    run_p.add_argument("--parallel", action="store_true",
+                       help="Run A/B conditions in parallel using dual worktrees")
 
     report_p = validate_sub.add_parser("report")
     report_p.add_argument("--format", choices=["cli", "markdown", "json", "all"], default="cli")
@@ -326,6 +328,7 @@ def run() -> None:
                     custom_github=getattr(args, 'github', None),
                     custom_name=getattr(args, 'name', None),
                     prep=getattr(args, 'prep', False),
+                    parallel=getattr(args, 'parallel', False),
                 ))
             elif args.validate_cmd == "report":
                 asyncio.run(vcli.validate_report(args.format, args.output))

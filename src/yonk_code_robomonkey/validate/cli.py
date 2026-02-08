@@ -13,6 +13,7 @@ from .tasks.generic_tasks import generate_generic_tasks
 from .tasks.prep_phase import generate_prep_tasks
 from .runner.orchestrator import Orchestrator, RunConfig
 from .runner.claude_code import ClaudeCodeDriver
+from .runner.parallel import run_suite_parallel
 from .capture.collector import collect_metrics
 from .evaluate.pipeline import evaluate_run
 from .report.comparator import compare_task, compare_suite
@@ -406,6 +407,7 @@ async def validate_run(
     custom_github: str | None = None,
     custom_name: str | None = None,
     prep: bool = False,
+    parallel: bool = False,
 ) -> None:
     """Execute validation runs.
 
@@ -421,6 +423,7 @@ async def validate_run(
         custom_github: GitHub org/repo slug (custom repo mode)
         custom_name: Custom name for the repo (used with --dir or --github)
         prep: Run LLM prep phase to generate dynamic tasks
+        parallel: Run conditions in parallel using dual worktrees
     """
     run_start = time.monotonic()
     custom_repo_name: str | None = None
@@ -497,41 +500,90 @@ async def validate_run(
             return
 
     mcp_path = _mcp_config_path()
-    config = RunConfig(
-        runs_per_condition=runs,
-        conditions=conditions,
-        mcp_config_path=str(mcp_path) if mcp_path.exists() else None,
-    )
-    driver = ClaudeCodeDriver()
-    orch = Orchestrator(driver, config)
     results_dir = _results_dir()
     results_dir.mkdir(parents=True, exist_ok=True)
-
     repos_dir = _repos_dir()
     all_results = []
     total_tasks = len(tasks)
 
-    for i, task in enumerate(tasks, 1):
-        repo_dir = repos_dir / task.target_repo
-        if not repo_dir.exists():
-            print(f"  Repo not found: {task.target_repo}. Run 'validate setup' first.", file=sys.stderr)
-            continue
+    # Parallel execution mode: use dual worktrees for A/B comparison
+    if parallel and condition == "both":
+        print("  Using parallel A/B execution with dual worktrees...")
 
-        def progress(tid, cond, run_num, current, total):
-            print(f"  [{i}/{total_tasks}] {tid} ({cond}) run {run_num} ...", flush=True)
+        # Group tasks by repo (parallel execution is per-repo)
+        tasks_by_repo: dict[str, list] = {}
+        for task in tasks:
+            tasks_by_repo.setdefault(task.target_repo, []).append(task)
 
-        single_results = await orch.run_task(task, repo_dir, on_progress=progress)
-        for sr in single_results:
-            run_result = collect_metrics(sr, task.target_repo, repo_dir)
+        for repo_name, repo_tasks in tasks_by_repo.items():
+            repo_dir = repos_dir / repo_name
+            if not repo_dir.exists():
+                print(f"  Repo not found: {repo_name}. Run 'validate setup' first.", file=sys.stderr)
+                continue
 
-            run_result = await evaluate_run(
-                result=run_result,
-                task=task,
+            def progress(tid, cond, run_num, current, total):
+                print(f"  {tid} ({cond}) run {run_num} ...", flush=True)
+
+            def task_progress(current, total):
+                print(f"  [{current}/{total}] tasks completed for {repo_name}", flush=True)
+
+            single_results = await run_suite_parallel(
+                tasks=repo_tasks,
                 repo_dir=repo_dir,
-                diff_text=sr.diff_text,
-                conversation_text=sr.driver_result.response_text,
+                mcp_config_path=str(mcp_path) if mcp_path.exists() else None,
+                runs_per_condition=runs,
+                on_progress=progress,
+                task_progress=task_progress,
             )
-            all_results.append(run_result)
+
+            # Create a task lookup for evaluation
+            task_lookup = {t.id: t for t in repo_tasks}
+
+            for sr in single_results:
+                task = task_lookup.get(sr.task_id)
+                if not task:
+                    continue
+
+                run_result = collect_metrics(sr, repo_name, repo_dir)
+                run_result = await evaluate_run(
+                    result=run_result,
+                    task=task,
+                    repo_dir=repo_dir,
+                    diff_text=sr.diff_text,
+                    conversation_text=sr.driver_result.response_text,
+                )
+                all_results.append(run_result)
+    else:
+        # Sequential execution (original behavior)
+        config = RunConfig(
+            runs_per_condition=runs,
+            conditions=conditions,
+            mcp_config_path=str(mcp_path) if mcp_path.exists() else None,
+        )
+        driver = ClaudeCodeDriver()
+        orch = Orchestrator(driver, config)
+
+        for i, task in enumerate(tasks, 1):
+            repo_dir = repos_dir / task.target_repo
+            if not repo_dir.exists():
+                print(f"  Repo not found: {task.target_repo}. Run 'validate setup' first.", file=sys.stderr)
+                continue
+
+            def progress(tid, cond, run_num, current, total):
+                print(f"  [{i}/{total_tasks}] {tid} ({cond}) run {run_num} ...", flush=True)
+
+            single_results = await orch.run_task(task, repo_dir, on_progress=progress)
+            for sr in single_results:
+                run_result = collect_metrics(sr, task.target_repo, repo_dir)
+
+                run_result = await evaluate_run(
+                    result=run_result,
+                    task=task,
+                    repo_dir=repo_dir,
+                    diff_text=sr.diff_text,
+                    conversation_text=sr.driver_result.response_text,
+                )
+                all_results.append(run_result)
 
     # Save results with task metadata for report reconstruction
     results_file = results_dir / "latest.json"
