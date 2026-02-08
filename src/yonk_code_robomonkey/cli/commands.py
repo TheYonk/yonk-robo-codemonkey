@@ -148,6 +148,8 @@ def run() -> None:
                        help="Path to local repo directory (custom repo)")
     run_p.add_argument("--github", default=None,
                        help="GitHub repo slug (org/name) to clone")
+    run_p.add_argument("--name", default=None,
+                       help="Custom name for the repo (used with --dir or --github)")
 
     report_p = validate_sub.add_parser("report")
     report_p.add_argument("--format", choices=["cli", "markdown", "json", "all"], default="cli")
@@ -312,6 +314,7 @@ def run() -> None:
                     tier=args.tier, task_type=args.task_type,
                     custom_dir=getattr(args, 'dir', None),
                     custom_github=getattr(args, 'github', None),
+                    custom_name=getattr(args, 'name', None),
                 ))
             elif args.validate_cmd == "report":
                 asyncio.run(vcli.validate_report(args.format, args.output))
