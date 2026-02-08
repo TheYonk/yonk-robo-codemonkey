@@ -36,15 +36,23 @@ def run() -> None:
     idx.add_argument("--name", required=True, help="Repository name")
     idx.add_argument("--force", action="store_true",
                      help="Force reinitialize schema even if it exists")
+    idx.add_argument("--skip-docs", action="store_true",
+                     help="Skip auto-discovery of documentation files")
 
     # Repository management commands
     repo = sub.add_parser("repo", help="Repository management commands")
     reposub = repo.add_subparsers(dest="repocmd", required=True)
     reposub.add_parser("ls", help="List all indexed repositories")
+    repo_del = reposub.add_parser("delete", help="Delete a repository")
+    repo_del.add_argument("--name", required=True, help="Repository name to delete")
+    repo_del.add_argument("--delete-schema", action="store_true",
+                          help="Also drop the PostgreSQL schema (CASCADE)")
+    repo_del.add_argument("--yes", "-y", action="store_true",
+                          help="Skip confirmation prompt")
 
     # Embedding commands
     emb = sub.add_parser("embed", help="Generate embeddings for chunks")
-    emb.add_argument("--repo_id", required=True, help="Repository UUID")
+    emb.add_argument("--repo", required=True, help="Repository name or UUID")
     emb.add_argument("--only-missing", action="store_true",
                      help="Only embed chunks without existing embeddings")
 
@@ -116,13 +124,30 @@ def run() -> None:
     validate = sub.add_parser("validate", help="Run A/B validation benchmarks")
     validate_sub = validate.add_subparsers(dest="validate_cmd", required=True)
 
-    validate_sub.add_parser("setup").add_argument("--repos", default="all")
+    setup_p = validate_sub.add_parser("setup")
+    setup_p.add_argument("--repos", default="all")
+    setup_p.add_argument("--dir", default=None,
+                         help="Path to local repo directory (custom repo)")
+    setup_p.add_argument("--github", default=None,
+                         help="GitHub repo slug (org/name) to clone")
+    setup_p.add_argument("--name", default=None,
+                         help="Custom name for the repo (used with --dir or --github)")
+
     run_p = validate_sub.add_parser("run")
     run_p.add_argument("--task", default=None)
     run_p.add_argument("--suite", choices=["simple", "medium", "hard", "all"], default=None)
     run_p.add_argument("--repo", default=None)
     run_p.add_argument("--runs", type=int, default=3)
     run_p.add_argument("--condition", choices=["both", "with", "without"], default="both")
+    run_p.add_argument("--tier", default=None,
+                       help="Filter by tier (understand,review,discover,refactor,rewrite)")
+    run_p.add_argument("--type", dest="task_type", default=None,
+                       choices=["qa", "code_change"],
+                       help="Filter by task type")
+    run_p.add_argument("--dir", default=None,
+                       help="Path to local repo directory (custom repo)")
+    run_p.add_argument("--github", default=None,
+                       help="GitHub repo slug (org/name) to clone")
 
     report_p = validate_sub.add_parser("report")
     report_p.add_argument("--format", choices=["cli", "markdown", "json", "all"], default="cli")
@@ -131,6 +156,11 @@ def run() -> None:
     list_p = validate_sub.add_parser("list")
     list_p.add_argument("--repo", default=None)
     list_p.add_argument("--difficulty", default=None)
+    list_p.add_argument("--tier", default=None,
+                       help="Filter by tier (understand,review,discover,refactor,rewrite)")
+    list_p.add_argument("--type", dest="task_type", default=None,
+                       choices=["qa", "code_change"],
+                       help="Filter by task type")
 
     clean_p = validate_sub.add_parser("clean")
     clean_p.add_argument("--repo", default=None)
@@ -161,19 +191,27 @@ def run() -> None:
                 args.repo,
                 args.name,
                 settings.database_url,
-                args.force
+                args.force,
+                args.skip_docs
             ))
         elif args.cmd == "repo":
             if args.repocmd == "ls":
                 asyncio.run(list_repos(settings.database_url))
+            elif args.repocmd == "delete":
+                asyncio.run(delete_repo_cmd(
+                    args.name,
+                    settings.database_url,
+                    args.delete_schema,
+                    args.yes,
+                ))
         elif args.cmd == "embed":
             asyncio.run(embed_repo(
-                args.repo_id,
+                args.repo,
                 settings.database_url,
                 settings.embeddings_provider,
                 settings.embeddings_model,
-                settings.embeddings_base_url if settings.embeddings_provider == "ollama" else settings.vllm_base_url,
-                settings.vllm_api_key,
+                settings.embeddings_base_url,
+                settings.embeddings_api_key,
                 args.only_missing
             ))
         elif args.cmd == "watch":
@@ -249,13 +287,26 @@ def run() -> None:
         elif args.cmd == "validate":
             from yonk_code_robomonkey.validate import cli as vcli
             if args.validate_cmd == "setup":
-                asyncio.run(vcli.validate_setup(args.repos))
+                asyncio.run(vcli.validate_setup(
+                    repos=args.repos,
+                    custom_dir=getattr(args, 'dir', None),
+                    custom_github=getattr(args, 'github', None),
+                    custom_name=getattr(args, 'name', None),
+                ))
             elif args.validate_cmd == "run":
-                asyncio.run(vcli.validate_run(args.task, args.suite, args.repo, args.runs, args.condition))
+                asyncio.run(vcli.validate_run(
+                    args.task, args.suite, args.repo, args.runs, args.condition,
+                    tier=args.tier, task_type=args.task_type,
+                    custom_dir=getattr(args, 'dir', None),
+                    custom_github=getattr(args, 'github', None),
+                ))
             elif args.validate_cmd == "report":
                 asyncio.run(vcli.validate_report(args.format, args.output))
             elif args.validate_cmd == "list":
-                asyncio.run(vcli.validate_list(args.repo, args.difficulty))
+                asyncio.run(vcli.validate_list(
+                    args.repo, args.difficulty,
+                    tier=args.tier, task_type=args.task_type,
+                ))
             elif args.validate_cmd == "clean":
                 asyncio.run(vcli.validate_clean(args.repo, getattr(args, 'all', False)))
             elif args.validate_cmd == "status":
@@ -383,7 +434,7 @@ async def db_ping(database_url: str) -> None:
         await conn.close()
 
 
-async def index_repo(repo_path: str, repo_name: str, database_url: str, force: bool = False) -> None:
+async def index_repo(repo_path: str, repo_name: str, database_url: str, force: bool = False, skip_docs: bool = False) -> None:
     """Index a repository.
 
     Args:
@@ -391,14 +442,17 @@ async def index_repo(repo_path: str, repo_name: str, database_url: str, force: b
         repo_name: Name for the repository
         database_url: PostgreSQL connection string
         force: If True, reinitialize schema even if it exists
+        skip_docs: If True, skip auto-discovery of documentation files
     """
     print(f"Indexing repository: {repo_name}")
     print(f"Path: {repo_path}")
     if force:
         print("Force mode: Will reinitialize schema if it exists")
+    if skip_docs:
+        print("Skip docs mode: Documentation auto-discovery disabled")
 
     try:
-        stats = await index_repository(repo_path, repo_name, database_url, force=force)
+        stats = await index_repository(repo_path, repo_name, database_url, force=force, skip_docs=skip_docs)
 
         print(f"\n✓ Indexing complete")
         print(f"  Files scanned: {stats['files_scanned']}")
@@ -448,8 +502,72 @@ async def list_repos(database_url: str) -> None:
         await conn.close()
 
 
+async def delete_repo_cmd(
+    repo_name: str,
+    database_url: str,
+    delete_schema: bool,
+    skip_confirm: bool,
+) -> None:
+    """Delete a repository from the registry and optionally its schema.
+
+    Args:
+        repo_name: Name of the repository to delete
+        database_url: PostgreSQL connection string
+        delete_schema: Also drop the PostgreSQL schema (CASCADE)
+        skip_confirm: Skip the confirmation prompt
+    """
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        # Look up repo in control registry
+        repo = await conn.fetchrow(
+            "SELECT name, schema_name FROM robomonkey_control.repo_registry WHERE name = $1",
+            repo_name,
+        )
+        if not repo:
+            raise RuntimeError(f"Repository '{repo_name}' not found in registry")
+
+        schema_name = repo["schema_name"]
+
+        # Confirmation
+        if not skip_confirm:
+            msg = f"Delete repository '{repo_name}' (schema: {schema_name})"
+            if delete_schema:
+                msg += " INCLUDING all data (DROP SCHEMA CASCADE)"
+            msg += "? [y/N] "
+            answer = input(msg).strip().lower()
+            if answer not in ("y", "yes"):
+                print("Aborted.")
+                return
+
+        schema_deleted = False
+        if delete_schema:
+            schema_exists = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)",
+                schema_name,
+            )
+            if schema_exists:
+                await conn.execute(f'DROP SCHEMA "{schema_name}" CASCADE')
+                schema_deleted = True
+
+        await conn.execute(
+            "DELETE FROM robomonkey_control.repo_registry WHERE name = $1",
+            repo_name,
+        )
+
+        print(f"✓ Repository '{repo_name}' deleted")
+        if schema_deleted:
+            print(f"  Schema '{schema_name}' dropped (CASCADE)")
+        elif delete_schema:
+            print(f"  Schema '{schema_name}' did not exist (nothing to drop)")
+        else:
+            print(f"  Schema '{schema_name}' preserved (use --delete-schema to remove)")
+
+    finally:
+        await conn.close()
+
+
 async def embed_repo(
-    repo_id: str,
+    repo_name_or_id: str,
     database_url: str,
     provider: str,
     model: str,
@@ -460,34 +578,78 @@ async def embed_repo(
     """Generate embeddings for repository chunks.
 
     Args:
-        repo_id: Repository UUID
+        repo_name_or_id: Repository name or UUID
         database_url: PostgreSQL connection string
-        provider: Embeddings provider ("ollama" or "vllm")
+        provider: Embeddings provider ("ollama", "vllm", or "openai")
         model: Model name
         base_url: Provider base URL
-        api_key: API key (for vLLM)
+        api_key: API key (for vLLM/OpenAI)
         only_missing: Only embed chunks without existing embeddings
     """
     from yonk_code_robomonkey.embeddings.embedder import embed_chunks
+    from yonk_code_robomonkey.daemon.kb_processors import detect_embedding_dimension
+    from yonk_code_robomonkey.config_settings import settings as app_settings
+    from yonk_code_robomonkey.db.schema_manager import resolve_repo_to_schema
 
-    print(f"Generating embeddings for repository: {repo_id}")
+    # Resolve repo name to UUID and schema
+    conn = await asyncpg.connect(dsn=database_url)
+    try:
+        repo_id, schema_name = await resolve_repo_to_schema(conn, repo_name_or_id)
+    except ValueError as e:
+        raise RuntimeError(f"Repository not found: {repo_name_or_id}") from e
+    finally:
+        await conn.close()
+
+    print(f"Generating embeddings for repository: {repo_name_or_id}")
+    print(f"  Resolved to: {repo_id} (schema: {schema_name})")
     print(f"Provider: {provider}")
     print(f"Model: {model}")
     print(f"Mode: {'Only missing chunks' if only_missing else 'All chunks'}")
 
+    # Probe actual dimension and warn if mismatched
     try:
-        stats = await embed_chunks(
+        actual_dim = await detect_embedding_dimension(provider, model, base_url, api_key)
+        if actual_dim != app_settings.embeddings_dimension:
+            print(
+                f"  WARNING: Model produces {actual_dim}-dim vectors but "
+                f"EMBEDDINGS_DIMENSION={app_settings.embeddings_dimension}. "
+                f"Update .env to avoid INSERT failures."
+            )
+        else:
+            print(f"  Embedding dimension: {actual_dim}")
+    except Exception:
+        pass
+
+    try:
+        from yonk_code_robomonkey.embeddings.embedder import embed_documents
+
+        # Embed chunks
+        chunk_stats = await embed_chunks(
             repo_id=repo_id,
             database_url=database_url,
             provider=provider,
             model=model,
             base_url=base_url,
             api_key=api_key,
-            only_missing=only_missing
+            only_missing=only_missing,
+            schema_name=schema_name
+        )
+
+        # Embed documents
+        doc_stats = await embed_documents(
+            repo_id=repo_id,
+            database_url=database_url,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            only_missing=only_missing,
+            schema_name=schema_name
         )
 
         print(f"\n✓ Embedding complete")
-        print(f"  Chunks embedded: {stats['embedded']}")
+        print(f"  Chunks embedded: {chunk_stats['embedded']}")
+        print(f"  Documents embedded: {doc_stats['embedded']}")
 
     except Exception as e:
         raise RuntimeError(f"Embedding failed: {e}")

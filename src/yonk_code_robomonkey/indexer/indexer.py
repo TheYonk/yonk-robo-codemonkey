@@ -24,7 +24,8 @@ async def index_repository(
     repo_name: str,
     database_url: str,
     force: bool = False,
-    max_file_size_mb: int = 100
+    max_file_size_mb: int = 100,
+    skip_docs: bool = False
 ) -> dict[str, int]:
     """Index a repository into the database.
 
@@ -34,6 +35,7 @@ async def index_repository(
         database_url: Database connection string
         force: If True, reinitialize schema even if it exists
         max_file_size_mb: Skip files larger than this (in MB), default 100
+        skip_docs: If True, skip auto-discovery of documentation files
 
     Returns:
         Dictionary with counts of indexed entities
@@ -77,17 +79,24 @@ async def index_repository(
                     print(f"Warning: Failed to index {file_path}: {e}")
                     continue
 
-            # Index documentation files
-            print("Indexing documentation files...")
-            doc_stats = await ingest_documents(
-                repo_id=repo_id,
-                repo_root=repo_root,
-                database_url=database_url,
-                schema_name=schema_name
-            )
-            stats["documents"] = doc_stats.get("documents", 0) + doc_stats.get("updated", 0)
-            stats["documents_skipped"] = doc_stats.get("skipped", 0)
-            print(f"Indexed {stats['documents']} documentation files ({stats['documents_skipped']} skipped)")
+            # Index documentation files if not skipped
+            if skip_docs:
+                print("Skipping documentation auto-discovery (--skip-docs)")
+                stats["documents"] = 0
+                stats["documents_skipped"] = 0
+                stats["docs_discovered"] = 0
+            else:
+                print("Indexing documentation files...")
+                doc_stats = await ingest_documents(
+                    repo_id=repo_id,
+                    repo_root=repo_root,
+                    database_url=database_url,
+                    schema_name=schema_name
+                )
+                stats["documents"] = doc_stats.get("documents", 0) + doc_stats.get("updated", 0)
+                stats["documents_skipped"] = doc_stats.get("skipped", 0)
+                stats["docs_discovered"] = stats["documents"] + stats["documents_skipped"]
+                print(f"Indexed {stats['documents']} documentation files ({stats['documents_skipped']} skipped)")
 
             # Get final counts
             stats["symbols"] = await conn.fetchval(
@@ -339,13 +348,15 @@ async def _index_file(
                 """
                 INSERT INTO chunk (
                     repo_id, file_id, symbol_id,
-                    start_line, end_line, content, content_hash
+                    start_line, end_line, content, content_hash,
+                    chunk_sequence, total_chunks
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 """,
                 repo_id, file_id, chunk_symbol_id,
                 chunk.start_line, chunk.end_line,
-                chunk.content, chunk.content_hash
+                chunk.content, chunk.content_hash,
+                chunk.chunk_sequence, chunk.total_chunks
             )
 
         # Insert edges (best-effort resolution of FQNs to symbol IDs)
@@ -434,10 +445,8 @@ def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100
         max_lines: Maximum lines per chunk (default 100)
 
     Returns:
-        List of chunks
+        List of chunks with sequence tracking
     """
-    chunks = []
-
     try:
         source_text = source.decode("utf-8", errors="replace")
     except Exception:
@@ -448,7 +457,9 @@ def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100
             end_line=1,
             content=f"[Binary file - {len(source)} bytes]",
             content_hash=content_hash,
-            symbol_id=None
+            symbol_id=None,
+            chunk_sequence=0,
+            total_chunks=1,
         )]
 
     lines = source_text.splitlines(keepends=True)
@@ -461,10 +472,13 @@ def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100
             end_line=1,
             content="",
             content_hash=hashlib.sha256(b"").hexdigest()[:16],
-            symbol_id=None
+            symbol_id=None,
+            chunk_sequence=0,
+            total_chunks=1,
         )]
 
-    # Split into chunks of max_lines
+    # First pass: calculate chunk boundaries
+    temp_chunks = []
     current_line = 0
     while current_line < total_lines:
         end_line = min(current_line + max_lines, total_lines)
@@ -476,24 +490,37 @@ def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100
         # Calculate content hash
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
-        chunks.append(Chunk(
-            start_line=current_line + 1,  # 1-indexed
-            end_line=end_line,
-            content=content,
-            content_hash=content_hash,
-            symbol_id=None  # No symbols for plain text
-        ))
+        temp_chunks.append({
+            "start_line": current_line + 1,  # 1-indexed
+            "end_line": end_line,
+            "content": content,
+            "content_hash": content_hash,
+        })
 
         current_line = end_line
+
+    # Second pass: create Chunk objects with sequence info
+    num_chunks = len(temp_chunks)
+    chunks = []
+    for i, tc in enumerate(temp_chunks):
+        chunks.append(Chunk(
+            start_line=tc["start_line"],
+            end_line=tc["end_line"],
+            content=tc["content"],
+            content_hash=tc["content_hash"],
+            symbol_id=None,
+            chunk_sequence=i,
+            total_chunks=num_chunks,
+        ))
 
     return chunks
 
 
 def _create_sql_chunks(source: bytes, file_path: Path, skip_data_statements: bool = True) -> list[Chunk]:
-    """Create SQL-aware chunks for SQL files.
+    """Create SQL-aware chunks for SQL files with sequence tracking.
 
     Uses smart SQL parsing to chunk by statements, optionally skipping
-    large data INSERT/COPY statements.
+    large data INSERT/COPY statements. Uses model-aware chunk configuration.
 
     Args:
         source: SQL file content as bytes
@@ -501,7 +528,7 @@ def _create_sql_chunks(source: bytes, file_path: Path, skip_data_statements: boo
         skip_data_statements: If True, skip INSERT/COPY/LOAD statements
 
     Returns:
-        List of chunks
+        List of chunks with sequence tracking
     """
     chunks = []
 
@@ -526,12 +553,12 @@ def _create_sql_chunks(source: bytes, file_path: Path, skip_data_statements: boo
     if auto_skip:
         print(f"  Skipping {data_statements} data statements in {file_path.name} (keeping {total_statements - data_statements} schema statements)")
 
-    # Chunk the SQL file
+    # Chunk the SQL file (uses model-aware config from settings)
     try:
         sql_chunks = list(chunk_sql_file(
             sql_text,
             skip_data_statements=auto_skip or skip_data_statements,
-            max_chunk_size=5000,  # 5KB per chunk
+            max_chunk_size=None,  # Use model-aware default
             max_statements_per_chunk=50
         ))
 
@@ -543,7 +570,9 @@ def _create_sql_chunks(source: bytes, file_path: Path, skip_data_statements: boo
                 end_line=sql_chunk.end_line,
                 content=sql_chunk.content,
                 content_hash=content_hash,
-                symbol_id=None
+                symbol_id=None,
+                chunk_sequence=sql_chunk.chunk_sequence,
+                total_chunks=sql_chunk.total_chunks,
             ))
 
     except Exception as e:
@@ -560,7 +589,9 @@ def _create_sql_chunks(source: bytes, file_path: Path, skip_data_statements: boo
             end_line=1,
             content=summary,
             content_hash=content_hash,
-            symbol_id=None
+            symbol_id=None,
+            chunk_sequence=0,
+            total_chunks=1,
         ))
 
     return chunks
