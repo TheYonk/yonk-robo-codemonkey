@@ -168,6 +168,16 @@ def run() -> None:
 
     validate_sub.add_parser("status")
 
+    # Docs commands
+    docs = sub.add_parser("docs", help="Document management commands")
+    docs_sub = docs.add_subparsers(dest="docs_cmd", required=True)
+
+    docs_index = docs_sub.add_parser("index", help="Index a document")
+    docs_index.add_argument("--file", required=True, help="Path to document file")
+    docs_index.add_argument("--repo", help="Associate with repo name. Omit for global doc.")
+    docs_index.add_argument("--name", help="Custom name (defaults to filename)")
+    docs_index.add_argument("--type", default="general", help="Document type")
+
     # Daemon command
     daemon = sub.add_parser("daemon", help="Daemon management commands")
     daemon_sub = daemon.add_subparsers(dest="daemon_cmd", required=True)
@@ -266,6 +276,9 @@ def run() -> None:
                     args.force,
                     args.limit
                 ))
+        elif args.cmd == "docs":
+            if args.docs_cmd == "index":
+                asyncio.run(handle_docs_index(args, settings))
         elif args.cmd == "daemon":
             if args.daemon_cmd == "run":
                 from yonk_code_robomonkey.daemon.main import main
@@ -1293,3 +1306,32 @@ async def summaries_generate_cmd(
 
     finally:
         await conn.close()
+
+
+async def handle_docs_index(args, settings):
+    """Index a document file with optional repo association."""
+    file_path = Path(args.file)
+    if not file_path.exists():
+        print(f"Error: File not found: {args.file}")
+        return 1
+
+    repo_name = args.repo
+    if repo_name and repo_name.lower() == "global":
+        repo_name = None
+
+    doc_name = args.name or file_path.stem
+    doc_type = args.type
+
+    print(f"Indexing document: {file_path}")
+    if repo_name:
+        print(f"  Associated with repo: {repo_name}")
+    else:
+        print(f"  Stored as global document")
+
+    # Note: Full KB ingestion would go here
+    # For now, just print what would be done
+    print(f"  Name: {doc_name}")
+    print(f"  Type: {doc_type}")
+    print("  (Document ingestion not fully implemented in this task)")
+
+    return 0
