@@ -102,7 +102,7 @@ def test_cli_report_renders():
     )
     suite = compare_suite([tc])
     output = generate_cli_report(suite)
-    assert "VALIDATION REPORT" in output
+    assert "ROBOMONKEY BENCHMARK REPORT" in output
     assert "tokens" in output
 
 

@@ -35,7 +35,7 @@ async def test_validate_list_shows_tasks(capsys, isolated_home):
         await validate_list()
     captured = capsys.readouterr()
     assert "simple-test" in captured.out
-    assert "SIMPLE" in captured.out
+    assert "simple" in captured.out  # difficulty value is lowercase
 
 
 @pytest.mark.asyncio
