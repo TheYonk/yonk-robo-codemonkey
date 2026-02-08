@@ -58,6 +58,7 @@ class DocSource(BaseModel):
     indexed_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    repo_name: Optional[str] = None  # repo_registry name, None = global doc
 
 
 class DocChunk(BaseModel):
@@ -104,6 +105,7 @@ class DocIndexRequest(BaseModel):
     version: Optional[str] = Field(default=None, description="Version string (e.g., '18' for EPAS v18)")
     description: Optional[str] = Field(default=None, description="Description of the document")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    repo: Optional[str] = Field(default=None, description="Associate with repo name. None = global doc.")
     recursive: bool = Field(default=False, description="Process subdirectories recursively")
 
 
@@ -134,6 +136,7 @@ class DocListItem(BaseModel):
     version: Optional[str] = None
     indexed_at: Optional[datetime] = None
     file_size_bytes: Optional[int] = None
+    repo_name: str = "global"
 
 
 class DocSearchParams(BaseModel):
@@ -147,6 +150,8 @@ class DocSearchParams(BaseModel):
     top_k: int = Field(default=10, ge=1, le=100, description="Number of results to return")
     search_mode: str = Field(default="hybrid", description="Search mode: hybrid, semantic, fts")
     min_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Minimum relevance score")
+    repo_name: Optional[str] = Field(default=None, description="Filter to specific repo name. None = all docs.")
+    include_global: bool = Field(default=True, description="Include docs with no repo (global docs) when repo_name is set")
 
 
 class DocChunkResult(BaseModel):
@@ -171,6 +176,7 @@ class DocChunkResult(BaseModel):
 
     # For citation
     citation: Optional[str] = None
+    repo_name: str = "global"  # repo_registry name, "global" when None
 
 
 class DocSearchResult(BaseModel):
@@ -265,7 +271,9 @@ class ChunkingConfig(BaseModel):
     """Configuration for the chunking algorithm.
 
     IMPORTANT: Chunk sizes should be configured based on your embedding model's
-    max input length. Common limits:
+    max input length. Use ChunkingConfig.for_model() to get optimal settings.
+
+    Common model limits:
     - all-MiniLM-L6-v2: ~256 tokens (~1000 chars)
     - all-mpnet-base-v2: ~384 tokens (~1500 chars)
     - text-embedding-3-small: ~8191 tokens (~32000 chars)
@@ -280,47 +288,18 @@ class ChunkingConfig(BaseModel):
 
     @classmethod
     def for_model(cls, model_name: str) -> "ChunkingConfig":
-        """Create chunking config optimized for a specific embedding model."""
-        # Model-specific max input lengths (conservative estimates in chars)
-        model_limits = {
-            # Sentence-transformers models
-            "all-MiniLM-L6-v2": 1000,
-            "all-mpnet-base-v2": 1500,
-            "all-MiniLM-L12-v2": 1000,
-            "paraphrase-MiniLM-L6-v2": 500,
-            "multi-qa-MiniLM-L6-cos-v1": 2000,
-            "all-distilroberta-v1": 2000,
-            # OpenAI models
-            "text-embedding-3-small": 30000,
-            "text-embedding-3-large": 30000,
-            "text-embedding-ada-002": 30000,
-            # Ollama/local models
-            "nomic-embed-text": 30000,
-            "snowflake-arctic-embed2": 2000,
-            "mxbai-embed-large": 2000,
-        }
+        """Create chunking config optimized for a specific embedding model.
 
-        # Find matching limit
-        max_chars = 2000  # Default
-        model_lower = model_name.lower()
-        base_name = model_name.split(":")[0].lower()
+        Uses the centralized model limits from config_settings.
+        """
+        # Import here to avoid circular dependency
+        from ..config_settings import ChunkConfig as CoreChunkConfig
 
-        for key, limit in model_limits.items():
-            if key.lower() == base_name or key.lower() in model_lower:
-                max_chars = limit
-                break
-
-        # Calculate optimal chunk sizes
-        # Target is 70% of max to leave room for variation
-        target_chars = int(max_chars * 0.7)
-        # Min is 10% of max
-        min_chars = max(100, int(max_chars * 0.1))
-        # Overlap is 10% of target
-        overlap_chars = int(target_chars * 0.1)
+        core_config = CoreChunkConfig.for_model(model_name)
 
         return cls(
-            max_chunk_chars=max_chars,
-            target_chunk_chars=target_chars,
-            min_chunk_chars=min_chars,
-            overlap_chars=overlap_chars,
+            max_chunk_chars=core_config.max_chars,
+            target_chunk_chars=core_config.target_chars,
+            min_chunk_chars=core_config.min_chars,
+            overlap_chars=core_config.overlap_chars,
         )
