@@ -122,6 +122,37 @@ STOP_WORDS = {
 }
 
 
+def _build_repo_filter(
+    repo_name: Optional[str],
+    include_global: bool,
+    param_idx: int,
+    bind_params: list,
+) -> tuple[str, int]:
+    """Build SQL WHERE clause for repo filtering.
+
+    Args:
+        repo_name: Repo name to filter by, or None for all docs
+        include_global: If True, include docs with NULL repo_name
+        param_idx: Current parameter index
+        bind_params: List to append bind params to
+
+    Returns:
+        Tuple of (SQL condition string, updated param_idx)
+    """
+    if repo_name is None:
+        return "TRUE", param_idx
+
+    if include_global:
+        # Match specific repo OR global docs
+        condition = f"(ds.repo_name = ${param_idx} OR ds.repo_name IS NULL)"
+    else:
+        # Match only specific repo
+        condition = f"ds.repo_name = ${param_idx}"
+
+    bind_params.append(repo_name)
+    return condition, param_idx + 1
+
+
 def extract_keywords(query: str) -> list[str]:
     """Extract significant keywords from a search query.
 
@@ -377,6 +408,7 @@ async def _hybrid_search(
                 topics=data["topics"] or [],
                 oracle_constructs=data["oracle_constructs"] or [],
                 epas_features=data["epas_features"] or [],
+                repo_name=data.get("repo_name") or "global",
                 score=scores[0],
                 vec_score=scores[1],
                 fts_score=scores[2],
@@ -436,6 +468,13 @@ async def _vector_search(
         bind_params.append(params.epas_features)
         param_idx += 1
 
+    # Repo filtering
+    if params.repo_name is not None:
+        repo_condition, param_idx = _build_repo_filter(
+            params.repo_name, params.include_global, param_idx, bind_params
+        )
+        conditions.append(repo_condition)
+
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
     query = f"""
@@ -444,6 +483,7 @@ async def _vector_search(
             dc.content,
             ds.name as source_name,
             ds.doc_type,
+            ds.repo_name,
             dc.section_path,
             dc.heading,
             dc.page_number,
@@ -476,6 +516,7 @@ async def _vector_search(
             topics=row["topics"] or [],
             oracle_constructs=row["oracle_constructs"] or [],
             epas_features=row["epas_features"] or [],
+            repo_name=row["repo_name"] or "global",
             score=row["vec_score"],
             vec_score=row["vec_score"],
             fts_score=None,
@@ -594,6 +635,13 @@ async def _keyword_fts_search_weighted(
         bind_params.append(params.epas_features)
         param_idx += 1
 
+    # Repo filtering
+    if params.repo_name is not None:
+        repo_condition, param_idx = _build_repo_filter(
+            params.repo_name, params.include_global, param_idx, bind_params
+        )
+        filter_conditions.append(repo_condition)
+
     where_clause = " AND ".join(filter_conditions)
     bind_params.append(limit)
     limit_param = param_idx
@@ -604,6 +652,7 @@ async def _keyword_fts_search_weighted(
             dc.content,
             ds.name as source_name,
             ds.doc_type,
+            ds.repo_name,
             dc.section_path,
             dc.heading,
             dc.page_number,
@@ -650,6 +699,7 @@ async def _keyword_fts_search_weighted(
             topics=row["topics"] or [],
             oracle_constructs=row["oracle_constructs"] or [],
             epas_features=row["epas_features"] or [],
+            repo_name=row["repo_name"] or "global",
             score=weighted_score / max_possible if max_possible else 0,
             vec_score=None,
             fts_score=weighted_score / max_possible if max_possible else 0,
@@ -832,6 +882,13 @@ async def _fts_ilike_search(
         bind_params.extend(params.doc_names)
         param_idx += len(params.doc_names)
 
+    # Repo filtering
+    if params.repo_name is not None:
+        repo_condition, param_idx = _build_repo_filter(
+            params.repo_name, params.include_global, param_idx, bind_params
+        )
+        filter_conditions.append(repo_condition)
+
     where_parts = [f"({' OR '.join(ilike_conditions)})"]
     if filter_conditions:
         where_parts.extend(filter_conditions)
@@ -844,6 +901,7 @@ async def _fts_ilike_search(
             dc.content,
             ds.name as source_name,
             ds.doc_type,
+            ds.repo_name,
             dc.section_path,
             dc.heading,
             dc.page_number,
@@ -859,7 +917,7 @@ async def _fts_ilike_search(
         LIMIT ${limit_param}
     """
 
-    logger.debug(f"ILIKE fallback query words: {significant_words}")
+    logger.debug(f"ILIKE fallback query words: {keywords}")
     rows = await conn.fetch(query, *bind_params)
     logger.info(f"ILIKE fallback returned {len(rows)} rows")
 
@@ -877,6 +935,7 @@ async def _fts_ilike_search(
             topics=row["topics"] or [],
             oracle_constructs=row["oracle_constructs"] or [],
             epas_features=row["epas_features"] or [],
+            repo_name=row["repo_name"] or "global",
             score=row["fts_score"],
             vec_score=None,
             fts_score=row["fts_score"],
@@ -941,6 +1000,13 @@ async def _fts_search_with_tsquery(
         bind_params.append(params.epas_features)
         param_idx += 1
 
+    # Repo filtering
+    if params.repo_name is not None:
+        repo_condition, param_idx = _build_repo_filter(
+            params.repo_name, params.include_global, param_idx, bind_params
+        )
+        conditions.append(repo_condition)
+
     where_clause = " AND ".join(conditions)
 
     # For ranking, use appropriate expression based on mode
@@ -956,6 +1022,7 @@ async def _fts_search_with_tsquery(
             dc.content,
             ds.name as source_name,
             ds.doc_type,
+            ds.repo_name,
             dc.section_path,
             dc.heading,
             dc.page_number,
@@ -991,6 +1058,7 @@ async def _fts_search_with_tsquery(
             topics=row["topics"] or [],
             oracle_constructs=row["oracle_constructs"] or [],
             epas_features=row["epas_features"] or [],
+            repo_name=row["repo_name"] or "global",
             score=row["fts_score"],
             vec_score=None,
             fts_score=row["fts_score"],
@@ -1014,6 +1082,7 @@ async def _fetch_chunks(
             dc.content,
             ds.name as source_name,
             ds.doc_type,
+            ds.repo_name,
             dc.section_path,
             dc.heading,
             dc.page_number,
