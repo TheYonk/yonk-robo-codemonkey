@@ -118,7 +118,7 @@ async def hybrid_search(
         embeddings_provider=settings.embeddings_provider,
         embeddings_model=settings.embeddings_model,
         embeddings_base_url=settings.embeddings_base_url,
-        embeddings_api_key=settings.vllm_api_key,
+        embeddings_api_key=settings.embeddings_api_key,
         repo_id=resolved_repo_id,
         schema_name=schema_name,
         tags_any=tags_any,
@@ -498,7 +498,7 @@ async def doc_search(
         embeddings_provider=settings.embeddings_provider,
         embeddings_model=settings.embeddings_model,
         embeddings_base_url=settings.embeddings_base_url,
-        embeddings_api_key=settings.vllm_api_key,
+        embeddings_api_key=settings.embeddings_api_key,
         repo_id=resolved_repo_id,
         schema_name=schema_name,
         vector_top_k=30,
@@ -1199,7 +1199,7 @@ async def feature_context(
             embeddings_provider=settings.embeddings_provider,
             embeddings_model=settings.embeddings_model,
             embeddings_base_url=settings.embeddings_base_url,
-            embeddings_api_key=settings.vllm_api_key,
+            embeddings_api_key=settings.embeddings_api_key,
             schema_name=schema_name,
             filters=filters,
             top_k_files=top_k_files,
@@ -1433,7 +1433,7 @@ async def db_feature_context(
             embeddings_provider=settings.embeddings_provider,
             embeddings_model=settings.embeddings_model,
             embeddings_base_url=settings.embeddings_base_url,
-            embeddings_api_key=settings.vllm_api_key,
+            embeddings_api_key=settings.embeddings_api_key,
             repo_id=repo_id,
             tags_any=filters.get("tags_any"),
             tags_all=filters.get("tags_all"),
@@ -2620,7 +2620,7 @@ async def universal_search(
             embeddings_provider=settings.embeddings_provider,
             embeddings_model=settings.embeddings_model,
             embeddings_base_url=settings.embeddings_base_url,
-            embeddings_api_key=settings.vllm_api_key,
+            embeddings_api_key=settings.embeddings_api_key,
             repo_id=repo_id,
             schema_name=schema_name,
             vector_top_k=settings.vector_top_k,
@@ -2646,7 +2646,7 @@ async def universal_search(
             embeddings_provider=settings.embeddings_provider,
             embeddings_model=settings.embeddings_model,
             embeddings_base_url=settings.embeddings_base_url,
-            embeddings_api_key=settings.vllm_api_key,
+            embeddings_api_key=settings.embeddings_api_key,
             repo_id=repo_id,
             schema_name=schema_name,
             vector_top_k=top_k * 2,
@@ -3992,7 +3992,7 @@ async def verify_doc_claims(
                     embeddings_provider=settings.embeddings_provider,
                     embeddings_model=settings.embeddings_model,
                     embeddings_base_url=settings.embeddings_base_url,
-                    embeddings_api_key=settings.vllm_api_key,
+                    embeddings_api_key=settings.embeddings_api_key,
                     schema_name=schema_name
                 )
 
@@ -4908,7 +4908,9 @@ async def doc_search(
     oracle_constructs: list[str] | None = None,
     epas_features: list[str] | None = None,
     top_k: int = 10,
-    search_mode: str = "hybrid"
+    search_mode: str = "hybrid",
+    repo: str | None = None,
+    include_global: bool = True
 ) -> dict[str, Any]:
     """Search indexed documentation using hybrid search (vector + FTS).
 
@@ -4924,6 +4926,8 @@ async def doc_search(
         epas_features: Filter by EPAS features (e.g., ["dblink_ora", "spl"])
         top_k: Number of results to return (default 10)
         search_mode: Search mode: "hybrid" (default), "semantic", or "fts"
+        repo: Optional repo name to scope search. None = search all docs.
+        include_global: If true (default), include global docs alongside repo-specific docs when repo is set.
 
     Returns:
         Dictionary with search results, scores, and citations
@@ -4937,6 +4941,12 @@ async def doc_search(
 
         # Search in specific documents
         doc_search(query="data types", doc_names=["oracle-migration-guide"])
+
+        # Search within a specific repo's docs
+        doc_search(query="authentication", repo="myapp")
+
+        # Search only repo docs, exclude global docs
+        doc_search(query="setup", repo="myapp", include_global=False)
     """
     from yonk_code_robomonkey.knowledge_base.models import DocSearchParams, DocType
     from yonk_code_robomonkey.knowledge_base.search import doc_search as _doc_search
@@ -4962,6 +4972,8 @@ async def doc_search(
         epas_features=epas_features,
         top_k=top_k,
         search_mode=search_mode,
+        repo_name=repo,
+        include_global=include_global,
     )
 
     # Get embedding function
@@ -5002,6 +5014,7 @@ async def doc_search(
                     "vec_score": round(chunk.vec_score, 4) if chunk.vec_score else None,
                     "fts_score": round(chunk.fts_score, 4) if chunk.fts_score else None,
                     "citation": chunk.citation,
+                    "repo_name": chunk.repo_name,
                 }
                 for chunk in result.chunks
             ],
