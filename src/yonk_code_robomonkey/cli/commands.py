@@ -150,6 +150,8 @@ def run() -> None:
                        help="GitHub repo slug (org/name) to clone")
     run_p.add_argument("--name", default=None,
                        help="Custom name for the repo (used with --dir or --github)")
+    run_p.add_argument("--prep", action="store_true",
+                       help="Run LLM prep phase to generate dynamic tasks")
 
     report_p = validate_sub.add_parser("report")
     report_p.add_argument("--format", choices=["cli", "markdown", "json", "all"], default="cli")
@@ -323,6 +325,7 @@ def run() -> None:
                     custom_dir=getattr(args, 'dir', None),
                     custom_github=getattr(args, 'github', None),
                     custom_name=getattr(args, 'name', None),
+                    prep=getattr(args, 'prep', False),
                 ))
             elif args.validate_cmd == "report":
                 asyncio.run(vcli.validate_report(args.format, args.output))

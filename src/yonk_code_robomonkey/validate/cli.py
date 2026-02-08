@@ -10,6 +10,7 @@ from pathlib import Path
 from .tasks.registry import discover_tasks
 from .tasks.task_model import TaskDifficulty, TaskCategory
 from .tasks.generic_tasks import generate_generic_tasks
+from .tasks.prep_phase import generate_prep_tasks
 from .runner.orchestrator import Orchestrator, RunConfig
 from .runner.claude_code import ClaudeCodeDriver
 from .capture.collector import collect_metrics
@@ -404,6 +405,7 @@ async def validate_run(
     custom_dir: str | None = None,
     custom_github: str | None = None,
     custom_name: str | None = None,
+    prep: bool = False,
 ) -> None:
     """Execute validation runs.
 
@@ -413,11 +415,12 @@ async def validate_run(
         repo: Filter by target repository
         runs: Number of runs per condition
         condition: "both", "with", or "without"
-        tier: Filter by tier (understand, review, discover, refactor, rewrite)
+        tier: Filter by tier (understand, review, discover, refactor, rewrite, deep)
         task_type: Filter by task type ("qa" or "code_change")
         custom_dir: Path to a local directory (custom repo mode)
         custom_github: GitHub org/repo slug (custom repo mode)
         custom_name: Custom name for the repo (used with --dir or --github)
+        prep: Run LLM prep phase to generate dynamic tasks
     """
     run_start = time.monotonic()
     custom_repo_name: str | None = None
@@ -440,10 +443,22 @@ async def validate_run(
             commit="HEAD",
             tiers=tier_list,
         )
+
+        # If prep phase is enabled, also generate dynamic tasks via LLM
+        if prep:
+            prep_tasks = await generate_prep_tasks(
+                repo_path=custom_repo_dir,
+                repo_name=custom_repo_name,
+                commit="HEAD",
+            )
+            if prep_tasks:
+                tasks.extend(prep_tasks)
+                print(f"  Added {len(prep_tasks)} LLM-generated dynamic tasks")
+
         if not tasks:
             print("No matching tasks generated for custom repo", file=sys.stderr)
             return
-        print(f"\n  Generated {len(tasks)} generic tasks for '{custom_repo_name}'")
+        print(f"\n  Generated {len(tasks)} total tasks for '{custom_repo_name}'")
     else:
         # ── Standard mode: discover YAML tasks ────────────────────
         difficulty = TaskDifficulty(suite) if suite and suite != "all" else None
