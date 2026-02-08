@@ -140,7 +140,7 @@ def run() -> None:
     run_p.add_argument("--runs", type=int, default=3)
     run_p.add_argument("--condition", choices=["both", "with", "without"], default="both")
     run_p.add_argument("--tier", default=None,
-                       help="Filter by tier (understand,review,discover,refactor,rewrite)")
+                       help="Filter by tier (understand,review,discover,deep,refactor,rewrite)")
     run_p.add_argument("--type", dest="task_type", default=None,
                        choices=["qa", "code_change"],
                        help="Filter by task type")
@@ -159,7 +159,7 @@ def run() -> None:
     list_p.add_argument("--repo", default=None)
     list_p.add_argument("--difficulty", default=None)
     list_p.add_argument("--tier", default=None,
-                       help="Filter by tier (understand,review,discover,refactor,rewrite)")
+                       help="Filter by tier (understand,review,discover,deep,refactor,rewrite)")
     list_p.add_argument("--type", dest="task_type", default=None,
                        choices=["qa", "code_change"],
                        help="Filter by task type")
@@ -169,6 +169,14 @@ def run() -> None:
     clean_p.add_argument("--all", action="store_true")
 
     validate_sub.add_parser("status")
+
+    snapshot_p = validate_sub.add_parser("snapshot", help="Create DB snapshot for a repo")
+    snapshot_p.add_argument("--repo", required=True, help="Repository name to snapshot")
+
+    restore_p = validate_sub.add_parser("restore", help="Restore DB from snapshot")
+    restore_p.add_argument("--repo", required=True, help="Repository name to restore")
+
+    snapshots_p = validate_sub.add_parser("snapshots", help="List available snapshots")
 
     # Docs commands
     docs = sub.add_parser("docs", help="Document management commands")
@@ -327,6 +335,22 @@ def run() -> None:
                 asyncio.run(vcli.validate_clean(args.repo, getattr(args, 'all', False)))
             elif args.validate_cmd == "status":
                 asyncio.run(vcli.validate_status())
+            elif args.validate_cmd == "snapshot":
+                from yonk_code_robomonkey.validate import snapshot
+                asyncio.run(snapshot.snapshot_schema(args.repo))
+            elif args.validate_cmd == "restore":
+                from yonk_code_robomonkey.validate import snapshot
+                asyncio.run(snapshot.restore_schema(args.repo))
+            elif args.validate_cmd == "snapshots":
+                from yonk_code_robomonkey.validate import snapshot
+                snapshots = asyncio.run(snapshot.list_snapshots())
+                if not snapshots:
+                    print("No snapshots found")
+                else:
+                    print(f"\n  {'REPO':<25} {'SIZE':<12} {'MODIFIED'}")
+                    print("  " + "-" * 60)
+                    for s in snapshots:
+                        print(f"  {s['repo_name']:<25} {s['size_kb']:.1f} KB      {s['modified']}")
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
         sys.exit(130)
