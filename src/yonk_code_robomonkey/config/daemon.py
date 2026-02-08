@@ -25,21 +25,47 @@ class DatabaseConfig(BaseModel):
         return v
 
 
+def _env_str(key: str, default: str) -> str:
+    """Get string from environment with default."""
+    return os.getenv(key, default)
+
+
+def _env_int(key: str, default: int) -> int:
+    """Get int from environment with default."""
+    val = os.getenv(key)
+    return int(val) if val else default
+
+
 class OllamaConfig(BaseModel):
     """Ollama-specific configuration."""
-    base_url: str = Field("http://localhost:11434", description="Ollama API URL")
+    base_url: str = Field(
+        default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://localhost:11434"),
+        description="Ollama API URL"
+    )
 
 
 class VLLMConfig(BaseModel):
     """vLLM-specific configuration."""
-    base_url: str = Field("http://localhost:8000", description="vLLM API URL")
-    api_key: str = Field("local-key", description="API key for vLLM")
+    base_url: str = Field(
+        default_factory=lambda: _env_str("VLLM_BASE_URL", "http://localhost:8000"),
+        description="vLLM API URL"
+    )
+    api_key: str = Field(
+        default_factory=lambda: _env_str("VLLM_API_KEY", ""),
+        description="API key for vLLM"
+    )
 
 
 class OpenAIConfig(BaseModel):
     """OpenAI-compatible API configuration (includes local embedding service)."""
-    base_url: str = Field("http://localhost:8082", description="OpenAI-compatible API URL")
-    api_key: str = Field("", description="API key (empty for local services)")
+    base_url: str = Field(
+        default_factory=lambda: _env_str("EMBEDDINGS_BASE_URL", _env_str("OPENAI_BASE_URL", "https://api.openai.com")),
+        description="OpenAI-compatible API URL"
+    )
+    api_key: str = Field(
+        default_factory=lambda: _env_str("OPENAI_API_KEY", ""),
+        description="API key (empty for local services)"
+    )
 
 
 class LLMModelConfig(BaseModel):
@@ -94,14 +120,33 @@ class LLMConfig(BaseModel):
 
 
 class EmbeddingsConfig(BaseModel):
-    """Embeddings configuration."""
+    """Embeddings configuration.
+
+    Defaults are read from environment variables (.env) so daemon and UI share config.
+    YAML values override environment defaults.
+    """
     enabled: bool = Field(True, description="Enable embeddings generation")
     backfill_on_startup: bool = Field(True, description="Backfill missing embeddings on startup")
-    provider: Literal["ollama", "vllm", "openai"] = Field("ollama", description="Embedding provider")
-    model: str = Field("snowflake-arctic-embed2:latest", description="Model name")
-    dimension: int = Field(1024, description="Embedding dimension")
-    max_chunk_length: int = Field(8192, description="Max characters per chunk")
-    batch_size: int = Field(100, description="Batch size for processing")
+    provider: Literal["ollama", "vllm", "openai"] = Field(
+        default_factory=lambda: _env_str("EMBEDDINGS_PROVIDER", "ollama"),
+        description="Embedding provider"
+    )
+    model: str = Field(
+        default_factory=lambda: _env_str("EMBEDDINGS_MODEL", "snowflake-arctic-embed2:latest"),
+        description="Model name"
+    )
+    dimension: int = Field(
+        default_factory=lambda: _env_int("EMBEDDINGS_DIMENSION", 1536),
+        description="Embedding dimension"
+    )
+    max_chunk_length: int = Field(
+        default_factory=lambda: _env_int("MAX_CHUNK_LENGTH", 8192),
+        description="Max characters per chunk"
+    )
+    batch_size: int = Field(
+        default_factory=lambda: _env_int("EMBEDDING_BATCH_SIZE", 100),
+        description="Batch size for processing"
+    )
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     vllm: VLLMConfig = Field(default_factory=VLLMConfig)
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
