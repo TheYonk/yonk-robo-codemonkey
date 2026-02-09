@@ -1,0 +1,469 @@
+{% extends "base.html" %}
+
+{% block title %}Metrics - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h2 class="text-2xl font-bold text-slate-100">Usage Metrics</h2>
+        <div class="flex items-center gap-3 text-sm">
+            <span id="last-updated" class="text-slate-500"></span>
+            <select id="days-select" onchange="loadAllMetrics()" class="text-xs bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-200">
+                <option value="1">Last 24h</option>
+                <option value="7" selected>Last 7 days</option>
+                <option value="30">Last 30 days</option>
+            </select>
+            <button id="refresh-toggle" onclick="toggleAutoRefresh()" class="px-2 py-1 bg-emerald-900/50 text-emerald-400 rounded text-xs border border-emerald-700">
+                Auto-refresh: ON
+            </button>
+        </div>
+    </div>
+
+    <!-- Summary Cards (24h) -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="summary-cards">
+        <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+            <p class="text-sm text-slate-400">Tool Calls (24h)</p>
+            <p id="summary-tool-calls" class="text-3xl font-bold text-slate-100">--</p>
+            <p id="summary-tool-errors" class="text-xs text-slate-500 mt-1"></p>
+        </div>
+        <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+            <p class="text-sm text-slate-400">LLM Tokens (24h)</p>
+            <p id="summary-llm-tokens" class="text-3xl font-bold text-slate-100">--</p>
+            <p id="summary-llm-calls" class="text-xs text-slate-500 mt-1"></p>
+        </div>
+        <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+            <p class="text-sm text-slate-400">Embeddings (24h)</p>
+            <p id="summary-embed-texts" class="text-3xl font-bold text-slate-100">--</p>
+            <p id="summary-embed-calls" class="text-xs text-slate-500 mt-1"></p>
+        </div>
+    </div>
+
+    <!-- Tool Call Stats -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-slate-100 mb-4">MCP Tool Calls</h3>
+        <div id="tool-stats-content">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+    </div>
+
+    <!-- LLM Usage Stats -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-slate-100 mb-4">LLM Usage</h3>
+        <div id="llm-stats-content">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Embedding Stats -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-slate-100 mb-4">Embedding Calls</h3>
+        <div id="embed-stats-content">
+            <p class="text-slate-400">Loading...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let refreshInterval = null;
+const REFRESH_INTERVAL_MS = 30000;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadAllMetrics();
+    startAutoRefresh();
+});
+
+function getDays() {
+    return document.getElementById('days-select').value;
+}
+
+function startAutoRefresh() {
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(loadAllMetrics, REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh() {
+    if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+}
+
+function toggleAutoRefresh() {
+    const btn = document.getElementById('refresh-toggle');
+    if (refreshInterval) {
+        stopAutoRefresh();
+        btn.textContent = 'Auto-refresh: OFF';
+        btn.className = 'px-2 py-1 bg-slate-700 text-slate-400 rounded text-xs border border-slate-600';
+    } else {
+        startAutoRefresh();
+        btn.textContent = 'Auto-refresh: ON';
+        btn.className = 'px-2 py-1 bg-emerald-900/50 text-emerald-400 rounded text-xs border border-emerald-700';
+    }
+}
+
+function fmt(n) {
+    if (n === null || n === undefined) return '--';
+    return Number(n).toLocaleString();
+}
+
+function fmtMs(n) {
+    if (n === null || n === undefined) return '--';
+    if (n > 60000) return (n / 1000).toFixed(1) + 's';
+    if (n > 1000) return (n / 1000).toFixed(2) + 's';
+    return n + 'ms';
+}
+
+function fmtChars(n) {
+    if (n === null || n === undefined) return '--';
+    if (n > 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n > 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+}
+
+const fmtRelative = (isoDate) => {
+    if (!isoDate) return 'N/A';
+    const date = new Date(isoDate);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${Math.floor(diffMs / 86400000)}d ago`;
+};
+
+async function loadAllMetrics() {
+    const days = getDays();
+    await Promise.all([
+        loadOverview(),
+        loadToolStats(days),
+        loadLLMStats(days),
+        loadEmbedStats(days)
+    ]);
+    document.getElementById('last-updated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+}
+
+async function loadOverview() {
+    try {
+        const resp = await fetch('/api/metrics/overview');
+        const data = await resp.json();
+        if (!data.enabled) {
+            document.getElementById('summary-tool-calls').textContent = 'N/A';
+            document.getElementById('summary-llm-tokens').textContent = 'N/A';
+            document.getElementById('summary-embed-texts').textContent = 'N/A';
+            return;
+        }
+        document.getElementById('summary-tool-calls').textContent = fmt(data.tool_calls.total);
+        document.getElementById('summary-tool-errors').textContent =
+            data.tool_calls.errors > 0 ? `${data.tool_calls.errors} errors | avg ${fmtMs(data.tool_calls.avg_duration_ms)}` : `avg ${fmtMs(data.tool_calls.avg_duration_ms)}`;
+        document.getElementById('summary-llm-tokens').textContent = fmt(data.llm_calls.total_tokens);
+        document.getElementById('summary-llm-calls').textContent =
+            `${fmt(data.llm_calls.total)} calls | avg ${fmtMs(data.llm_calls.avg_duration_ms)}`;
+        document.getElementById('summary-embed-texts').textContent = fmt(data.embedding_calls.total_texts);
+        document.getElementById('summary-embed-calls').textContent =
+            `${fmt(data.embedding_calls.total)} calls | ${fmtChars(data.embedding_calls.total_chars)} chars`;
+    } catch (e) {
+        console.error('Overview load error:', e);
+    }
+}
+
+async function loadToolStats(days) {
+    const content = document.getElementById('tool-stats-content');
+    try {
+        const resp = await fetch(`/api/metrics/tools?days=${days}`);
+        const data = await resp.json();
+        if (data.error) { content.innerHTML = `<p class="text-red-400">${data.error}</p>`; return; }
+
+        // Aggregate daily stats by tool_name for summary table
+        const byTool = {};
+        (data.daily_stats || []).forEach(r => {
+            if (!byTool[r.tool_name]) byTool[r.tool_name] = { calls: 0, errors: 0, avg: [], p95: [], max: 0 };
+            const t = byTool[r.tool_name];
+            t.calls += r.call_count;
+            t.errors += r.error_count;
+            if (r.avg_duration_ms !== null) t.avg.push(r.avg_duration_ms);
+            if (r.p95_duration_ms !== null) t.p95.push(r.p95_duration_ms);
+            t.max = Math.max(t.max, r.max_duration_ms || 0);
+        });
+
+        const toolRows = Object.entries(byTool).sort((a,b) => b[1].calls - a[1].calls);
+
+        let html = '';
+        if (toolRows.length > 0) {
+            html += `
+            <div class="overflow-x-auto mb-6">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-slate-300">Tool</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Calls</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Errors</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Avg Latency</th>
+                            <th class="px-3 py-2 text-right text-slate-300">P95 Latency</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Max Latency</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${toolRows.map(([name, t]) => {
+                            const avgAll = t.avg.length ? Math.round(t.avg.reduce((a,b)=>a+b,0)/t.avg.length) : null;
+                            const p95All = t.p95.length ? Math.max(...t.p95) : null;
+                            return `
+                            <tr class="hover:bg-slate-700/50">
+                                <td class="px-3 py-2 font-medium text-slate-100 font-mono text-xs">${name}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmt(t.calls)}</td>
+                                <td class="px-3 py-2 text-right ${t.errors > 0 ? 'text-red-400' : 'text-slate-500'}">${t.errors}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmtMs(avgAll)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmtMs(p95All)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmtMs(t.max)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        } else {
+            html += '<p class="text-slate-500 mb-4">No daily stats yet. Stats are aggregated every 5 minutes by the daemon.</p>';
+        }
+
+        // Recent calls
+        if (data.recent_calls && data.recent_calls.length > 0) {
+            html += `
+            <h4 class="font-semibold text-slate-300 mb-2">Recent Calls</h4>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-xs">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-slate-300">Tool</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Duration</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Status</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Repo</th>
+                            <th class="px-3 py-2 text-left text-slate-300">When</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${data.recent_calls.map(r => `
+                        <tr class="hover:bg-slate-700/50">
+                            <td class="px-3 py-2 font-mono text-slate-100">${r.tool_name}</td>
+                            <td class="px-3 py-2 text-right text-slate-300">${fmtMs(r.duration_ms)}</td>
+                            <td class="px-3 py-2">
+                                <span class="px-2 py-0.5 rounded text-xs ${r.status === 'ok' ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-700' : 'bg-red-900/50 text-red-400 border border-red-700'}">${r.status}</span>
+                            </td>
+                            <td class="px-3 py-2 text-slate-400">${r.repo_context || '-'}</td>
+                            <td class="px-3 py-2 text-slate-400">${fmtRelative(r.created_at)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        }
+
+        content.innerHTML = html || '<p class="text-slate-500">No metrics data yet.</p>';
+    } catch (e) {
+        content.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+    }
+}
+
+async function loadLLMStats(days) {
+    const content = document.getElementById('llm-stats-content');
+    try {
+        const resp = await fetch(`/api/metrics/llm?days=${days}`);
+        const data = await resp.json();
+        if (data.error) { content.innerHTML = `<p class="text-red-400">${data.error}</p>`; return; }
+
+        // Aggregate by provider/model
+        const byModel = {};
+        (data.daily_stats || []).forEach(r => {
+            const key = `${r.provider}/${r.model}`;
+            if (!byModel[key]) byModel[key] = { provider: r.provider, model: r.model, calls: 0, errors: 0, prompt: 0, completion: 0, total: 0, avg: [], max: 0 };
+            const m = byModel[key];
+            m.calls += r.call_count;
+            m.errors += r.error_count;
+            m.prompt += r.total_prompt_tokens || 0;
+            m.completion += r.total_completion_tokens || 0;
+            m.total += r.total_tokens || 0;
+            if (r.avg_duration_ms !== null) m.avg.push(r.avg_duration_ms);
+            m.max = Math.max(m.max, r.max_duration_ms || 0);
+        });
+
+        const modelRows = Object.entries(byModel).sort((a,b) => b[1].total - a[1].total);
+
+        let html = '';
+        if (modelRows.length > 0) {
+            html += `
+            <div class="overflow-x-auto mb-6">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-slate-300">Provider / Model</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Calls</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Prompt Tokens</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Completion Tokens</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Total Tokens</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Avg Latency</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${modelRows.map(([key, m]) => {
+                            const avgAll = m.avg.length ? Math.round(m.avg.reduce((a,b)=>a+b,0)/m.avg.length) : null;
+                            return `
+                            <tr class="hover:bg-slate-700/50">
+                                <td class="px-3 py-2 font-medium text-slate-100">
+                                    <span class="text-slate-400 text-xs">${m.provider}/</span>${m.model}
+                                </td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmt(m.calls)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmt(m.prompt)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmt(m.completion)}</td>
+                                <td class="px-3 py-2 text-right font-medium text-slate-100">${fmt(m.total)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmtMs(avgAll)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        } else {
+            html += '<p class="text-slate-500 mb-4">No LLM stats yet.</p>';
+        }
+
+        // Recent calls
+        if (data.recent_calls && data.recent_calls.length > 0) {
+            html += `
+            <h4 class="font-semibold text-slate-300 mb-2">Recent Calls</h4>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-xs">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-slate-300">Provider/Model</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Task</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Tokens</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Duration</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Status</th>
+                            <th class="px-3 py-2 text-left text-slate-300">When</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${data.recent_calls.map(r => `
+                        <tr class="hover:bg-slate-700/50">
+                            <td class="px-3 py-2 font-mono text-slate-100">${r.provider}/${r.model}</td>
+                            <td class="px-3 py-2">
+                                <span class="px-2 py-0.5 rounded text-xs ${r.task_type === 'deep' ? 'bg-purple-900/50 text-purple-400 border border-purple-700' : 'bg-cyan-900/50 text-cyan-400 border border-cyan-700'}">${r.task_type}</span>
+                            </td>
+                            <td class="px-3 py-2 text-right text-slate-300">
+                                ${fmt(r.total_tokens)}${r.tokens_estimated ? '<span class="text-slate-500 ml-1">~</span>' : ''}
+                            </td>
+                            <td class="px-3 py-2 text-right text-slate-300">${fmtMs(r.duration_ms)}</td>
+                            <td class="px-3 py-2">
+                                <span class="px-2 py-0.5 rounded text-xs ${r.status === 'ok' ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-700' : 'bg-red-900/50 text-red-400 border border-red-700'}">${r.status}</span>
+                            </td>
+                            <td class="px-3 py-2 text-slate-400">${fmtRelative(r.created_at)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        }
+
+        content.innerHTML = html || '<p class="text-slate-500">No LLM metrics data yet.</p>';
+    } catch (e) {
+        content.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+    }
+}
+
+async function loadEmbedStats(days) {
+    const content = document.getElementById('embed-stats-content');
+    try {
+        const resp = await fetch(`/api/metrics/embeddings?days=${days}`);
+        const data = await resp.json();
+        if (data.error) { content.innerHTML = `<p class="text-red-400">${data.error}</p>`; return; }
+
+        // Aggregate by provider/model
+        const byModel = {};
+        (data.daily_stats || []).forEach(r => {
+            const key = `${r.provider}/${r.model}`;
+            if (!byModel[key]) byModel[key] = { provider: r.provider, model: r.model, calls: 0, errors: 0, texts: 0, chars: 0, avg: [], max: 0 };
+            const m = byModel[key];
+            m.calls += r.call_count;
+            m.errors += r.error_count;
+            m.texts += r.total_texts || 0;
+            m.chars += r.total_chars || 0;
+            if (r.avg_duration_ms !== null) m.avg.push(r.avg_duration_ms);
+            m.max = Math.max(m.max, r.max_duration_ms || 0);
+        });
+
+        const modelRows = Object.entries(byModel).sort((a,b) => b[1].texts - a[1].texts);
+
+        let html = '';
+        if (modelRows.length > 0) {
+            html += `
+            <div class="overflow-x-auto mb-6">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-slate-300">Provider / Model</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Calls</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Errors</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Texts Embedded</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Chars Embedded</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Avg Latency</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Max Latency</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${modelRows.map(([key, m]) => {
+                            const avgAll = m.avg.length ? Math.round(m.avg.reduce((a,b)=>a+b,0)/m.avg.length) : null;
+                            return `
+                            <tr class="hover:bg-slate-700/50">
+                                <td class="px-3 py-2 font-medium text-slate-100">
+                                    <span class="text-slate-400 text-xs">${m.provider}/</span>${m.model}
+                                </td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmt(m.calls)}</td>
+                                <td class="px-3 py-2 text-right ${m.errors > 0 ? 'text-red-400' : 'text-slate-500'}">${m.errors}</td>
+                                <td class="px-3 py-2 text-right font-medium text-slate-100">${fmt(m.texts)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmtChars(m.chars)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmtMs(avgAll)}</td>
+                                <td class="px-3 py-2 text-right text-slate-300">${fmtMs(m.max)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        } else {
+            html += '<p class="text-slate-500 mb-4">No embedding stats yet.</p>';
+        }
+
+        // Recent calls
+        if (data.recent_calls && data.recent_calls.length > 0) {
+            html += `
+            <h4 class="font-semibold text-slate-300 mb-2">Recent Calls</h4>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-xs">
+                    <thead class="bg-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-slate-300">Provider/Model</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Texts</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Chars</th>
+                            <th class="px-3 py-2 text-right text-slate-300">Duration</th>
+                            <th class="px-3 py-2 text-left text-slate-300">Status</th>
+                            <th class="px-3 py-2 text-left text-slate-300">When</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        ${data.recent_calls.map(r => `
+                        <tr class="hover:bg-slate-700/50">
+                            <td class="px-3 py-2 font-mono text-slate-100">${r.provider}/${r.model}</td>
+                            <td class="px-3 py-2 text-right text-slate-300">${fmt(r.text_count)}</td>
+                            <td class="px-3 py-2 text-right text-slate-300">${fmtChars(r.total_chars)}</td>
+                            <td class="px-3 py-2 text-right text-slate-300">${fmtMs(r.duration_ms)}</td>
+                            <td class="px-3 py-2">
+                                <span class="px-2 py-0.5 rounded text-xs ${r.status === 'ok' ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-700' : 'bg-red-900/50 text-red-400 border border-red-700'}">${r.status}</span>
+                            </td>
+                            <td class="px-3 py-2 text-slate-400">${fmtRelative(r.created_at)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        }
+
+        content.innerHTML = html || '<p class="text-slate-500">No embedding metrics data yet.</p>';
+    } catch (e) {
+        content.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+    }
+}
+</script>
+{% endblock %}

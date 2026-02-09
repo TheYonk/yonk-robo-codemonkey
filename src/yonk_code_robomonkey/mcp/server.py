@@ -6,6 +6,7 @@ Uses the official mcp Python SDK for robust protocol handling.
 import asyncio
 import sys
 import json
+import time
 from typing import Any
 
 from mcp.server import Server
@@ -14,6 +15,7 @@ from mcp import types
 
 from yonk_code_robomonkey.mcp.tools import TOOL_REGISTRY
 from yonk_code_robomonkey.mcp.schemas import TOOL_SCHEMAS
+from yonk_code_robomonkey.metrics import record_tool_call
 
 
 # Create MCP server instance
@@ -50,7 +52,28 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
         raise ValueError(f"Unknown tool: {name}")
 
     handler = TOOL_REGISTRY[name]
-    result = await handler(**arguments)
+
+    # Extract repo context from arguments for metrics attribution
+    repo_context = arguments.get("repo") or arguments.get("repo_id") or arguments.get("repo_name_or_id")
+
+    t0 = time.monotonic()
+    status = "ok"
+    error_msg = None
+    try:
+        result = await handler(**arguments)
+    except Exception as exc:
+        status = "error"
+        error_msg = str(exc)[:500]
+        raise
+    finally:
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record_tool_call(
+            tool_name=name,
+            duration_ms=duration_ms,
+            status=status,
+            repo_context=str(repo_context) if repo_context else None,
+            error_message=error_msg,
+        )
 
     # Return result as TextContent
     return [
@@ -66,14 +89,32 @@ async def run_stdio_server() -> None:
     print("RoboMonkey MCP server starting on stdio...", file=sys.stderr)
     print(f"Available tools: {', '.join(TOOL_REGISTRY.keys())}", file=sys.stderr)
 
-    async with stdio_server() as (read_stream, write_stream):
-        init_options = app.create_initialization_options()
-        await app.run(
-            read_stream,
-            write_stream,
-            init_options,
-            raise_exceptions=False
-        )
+    # Initialize metrics collector
+    from yonk_code_robomonkey.metrics import init_collector, shutdown_collector
+    import os
+    db_url = os.getenv("DATABASE_URL")
+    collector = None
+    if db_url:
+        try:
+            collector = init_collector(db_url)
+            collector.start()
+            print("Metrics collector initialized", file=sys.stderr)
+        except Exception as e:
+            print(f"Metrics collector init failed (non-fatal): {e}", file=sys.stderr)
+
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            init_options = app.create_initialization_options()
+            await app.run(
+                read_stream,
+                write_stream,
+                init_options,
+                raise_exceptions=False
+            )
+    finally:
+        if collector:
+            await collector.stop()
+            shutdown_collector()
 
 
 def main() -> None:

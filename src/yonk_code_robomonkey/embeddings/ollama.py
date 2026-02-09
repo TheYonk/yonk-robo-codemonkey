@@ -4,9 +4,12 @@ Provides embedding generation via Ollama's /api/embeddings endpoint.
 """
 from __future__ import annotations
 import asyncio
+import time
 import httpx
 import logging
 from typing import List
+
+from yonk_code_robomonkey.metrics import record_embedding_call
 
 logger = logging.getLogger(__name__)
 
@@ -36,46 +39,70 @@ async def ollama_embed(
     if not texts:
         return []
 
+    text_count = len(texts)
+    total_chars = sum(len(t) for t in texts)
+    t0 = time.monotonic()
+    metric_status = "ok"
+    metric_error = None
+
     embeddings: list[list[float]] = []
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        # Ollama API processes one text at a time
-        for idx, text in enumerate(texts):
-            text_len = len(text)
-            text_preview = text[:200] + "..." if len(text) > 200 else text
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Ollama API processes one text at a time
+            for idx, text in enumerate(texts):
+                text_len = len(text)
+                text_preview = text[:200] + "..." if len(text) > 200 else text
 
-            logger.debug(f"Embedding text {idx+1}/{len(texts)}: length={text_len}, preview={text_preview!r}")
+                logger.debug(f"Embedding text {idx+1}/{len(texts)}: length={text_len}, preview={text_preview!r}")
 
-            # Try with exponential backoff
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    response = await client.post(
-                        f"{base_url.rstrip('/')}/api/embeddings",
-                        json={"model": model, "prompt": text},
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    embeddings.append(data["embedding"])
-                    break  # Success, move to next text
+                # Try with exponential backoff
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        response = await client.post(
+                            f"{base_url.rstrip('/')}/api/embeddings",
+                            json={"model": model, "prompt": text},
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        embeddings.append(data["embedding"])
+                        break  # Success, move to next text
 
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 500 and attempt == max_retries - 1:
-                        # Ollama 500 error - skip this text with zero embedding
-                        logger.warning(f"Skipping text {idx+1}/{len(texts)} after {max_retries} attempts (len={text_len}): {e}")
-                        logger.warning(f"Text preview: {text_preview!r}")
-                        # Return zero vector as placeholder
-                        embeddings.append([0.0] * embedding_dim)
-                        break
-                    elif attempt < max_retries - 1:
-                        # Retry with exponential backoff
-                        await asyncio.sleep(2 ** attempt)
-                    else:
-                        raise
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 500 and attempt == max_retries - 1:
+                            # Ollama 500 error - skip this text with zero embedding
+                            logger.warning(f"Skipping text {idx+1}/{len(texts)} after {max_retries} attempts (len={text_len}): {e}")
+                            logger.warning(f"Text preview: {text_preview!r}")
+                            # Return zero vector as placeholder
+                            embeddings.append([0.0] * embedding_dim)
+                            break
+                        elif attempt < max_retries - 1:
+                            # Retry with exponential backoff
+                            await asyncio.sleep(2 ** attempt)
+                        else:
+                            raise
 
-                except httpx.HTTPError as e:
-                    error_msg = f"Ollama embedding failed for text {idx+1}/{len(texts)} (len={text_len}): {e}"
-                    logger.error(f"{error_msg}\nText preview: {text_preview!r}")
-                    raise RuntimeError(error_msg)
+                    except httpx.HTTPError as e:
+                        error_msg = f"Ollama embedding failed for text {idx+1}/{len(texts)} (len={text_len}): {e}"
+                        logger.error(f"{error_msg}\nText preview: {text_preview!r}")
+                        raise RuntimeError(error_msg)
 
-    return embeddings
+        return embeddings
+
+    except Exception as exc:
+        metric_status = "error"
+        metric_error = str(exc)[:500]
+        raise
+
+    finally:
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record_embedding_call(
+            provider="ollama",
+            model=model,
+            text_count=text_count,
+            total_chars=total_chars,
+            duration_ms=duration_ms,
+            status=metric_status,
+            error_message=metric_error,
+        )

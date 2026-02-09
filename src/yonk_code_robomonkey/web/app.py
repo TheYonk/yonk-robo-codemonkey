@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from yonk_code_robomonkey.config import Settings
 
 # Import routes
-from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats, maintenance, sources, docs, settings
+from yonk_code_robomonkey.web.routes import repos, tables, mcp_tools, stats, maintenance, sources, docs, settings, metrics
 
 logger = logging.getLogger(__name__)
 
@@ -119,9 +119,25 @@ async def lifespan(app: FastAPI):
     print("RoboMonkey Web UI starting up...")
     logger.info("RoboMonkey Web UI starting up...")
     await run_migrations()
+
+    # Initialize metrics collector
+    from yonk_code_robomonkey.metrics import init_collector, shutdown_collector
+    settings_obj = Settings()
+    metrics_collector = None
+    if settings_obj.database_url:
+        try:
+            metrics_collector = init_collector(settings_obj.database_url)
+            metrics_collector.start()
+            print("Metrics collector initialized")
+        except Exception as e:
+            print(f"Metrics collector init failed (non-fatal): {e}")
+
     print("Startup complete, server ready")
     yield
     # Shutdown
+    if metrics_collector:
+        await metrics_collector.stop()
+        shutdown_collector()
     print("RoboMonkey Web UI shutting down...")
     logger.info("RoboMonkey Web UI shutting down...")
 
@@ -161,6 +177,7 @@ app.include_router(maintenance.router, prefix="/api/maintenance", tags=["mainten
 app.include_router(sources.router, prefix="/api", tags=["sources"])
 app.include_router(docs.router, prefix="/api/docs", tags=["knowledge-base"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -209,6 +226,12 @@ async def knowledge_base_page(request: Request):
 async def settings_page(request: Request):
     """Settings management page."""
     return templates.TemplateResponse("settings.html", {"request": request})
+
+
+@app.get("/metrics", response_class=HTMLResponse)
+async def metrics_page(request: Request):
+    """Metrics dashboard page."""
+    return templates.TemplateResponse("metrics.html", {"request": request})
 
 
 @app.get("/health")

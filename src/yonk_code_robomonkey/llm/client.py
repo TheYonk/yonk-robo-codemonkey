@@ -21,9 +21,12 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Literal
 
 import httpx
+
+from yonk_code_robomonkey.metrics import record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -136,12 +139,21 @@ async def call_llm(
     config = config_override or get_llm_config(task_type)
 
     provider = config.get("provider", "ollama")
-    model = config.get("model")
+    model = config.get("model") or "unknown"
     base_url = config.get("base_url", "http://localhost:11434")
     temperature = config.get("temperature", 0.3)
     max_tokens = config.get("max_tokens", 2000)
 
     logger.debug(f"Calling {provider}/{model} (task_type={task_type})")
+
+    t0 = time.monotonic()
+    metric_status = "ok"
+    metric_error = None
+    prompt_tokens = None
+    completion_tokens = None
+    total_tokens = None
+    tokens_estimated = True
+    result_text: str | None = None
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -159,7 +171,19 @@ async def call_llm(
                     }
                 )
                 response.raise_for_status()
-                return response.json().get("response", "")
+                data = response.json()
+                result_text = data.get("response", "")
+                # Ollama returns eval_count/prompt_eval_count in some versions
+                if "prompt_eval_count" in data:
+                    prompt_tokens = data["prompt_eval_count"]
+                    completion_tokens = data.get("eval_count", 0)
+                    total_tokens = prompt_tokens + completion_tokens
+                    tokens_estimated = False
+                else:
+                    prompt_tokens = len(prompt) // 4
+                    completion_tokens = len(result_text) // 4 if result_text else 0
+                    total_tokens = prompt_tokens + completion_tokens
+                return result_text
 
             elif provider == "vllm":
                 api_key = config.get("api_key") or os.getenv("VLLM_API_KEY", "local-key")
@@ -174,9 +198,22 @@ async def call_llm(
                     }
                 )
                 response.raise_for_status()
-                choices = response.json().get("choices", [])
+                data = response.json()
+                choices = data.get("choices", [])
+                # vLLM returns usage in OpenAI format
+                usage = data.get("usage", {})
+                if usage:
+                    prompt_tokens = usage.get("prompt_tokens")
+                    completion_tokens = usage.get("completion_tokens")
+                    total_tokens = usage.get("total_tokens")
+                    tokens_estimated = False
                 if choices:
-                    return choices[0].get("text", "")
+                    result_text = choices[0].get("text", "")
+                    if tokens_estimated:
+                        prompt_tokens = len(prompt) // 4
+                        completion_tokens = len(result_text) // 4
+                        total_tokens = prompt_tokens + completion_tokens
+                    return result_text
 
             elif provider == "openai":
                 # OpenAI-compatible chat completions API
@@ -229,12 +266,42 @@ async def call_llm(
                 if response.status_code >= 400:
                     logger.error(f"OpenAI API error {response.status_code}: {response.text}")
                 response.raise_for_status()
-                choices = response.json().get("choices", [])
+                data = response.json()
+                # Extract real token usage from OpenAI response
+                usage = data.get("usage", {})
+                if usage:
+                    prompt_tokens = usage.get("prompt_tokens")
+                    completion_tokens = usage.get("completion_tokens")
+                    total_tokens = usage.get("total_tokens")
+                    tokens_estimated = False
+                choices = data.get("choices", [])
                 if choices:
-                    return choices[0].get("message", {}).get("content", "")
+                    result_text = choices[0].get("message", {}).get("content", "")
+                    if tokens_estimated:
+                        prompt_tokens = len(prompt) // 4
+                        completion_tokens = len(result_text) // 4 if result_text else 0
+                        total_tokens = prompt_tokens + completion_tokens
+                    return result_text
 
     except Exception as e:
+        metric_status = "error"
+        metric_error = str(e)[:500]
         logger.warning(f"LLM call failed ({provider}/{model}): {e}")
+
+    finally:
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record_llm_call(
+            provider=provider,
+            model=model,
+            task_type=task_type,
+            duration_ms=duration_ms,
+            status=metric_status,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            tokens_estimated=tokens_estimated,
+            error_message=metric_error,
+        )
 
     return None
 

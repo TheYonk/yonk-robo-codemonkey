@@ -77,9 +77,8 @@ CREATE TABLE IF NOT EXISTS job_queue (
         'REINDEX_FILE',
         'REINDEX_MANY',
         'EMBED_MISSING',
-        'EMBED_CHUNK',
+        'EMBED_SUMMARIES',
         'DOCS_SCAN',
-        'SUMMARIZE_MISSING',
         'SUMMARIZE_FILES',
         'SUMMARIZE_SYMBOLS',
         'TAG_RULES_SYNC',
@@ -318,6 +317,172 @@ CREATE TRIGGER repo_registry_updated_at
     BEFORE UPDATE ON repo_registry
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================================
+-- MCP Tool Metrics: Per-call log for MCP tool invocations
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS mcp_tool_metrics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_name TEXT NOT NULL,
+    duration_ms INT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok',  -- ok | error
+    repo_context TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT valid_tool_status CHECK (status IN ('ok', 'error'))
+);
+
+CREATE INDEX idx_mcp_tool_metrics_created ON mcp_tool_metrics(created_at DESC);
+CREATE INDEX idx_mcp_tool_metrics_tool ON mcp_tool_metrics(tool_name, created_at DESC);
+
+-- ============================================================================
+-- MCP Tool Stats: Daily rollup by tool_name
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS mcp_tool_stats (
+    tool_name TEXT NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+
+    call_count INT NOT NULL DEFAULT 0,
+    error_count INT NOT NULL DEFAULT 0,
+    avg_duration_ms INT,
+    p95_duration_ms INT,
+    max_duration_ms INT,
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (tool_name, date)
+);
+
+CREATE INDEX idx_mcp_tool_stats_date ON mcp_tool_stats(date DESC);
+
+-- ============================================================================
+-- LLM Call Metrics: Per-call log for LLM API invocations
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS llm_call_metrics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    task_type TEXT NOT NULL,  -- deep | small
+    prompt_tokens INT,
+    completion_tokens INT,
+    total_tokens INT,
+    tokens_estimated BOOLEAN NOT NULL DEFAULT true,
+    duration_ms INT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok',
+    caller TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT valid_llm_status CHECK (status IN ('ok', 'error'))
+);
+
+CREATE INDEX idx_llm_call_metrics_created ON llm_call_metrics(created_at DESC);
+CREATE INDEX idx_llm_call_metrics_model ON llm_call_metrics(provider, model, created_at DESC);
+
+-- ============================================================================
+-- LLM Call Stats: Daily rollup by provider/model/task_type
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS llm_call_stats (
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+
+    call_count INT NOT NULL DEFAULT 0,
+    error_count INT NOT NULL DEFAULT 0,
+    total_prompt_tokens BIGINT NOT NULL DEFAULT 0,
+    total_completion_tokens BIGINT NOT NULL DEFAULT 0,
+    total_tokens BIGINT NOT NULL DEFAULT 0,
+    avg_duration_ms INT,
+    p95_duration_ms INT,
+    max_duration_ms INT,
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (provider, model, task_type, date)
+);
+
+CREATE INDEX idx_llm_call_stats_date ON llm_call_stats(date DESC);
+
+-- ============================================================================
+-- Embedding Call Metrics: Per-call log for embedding API invocations
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS embedding_call_metrics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    text_count INT NOT NULL,
+    total_chars INT NOT NULL,
+    duration_ms INT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok',
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT valid_embed_status CHECK (status IN ('ok', 'error'))
+);
+
+CREATE INDEX idx_embedding_call_metrics_created ON embedding_call_metrics(created_at DESC);
+CREATE INDEX idx_embedding_call_metrics_model ON embedding_call_metrics(provider, model, created_at DESC);
+
+-- ============================================================================
+-- Embedding Call Stats: Daily rollup by provider/model
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS embedding_call_stats (
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+
+    call_count INT NOT NULL DEFAULT 0,
+    error_count INT NOT NULL DEFAULT 0,
+    total_texts INT NOT NULL DEFAULT 0,
+    total_chars BIGINT NOT NULL DEFAULT 0,
+    avg_duration_ms INT,
+    p95_duration_ms INT,
+    max_duration_ms INT,
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (provider, model, date)
+);
+
+CREATE INDEX idx_embedding_call_stats_date ON embedding_call_stats(date DESC);
+
+-- ============================================================================
+-- Cleanup function for granular metrics data
+-- ============================================================================
+CREATE OR REPLACE FUNCTION cleanup_old_metrics(
+    p_retention_days INT DEFAULT 30
+) RETURNS JSONB AS $$
+DECLARE
+    v_tool_deleted INT;
+    v_llm_deleted INT;
+    v_embed_deleted INT;
+    v_cutoff TIMESTAMPTZ;
+BEGIN
+    v_cutoff := now() - (p_retention_days || ' days')::INTERVAL;
+
+    DELETE FROM robomonkey_control.mcp_tool_metrics
+    WHERE created_at < v_cutoff;
+    GET DIAGNOSTICS v_tool_deleted = ROW_COUNT;
+
+    DELETE FROM robomonkey_control.llm_call_metrics
+    WHERE created_at < v_cutoff;
+    GET DIAGNOSTICS v_llm_deleted = ROW_COUNT;
+
+    DELETE FROM robomonkey_control.embedding_call_metrics
+    WHERE created_at < v_cutoff;
+    GET DIAGNOSTICS v_embed_deleted = ROW_COUNT;
+
+    RETURN jsonb_build_object(
+        'tool_metrics_deleted', v_tool_deleted,
+        'llm_metrics_deleted', v_llm_deleted,
+        'embedding_metrics_deleted', v_embed_deleted,
+        'retention_days', p_retention_days,
+        'cutoff', v_cutoff
+    );
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- Grants (assuming default postgres user)

@@ -3,7 +3,10 @@
 Provides embedding generation via vLLM's OpenAI-compatible /v1/embeddings endpoint.
 """
 from __future__ import annotations
+import time
 import httpx
+
+from yonk_code_robomonkey.metrics import record_embedding_call
 
 
 async def vllm_embed(
@@ -31,6 +34,12 @@ async def vllm_embed(
     if not texts:
         return []
 
+    text_count = len(texts)
+    total_chars = sum(len(t) for t in texts)
+    t0 = time.monotonic()
+    metric_status = "ok"
+    metric_error = None
+
     all_embeddings: list[list[float]] = []
 
     # Build headers - only add Authorization if api_key is provided
@@ -38,25 +47,43 @@ async def vllm_embed(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        # Process in batches
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Process in batches
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
 
-            try:
-                response = await client.post(
-                    f"{base_url.rstrip('/')}/v1/embeddings",
-                    headers=headers,
-                    json={"model": model, "input": batch},
-                )
-                response.raise_for_status()
-                data = response.json()
+                try:
+                    response = await client.post(
+                        f"{base_url.rstrip('/')}/v1/embeddings",
+                        headers=headers,
+                        json={"model": model, "input": batch},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
 
-                # Extract embeddings in order
-                batch_embeddings = [item["embedding"] for item in data["data"]]
-                all_embeddings.extend(batch_embeddings)
+                    # Extract embeddings in order
+                    batch_embeddings = [item["embedding"] for item in data["data"]]
+                    all_embeddings.extend(batch_embeddings)
 
-            except httpx.HTTPError as e:
-                raise RuntimeError(f"vLLM embedding failed: {e}")
+                except httpx.HTTPError as e:
+                    raise RuntimeError(f"vLLM embedding failed: {e}")
 
-    return all_embeddings
+        return all_embeddings
+
+    except Exception as exc:
+        metric_status = "error"
+        metric_error = str(exc)[:500]
+        raise
+
+    finally:
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record_embedding_call(
+            provider="vllm",
+            model=model,
+            text_count=text_count,
+            total_chars=total_chars,
+            duration_ms=duration_ms,
+            status=metric_status,
+            error_message=metric_error,
+        )

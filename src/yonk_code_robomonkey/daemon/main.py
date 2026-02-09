@@ -18,6 +18,7 @@ from yonk_code_robomonkey.daemon.queue import JobQueue
 from yonk_code_robomonkey.daemon.kb_queue import KBJobQueue
 from yonk_code_robomonkey.daemon.workers import WorkerPool
 from yonk_code_robomonkey.llm import set_llm_config
+from yonk_code_robomonkey.metrics import init_collector, shutdown_collector, run_all_rollups
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,15 @@ class CodeGraphDaemon:
 
         # Initialize control schema if needed
         await self._ensure_control_schema()
+
+        # Initialize metrics collector
+        try:
+            self._metrics_collector = init_collector(self.config.database.control_dsn)
+            self._metrics_collector.start()
+            logger.info("Metrics collector initialized")
+        except Exception as e:
+            logger.warning(f"Metrics collector init failed (non-fatal): {e}")
+            self._metrics_collector = None
 
         # Create job queue
         self.job_queue = JobQueue(
@@ -217,6 +227,20 @@ class CodeGraphDaemon:
                 self.config.daemon_id
             )
 
+    async def _metrics_rollup_loop(self):
+        """Periodically aggregate granular metrics into daily rollups."""
+        interval = 300  # 5 minutes
+        while self.running:
+            try:
+                await asyncio.sleep(interval)
+                result = await run_all_rollups(self.config.database.control_dsn)
+                logger.debug("Metrics rollup complete: %s", result)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Metrics rollup failed: %s", e)
+                await asyncio.sleep(interval)
+
     async def _heartbeat_loop(self):
         """Periodic heartbeat updater."""
         interval = self.config.monitoring.heartbeat_interval
@@ -236,6 +260,10 @@ class CodeGraphDaemon:
 
         # Start heartbeat task
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+        # Start metrics rollup task
+        metrics_rollup_task = asyncio.create_task(self._metrics_rollup_loop())
+        logger.info("Metrics rollup loop started (every 5 minutes)")
 
         # Start worker pool
         worker_task = asyncio.create_task(self.worker_pool.run())
@@ -294,6 +322,7 @@ class CodeGraphDaemon:
 
         # Cancel tasks
         heartbeat_task.cancel()
+        metrics_rollup_task.cancel()
         worker_task.cancel()
         if watcher_task:
             watcher_task.cancel()
@@ -306,8 +335,13 @@ class CodeGraphDaemon:
         health_monitor.stop()
         health_task.cancel()
 
+        # Stop metrics collector (final flush)
+        if getattr(self, '_metrics_collector', None):
+            await self._metrics_collector.stop()
+            shutdown_collector()
+
         # Wait for tasks to complete
-        tasks = [heartbeat_task, worker_task, health_task]
+        tasks = [heartbeat_task, metrics_rollup_task, worker_task, health_task]
         if watcher_task:
             tasks.append(watcher_task)
         if summary_task:
