@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+
+{% block title %}Transfer - RoboMonkey{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-100">Repo Transfer</h2>
+            <p class="text-sm text-slate-400 mt-1">Export and import indexed repositories between RoboMonkey instances</p>
+        </div>
+    </div>
+
+    <!-- Export Section -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg">
+        <div class="p-6 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Export Repository</h3>
+            <p class="text-sm text-slate-400 mt-1">Download an indexed repo as a .tar.gz archive including all data and embeddings</p>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Repository</label>
+                <select id="export-repo" onchange="onExportRepoChange()"
+                    class="w-full md:w-96 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-slate-100">
+                    <option value="">-- Select a repository --</option>
+                </select>
+            </div>
+
+            <!-- Repo stats -->
+            <div id="export-stats" class="hidden">
+                <div class="grid grid-cols-3 gap-4 max-w-md">
+                    <div class="bg-slate-700/50 rounded p-3 text-center">
+                        <div id="stat-files" class="text-xl font-bold text-blue-400">0</div>
+                        <div class="text-xs text-slate-400">Files</div>
+                    </div>
+                    <div class="bg-slate-700/50 rounded p-3 text-center">
+                        <div id="stat-symbols" class="text-xl font-bold text-emerald-400">0</div>
+                        <div class="text-xs text-slate-400">Symbols</div>
+                    </div>
+                    <div class="bg-slate-700/50 rounded p-3 text-center">
+                        <div id="stat-chunks" class="text-xl font-bold text-purple-400">0</div>
+                        <div class="text-xs text-slate-400">Chunks</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button id="export-btn" onclick="exportRepo()" disabled
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded font-medium text-sm transition-colors">
+                    Export
+                </button>
+                <span id="export-status" class="text-sm text-slate-400"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Section -->
+    <div class="bg-slate-800 border border-slate-700 shadow-lg rounded-lg">
+        <div class="p-6 border-b border-slate-700">
+            <h3 class="text-lg font-semibold text-slate-100">Import Repository</h3>
+            <p class="text-sm text-slate-400 mt-1">Upload a .tar.gz archive exported from another RoboMonkey instance</p>
+        </div>
+        <div class="p-6 space-y-4">
+            <!-- Drop zone -->
+            <div id="drop-zone"
+                class="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-slate-700/30 transition-colors"
+                onclick="document.getElementById('import-file').click()">
+                <svg class="mx-auto h-12 w-12 text-slate-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+                <p class="text-slate-300 font-medium">Drop .tar.gz file here or click to browse</p>
+                <p class="text-xs text-slate-500 mt-1">RoboMonkey export archives only</p>
+            </div>
+            <input type="file" id="import-file" accept=".tar.gz,.tgz" class="hidden" onchange="onFileSelected(this)">
+
+            <!-- Selected file info -->
+            <div id="file-info" class="hidden flex items-center gap-3 bg-slate-700/50 rounded p-3">
+                <svg class="w-5 h-5 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <div class="flex-1 min-w-0">
+                    <div id="file-name" class="text-sm text-slate-200 truncate"></div>
+                    <div id="file-size" class="text-xs text-slate-400"></div>
+                </div>
+                <button onclick="clearFile()" class="text-slate-400 hover:text-red-400 text-sm">Clear</button>
+            </div>
+
+            <!-- Progress bar -->
+            <div id="import-progress" class="hidden">
+                <div class="flex items-center justify-between mb-1">
+                    <span id="import-progress-label" class="text-sm text-slate-300">Uploading...</span>
+                    <span id="import-progress-pct" class="text-sm text-slate-400"></span>
+                </div>
+                <div class="w-full bg-slate-700 rounded-full h-2">
+                    <div id="import-progress-bar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button id="import-btn" onclick="importRepo()" disabled
+                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded font-medium text-sm transition-colors">
+                    Import
+                </button>
+                <span id="import-status" class="text-sm text-slate-400"></span>
+            </div>
+
+            <!-- Import result -->
+            <div id="import-result" class="hidden rounded-lg p-4">
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let repos = [];
+    let selectedFile = null;
+
+    // ========================
+    // Export
+    // ========================
+
+    async function loadRepos() {
+        try {
+            const resp = await fetch('/api/transfer/repos');
+            repos = await resp.json();
+
+            const select = document.getElementById('export-repo');
+            select.innerHTML = '<option value="">-- Select a repository --</option>';
+            repos.forEach(r => {
+                const opt = document.createElement('option');
+                opt.value = r.name;
+                opt.textContent = `${r.name} (${r.file_count} files, ${r.chunk_count} chunks)`;
+                select.appendChild(opt);
+            });
+        } catch (err) {
+            console.error('Failed to load repos:', err);
+        }
+    }
+
+    function onExportRepoChange() {
+        const name = document.getElementById('export-repo').value;
+        const btn = document.getElementById('export-btn');
+        const stats = document.getElementById('export-stats');
+
+        if (!name) {
+            btn.disabled = true;
+            stats.classList.add('hidden');
+            return;
+        }
+
+        btn.disabled = false;
+        const repo = repos.find(r => r.name === name);
+        if (repo) {
+            document.getElementById('stat-files').textContent = repo.file_count.toLocaleString();
+            document.getElementById('stat-symbols').textContent = repo.symbol_count.toLocaleString();
+            document.getElementById('stat-chunks').textContent = repo.chunk_count.toLocaleString();
+            stats.classList.remove('hidden');
+        }
+    }
+
+    function exportRepo() {
+        const name = document.getElementById('export-repo').value;
+        if (!name) return;
+
+        const status = document.getElementById('export-status');
+        status.textContent = 'Preparing download...';
+        status.className = 'text-sm text-blue-400';
+
+        // Trigger browser download
+        window.location.href = `/api/transfer/export/${encodeURIComponent(name)}`;
+
+        setTimeout(() => {
+            status.textContent = 'Download started. Check your browser downloads.';
+            status.className = 'text-sm text-emerald-400';
+        }, 1000);
+
+        setTimeout(() => {
+            status.textContent = '';
+        }, 5000);
+    }
+
+    // ========================
+    // Import
+    // ========================
+
+    // Drag and drop
+    const dropZone = document.getElementById('drop-zone');
+
+    ['dragenter', 'dragover'].forEach(evt => {
+        dropZone.addEventListener(evt, e => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-slate-700/30');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(evt => {
+        dropZone.addEventListener(evt, e => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-slate-700/30');
+        });
+    });
+
+    dropZone.addEventListener('drop', e => {
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleFile(files[0]);
+        }
+    });
+
+    function onFileSelected(input) {
+        if (input.files.length > 0) {
+            handleFile(input.files[0]);
+        }
+    }
+
+    function handleFile(file) {
+        if (!file.name.endsWith('.tar.gz') && !file.name.endsWith('.tgz')) {
+            showImportStatus('Please select a .tar.gz file', 'error');
+            return;
+        }
+        selectedFile = file;
+        document.getElementById('file-name').textContent = file.name;
+        document.getElementById('file-size').textContent = formatSize(file.size);
+        document.getElementById('file-info').classList.remove('hidden');
+        document.getElementById('import-btn').disabled = false;
+        document.getElementById('import-result').classList.add('hidden');
+    }
+
+    function clearFile() {
+        selectedFile = null;
+        document.getElementById('import-file').value = '';
+        document.getElementById('file-info').classList.add('hidden');
+        document.getElementById('import-btn').disabled = true;
+    }
+
+    async function importRepo() {
+        if (!selectedFile) return;
+
+        const btn = document.getElementById('import-btn');
+        btn.disabled = true;
+
+        const progress = document.getElementById('import-progress');
+        const progressBar = document.getElementById('import-progress-bar');
+        const progressLabel = document.getElementById('import-progress-label');
+        const progressPct = document.getElementById('import-progress-pct');
+
+        progress.classList.remove('hidden');
+        progressBar.style.width = '0%';
+        progressLabel.textContent = 'Uploading archive...';
+        showImportStatus('', '');
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        try {
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.addEventListener('progress', e => {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = pct + '%';
+                    progressPct.textContent = pct + '%';
+                    if (pct >= 100) {
+                        progressLabel.textContent = 'Importing tables...';
+                    }
+                }
+            });
+
+            const result = await new Promise((resolve, reject) => {
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve(JSON.parse(xhr.responseText));
+                    } else {
+                        try {
+                            const err = JSON.parse(xhr.responseText);
+                            reject(new Error(err.detail || `HTTP ${xhr.status}`));
+                        } catch {
+                            reject(new Error(`HTTP ${xhr.status}: ${xhr.statusText}`));
+                        }
+                    }
+                };
+                xhr.onerror = () => reject(new Error('Network error'));
+                xhr.open('POST', '/api/transfer/import');
+                xhr.send(formData);
+            });
+
+            progressBar.style.width = '100%';
+            progressBar.classList.remove('bg-blue-500');
+            progressBar.classList.add('bg-emerald-500');
+            progressLabel.textContent = 'Import complete';
+
+            showImportResult(result);
+
+            // Refresh repo list
+            loadRepos();
+            if (window.refreshRepoStatus) window.refreshRepoStatus();
+
+        } catch (err) {
+            progressBar.classList.remove('bg-blue-500');
+            progressBar.classList.add('bg-red-500');
+            progressLabel.textContent = 'Import failed';
+            showImportStatus(err.message, 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function showImportResult(result) {
+        const el = document.getElementById('import-result');
+        el.classList.remove('hidden');
+
+        const totalRows = result.rows_imported || 0;
+        const tables = result.tables_imported || {};
+        const tableCount = Object.keys(tables).filter(t => tables[t] > 0).length;
+
+        let warningsHtml = '';
+        if (result.warnings && result.warnings.length > 0) {
+            warningsHtml = `
+                <div class="mt-3 bg-yellow-900/30 border border-yellow-700/50 rounded p-3">
+                    <div class="text-sm font-medium text-yellow-400 mb-1">Warnings</div>
+                    <ul class="text-xs text-yellow-300/80 space-y-1 list-disc list-inside">
+                        ${result.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+
+        el.className = 'rounded-lg p-4 bg-emerald-900/20 border border-emerald-700/50';
+        el.innerHTML = `
+            <div class="flex items-center gap-2 mb-2">
+                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span class="text-emerald-300 font-medium">Successfully imported "${escapeHtml(result.repo_name)}"</span>
+            </div>
+            <div class="grid grid-cols-3 gap-3 max-w-sm">
+                <div class="text-center">
+                    <div class="text-lg font-bold text-slate-200">${tableCount}</div>
+                    <div class="text-xs text-slate-400">Tables</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-lg font-bold text-slate-200">${totalRows.toLocaleString()}</div>
+                    <div class="text-xs text-slate-400">Rows</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-lg font-bold ${result.embedding_dimension_match ? 'text-emerald-400' : 'text-yellow-400'}">${result.embedding_dimension_match ? 'Yes' : 'No'}</div>
+                    <div class="text-xs text-slate-400">Embeddings</div>
+                </div>
+            </div>
+            ${warningsHtml}
+        `;
+    }
+
+    function showImportStatus(msg, type) {
+        const el = document.getElementById('import-status');
+        el.textContent = msg;
+        if (type === 'error') {
+            el.className = 'text-sm text-red-400';
+        } else {
+            el.className = 'text-sm text-slate-400';
+        }
+    }
+
+    // ========================
+    // Utils
+    // ========================
+
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // Init
+    document.addEventListener('DOMContentLoaded', loadRepos);
+</script>
+{% endblock %}
