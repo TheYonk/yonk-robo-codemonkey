@@ -319,6 +319,9 @@ async def callers(
     """
     settings = Settings()
 
+    # Use default repo if not provided
+    repo = get_repo_or_default(repo)
+
     # Resolve repo to schema if provided
     repo_id = None
     schema_name = None
@@ -389,6 +392,9 @@ async def callees(
         List of callee symbols with depth and edge info
     """
     settings = Settings()
+
+    # Use default repo if not provided
+    repo = get_repo_or_default(repo)
 
     # Resolve repo to schema if provided
     repo_id = None
