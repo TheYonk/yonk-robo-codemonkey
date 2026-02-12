@@ -270,7 +270,7 @@ doc_validity:
 
 workers:
   # Processing mode: "single", "per_repo", or "pool"
-  mode: "pool"
+  mode: "per_repo"
 
   # Global concurrency limits
   max_workers: 4              # Maximum concurrent job workers

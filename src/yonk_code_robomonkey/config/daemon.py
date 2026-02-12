@@ -207,7 +207,7 @@ class WorkersConfig(BaseModel):
     """
     # Processing mode
     mode: Literal["single", "per_repo", "pool"] = Field(
-        "pool",
+        "per_repo",
         description="Processing mode: single, per_repo, or pool"
     )
 

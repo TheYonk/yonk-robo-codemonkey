@@ -250,9 +250,12 @@ The script automatically verifies your configuration:
 ### `.env` (Project Root)
 
 ```env
+# Database connection — port must match docker-compose and config/robomonkey-daemon.yaml
+# See "Database Port Configuration" section below if you change the port
 DATABASE_URL=postgresql://postgres:postgres@localhost:5433/robomonkey
 
 # Embeddings Provider
+
 EMBEDDINGS_PROVIDER=ollama
 EMBEDDINGS_MODEL=snowflake-arctic-embed2:latest
 EMBEDDINGS_BASE_URL=http://localhost:11434
@@ -276,6 +279,8 @@ GRAPH_DEPTH=2
 
 ### `.mcp.json` (Repository Directory)
 
+**Note:** The `DATABASE_URL` port here must match the port in `.env` and `config/robomonkey-daemon.yaml`.
+
 ```json
 {
   "mcpServers": {
@@ -296,6 +301,54 @@ GRAPH_DEPTH=2
     }
   }
 }
+```
+
+## Database Port Configuration
+
+RoboMonkey uses PostgreSQL and the connection is configured in **two places** that must stay in sync. If you change the database port (e.g., from the default `5432` to `5436`), you must update both.
+
+### 1. `.env` (Web UI + MCP Server + CLI)
+
+The `.env` file in the project root controls the database connection for the web UI, MCP server, and CLI commands. Update the port in the `DATABASE_URL`:
+
+```env
+# Default docker-compose uses port 5432, but you may map it to another port
+DATABASE_URL=postgresql://postgres:postgres@localhost:5436/robomonkey
+```
+
+### 2. `config/robomonkey-daemon.yaml` (Daemon)
+
+The daemon reads its database connection from `config/robomonkey-daemon.yaml`, **not** from `.env`. If you change the port in `.env`, you must also update `control_dsn` in the daemon config:
+
+```yaml
+database:
+  control_dsn: "postgresql://postgres:postgres@localhost:5436/robomonkey"
+  schema_prefix: "robomonkey_"
+  pool_size: 10
+```
+
+### 3. `.mcp.json` (MCP Clients)
+
+If you use RoboMonkey as an MCP server in Claude Desktop, Cline, or other MCP clients, update the `DATABASE_URL` in `.mcp.json` as well:
+
+```json
+{
+  "env": {
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:5436/robomonkey"
+  }
+}
+```
+
+### Common Symptom
+
+If the ports don't match, you'll see one of:
+- **Web UI works but daemon jobs fail** — daemon config has wrong port
+- **CLI works but web UI can't connect** — `.env` has wrong port
+- **MCP tools fail but web UI works** — `.mcp.json` has wrong port
+
+After changing the port, restart all services:
+```bash
+./scripts/restart.sh
 ```
 
 ## Troubleshooting

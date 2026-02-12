@@ -1975,6 +1975,11 @@ async def repo_add(
     Returns:
         Repository registration confirmation
     """
+    from yonk_code_robomonkey.db.schema_manager import (
+        create_schema,
+        init_schema_tables,
+    )
+
     settings = Settings()
     conn = await asyncpg.connect(dsn=settings.database_url)
 
@@ -1994,32 +1999,38 @@ async def repo_add(
                 "why": "Use a different name or update the existing repository"
             }
 
-        # Create schema
-        await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+        # Wrap all mutations in a transaction so a partial failure doesn't
+        # leave an orphaned schema or registry row without tables.
+        async with conn.transaction():
+            # Create schema and initialize tables (handles vector dimension)
+            await create_schema(conn, schema_name)
+            await init_schema_tables(conn, schema_name)
 
-        # Initialize schema with DDL
-        from yonk_code_robomonkey.db.ddl import DDL_PATH
-        ddl = DDL_PATH.read_text()
+            # Insert the repo row into the per-schema repo table so
+            # the schema is fully self-consistent before any jobs run.
+            await conn.execute(f'SET search_path TO "{schema_name}", public')
+            await conn.execute(
+                "INSERT INTO repo (name, root_path) VALUES ($1, $2)",
+                name, path,
+            )
+            await conn.execute("SET search_path TO public")
 
-        await conn.execute(f'SET search_path TO "{schema_name}", public')
-        await conn.execute(ddl)
+            # Insert into daemon registry
+            await conn.execute("""
+                INSERT INTO robomonkey_control.repo_registry
+                    (name, schema_name, root_path, enabled, auto_index, auto_embed, auto_watch, auto_summaries)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """, name, schema_name, path, True, auto_index, auto_embed, auto_watch, auto_summaries)
 
-        # Insert into registry
-        await conn.execute("""
-            INSERT INTO robomonkey_control.repo_registry
-                (name, schema_name, root_path, enabled, auto_index, auto_embed, auto_watch, auto_summaries)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        """, name, schema_name, path, True, auto_index, auto_embed, auto_watch, auto_summaries)
-
-        # Enqueue full index if requested
-        job_id = None
-        if auto_index:
-            job_id = await conn.fetchval("""
-                INSERT INTO robomonkey_control.job_queue
-                    (repo_name, schema_name, job_type, payload, priority, dedup_key)
-                VALUES ($1, $2, 'FULL_INDEX', '{}'::jsonb, 7, $3)
-                RETURNING id
-            """, name, schema_name, f"{name}:full_index")
+            # Enqueue full index if requested
+            job_id = None
+            if auto_index:
+                job_id = await conn.fetchval("""
+                    INSERT INTO robomonkey_control.job_queue
+                        (repo_name, schema_name, job_type, payload, priority, dedup_key)
+                    VALUES ($1, $2, 'FULL_INDEX', '{}'::jsonb, 7, $3)
+                    RETURNING id
+                """, name, schema_name, f"{name}:full_index")
 
         return {
             "success": True,
