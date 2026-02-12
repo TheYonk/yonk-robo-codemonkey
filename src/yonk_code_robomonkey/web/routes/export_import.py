@@ -422,6 +422,12 @@ async def import_repo(file: UploadFile = File(...)) -> dict[str, Any]:
                     }
                     insert_cols = [c for c in col_names if c not in tsvector_cols]
 
+                    # Detect if table has vector columns (asyncpg COPY
+                    # can't handle pgvector's binary encoding).
+                    has_vector = any(
+                        c["udt"].startswith("vector") for c in columns
+                    )
+
                     # Build tuples for insert
                     records = []
                     for row in rows:
@@ -431,35 +437,33 @@ async def import_repo(file: UploadFile = File(...)) -> dict[str, Any]:
                             vals.append(_coerce_value(raw, col_udts[col]))
                         records.append(tuple(vals))
 
-                    # Use copy_records_to_table for fast bulk insert
                     await conn.execute(
                         f'SET search_path TO "{schema_name}", public'
                     )
                     try:
-                        await conn.copy_records_to_table(
-                            table_name,
-                            records=records,
-                            columns=insert_cols,
-                            schema_name=schema_name,
-                        )
-                    except Exception as e:
-                        # Fall back to batched inserts if COPY fails
-                        logger.warning(
-                            "COPY failed for %s (%s), falling back to executemany",
-                            table_name,
-                            e,
-                        )
-                        placeholders = ", ".join(
-                            f"${i + 1}" for i in range(len(insert_cols))
-                        )
-                        col_list = ", ".join(
-                            f'"{c}"' for c in insert_cols
-                        )
-                        insert_sql = (
-                            f'INSERT INTO "{schema_name}"."{table_name}" '
-                            f"({col_list}) VALUES ({placeholders})"
-                        )
-                        await conn.executemany(insert_sql, records)
+                        if has_vector:
+                            # Vector tables must use text-protocol INSERT
+                            # because asyncpg COPY lacks a binary encoder
+                            # for pgvector types.
+                            placeholders = ", ".join(
+                                f"${i + 1}" for i in range(len(insert_cols))
+                            )
+                            col_list = ", ".join(
+                                f'"{c}"' for c in insert_cols
+                            )
+                            insert_sql = (
+                                f'INSERT INTO "{schema_name}"."{table_name}" '
+                                f"({col_list}) VALUES ({placeholders})"
+                            )
+                            await conn.executemany(insert_sql, records)
+                        else:
+                            # Non-vector tables use fast binary COPY
+                            await conn.copy_records_to_table(
+                                table_name,
+                                records=records,
+                                columns=insert_cols,
+                                schema_name=schema_name,
+                            )
                     finally:
                         await conn.execute("SET search_path TO public")
 
