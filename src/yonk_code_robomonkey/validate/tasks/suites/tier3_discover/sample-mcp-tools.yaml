@@ -1,0 +1,67 @@
+# suites/tier3_discover/sample-mcp-tools.yaml
+id: discover-sample-mcp-tools
+name: "Discover MCP tool definitions and serving"
+difficulty: medium
+category: discover
+task_type: qa
+target_repo: sample
+
+prompt: |
+  Find and explain how MCP tools are defined and served in RoboMonkey.
+  Your analysis should trace through the actual source code in the
+  repository.
+
+  Specifically:
+
+  1. Identify all files involved in the MCP server and tool definitions.
+     Where is the MCP server entry point? Where are tools defined and
+     registered?
+  2. List all available MCP tools. For each tool, describe its purpose,
+     input parameters, and what retrieval/analysis it performs.
+  3. Explain how the MCP server communicates over stdio. What protocol
+     library or framework is used? How are tool invocations received
+     and responses sent?
+  4. Trace how an MCP tool connects to the retrieval layer. For example,
+     how does the hybrid_search tool call into the retrieval module?
+     What data transformations happen between the MCP request and the
+     database query?
+  5. How are tool input schemas defined? Where are the Pydantic models
+     for tool inputs/outputs? How do they map to the MCP protocol's
+     tool schema format?
+  6. How does the MCP server handle database connections and
+     configuration? How are settings (DATABASE_URL, embedding provider,
+     etc.) loaded when the server starts?
+
+  Cite specific file paths, class names, and function signatures from the
+  source code. Do not describe tools or features that are not implemented.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "Identifies MCP server and tool definition files"
+    - "Lists available MCP tools with purposes and parameters"
+    - "Explains stdio communication protocol and framework"
+    - "Traces tool-to-retrieval-layer connection with data flow"
+    - "Describes tool input/output schemas and Pydantic models"
+  rubric_weights:
+    "Identifies MCP server and tool definition files": 0.15
+    "Lists available MCP tools with purposes and parameters": 0.25
+    "Explains stdio communication protocol and framework": 0.15
+    "Traces tool-to-retrieval-layer connection with data flow": 0.25
+    "Describes tool input/output schemas and Pydantic models": 0.20
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: [discovery, mcp, sample, tools, protocol, retrieval]
+expected_turns_range: [2, 10]

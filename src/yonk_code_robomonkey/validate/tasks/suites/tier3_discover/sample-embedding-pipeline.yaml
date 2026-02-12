@@ -1,0 +1,65 @@
+# suites/tier3_discover/sample-embedding-pipeline.yaml
+id: discover-sample-embedding-pipeline
+name: "Discover the embedding pipeline"
+difficulty: medium
+category: discover
+task_type: qa
+target_repo: sample
+
+prompt: |
+  Find and explain the embedding pipeline in RoboMonkey. Your analysis
+  should trace through the actual source code in the repository.
+
+  Specifically:
+
+  1. Identify all files that implement the embedding pipeline. Where is
+     the main embedding orchestration logic? What provider clients exist?
+  2. Explain the embedding provider abstraction. What providers are
+     supported (Ollama, vLLM, OpenAI-compatible)? How are they configured
+     via environment variables? Where are the client implementations?
+  3. Trace the chunk embedding flow. Starting from an indexed repository,
+     how are code chunks prepared for embedding? How does the chunking
+     strategy work (per-symbol + file header)?
+  4. Explain the content hashing mechanism. How does RoboMonkey avoid
+     re-embedding unchanged chunks? What hash is used, and where is the
+     comparison logic?
+  5. Describe how embeddings are stored in Postgres. What tables hold
+     the vector data (chunk_embedding, document_embedding, summary
+     embeddings)? What is the vector dimension and how is it configured?
+  6. How does the embedding dimension consistency work? What happens if
+     the configured model produces embeddings of a different dimension
+     than the database schema expects?
+
+  Cite specific file paths, class names, and function signatures from the
+  source code. Do not describe features that are not implemented.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "Identifies embedding pipeline files (embedder.py, provider clients)"
+    - "Explains provider abstraction and configuration (Ollama, vLLM, OpenAI)"
+    - "Traces chunk embedding flow from indexed code to vectors"
+    - "Describes content hashing to avoid re-embedding unchanged chunks"
+    - "Covers embedding storage tables and vector dimension configuration"
+  rubric_weights:
+    "Identifies embedding pipeline files (embedder.py, provider clients)": 0.15
+    "Explains provider abstraction and configuration (Ollama, vLLM, OpenAI)": 0.20
+    "Traces chunk embedding flow from indexed code to vectors": 0.25
+    "Describes content hashing to avoid re-embedding unchanged chunks": 0.20
+    "Covers embedding storage tables and vector dimension configuration": 0.20
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: [discovery, embeddings, sample, pgvector, pipeline, providers]
+expected_turns_range: [2, 10]

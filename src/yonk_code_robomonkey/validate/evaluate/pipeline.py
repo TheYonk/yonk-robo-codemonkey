@@ -9,9 +9,10 @@ from ..capture.hallucination import check_hallucinations
 from .test_runner import run_tests
 from .lint_checker import run_lint_checks
 from .diff_analyzer import analyze_diff
-from .scorer import score_run
+from .scorer import score_run, score_qa_run
 
 logger = logging.getLogger(__name__)
+
 
 async def evaluate_run(
     result: RunResult,
@@ -25,13 +26,9 @@ async def evaluate_run(
 ) -> RunResult:
     """Run all evaluation steps and update RunResult in place.
 
-    This is the pipeline that wires together:
-    1. Test runner (pytest on task-specific tests)
-    2. Lint + type checker (ruff + mypy on changed files)
-    3. Diff analyzer (must_modify, must_not_modify, max_files_changed)
-    4. Hallucination detection (files, imports, symbols)
-    5. LLM judge (optional, qualitative scoring)
-    6. Composite scorer (weighted aggregate of all signals)
+    Branches based on task.task_type:
+    - "code_change": tests, lint, diff analysis, hallucinations, LLM judge, scorer
+    - "qa": hallucination check, Q&A LLM judge with rubric, Q&A scorer
 
     Args:
         result: RunResult to enrich (mutated in place)
@@ -46,6 +43,29 @@ async def evaluate_run(
     Returns:
         The same RunResult, now with evaluation fields populated
     """
+    if task.task_type == "qa":
+        return await _evaluate_qa_run(
+            result, task, repo_dir, conversation_text,
+            baseline_tokens, baseline_turns, run_judge,
+        )
+    else:
+        return await _evaluate_code_run(
+            result, task, repo_dir, diff_text, conversation_text,
+            baseline_tokens, baseline_turns, run_judge,
+        )
+
+
+async def _evaluate_code_run(
+    result: RunResult,
+    task: TaskDefinition,
+    repo_dir: Path,
+    diff_text: str,
+    conversation_text: str,
+    baseline_tokens: int | None,
+    baseline_turns: int | None,
+    run_judge: bool,
+) -> RunResult:
+    """Evaluate a code-change task (existing logic)."""
     eval_criteria = task.eval
 
     # Steps 1-2 can run in parallel
@@ -95,7 +115,7 @@ async def evaluate_run(
         result.hallucinated_imports = hall_report.hallucinated_imports
         result.hallucination_count = hall_report.total
 
-    # Step 5: LLM judge (optional, slowest step, Phase 7)
+    # Step 5: LLM judge (optional, slowest step)
     if run_judge and eval_criteria.llm_judge:
         try:
             from .llm_judge import judge_run
@@ -104,7 +124,7 @@ async def evaluate_run(
             result.llm_judge_score = judge_result.score
             result.llm_judge_reasoning = judge_result.reasoning
         except ImportError:
-            logger.warning("LLM judge not available (Phase 7 not yet implemented)")
+            logger.warning("LLM judge not available")
             result.llm_judge_score = 5.0
             result.llm_judge_reasoning = "Judge not available"
 
@@ -113,3 +133,108 @@ async def evaluate_run(
     result.composite_score = score.composite
 
     return result
+
+
+async def _evaluate_qa_run(
+    result: RunResult,
+    task: TaskDefinition,
+    repo_dir: Path,
+    conversation_text: str,
+    baseline_tokens: int | None,
+    baseline_turns: int | None,
+    run_judge: bool,
+) -> RunResult:
+    """Evaluate a Q&A task (no code changes to check).
+
+    Q&A evaluation path:
+    1. Store response text
+    2. Hallucination check on response (file paths, symbols mentioned)
+    3. Q&A LLM judge with rubric scoring
+    4. Q&A composite scorer
+    """
+    eval_criteria = task.eval
+
+    # Store the response text
+    result.response_text = conversation_text
+
+    # Step 1: Hallucination detection (check file/symbol references in response)
+    if eval_criteria.hallucination_check:
+        hall_report = await check_hallucinations("", conversation_text, repo_dir)
+        result.hallucinated_files = hall_report.hallucinated_files
+        result.hallucinated_symbols = hall_report.hallucinated_symbols
+        result.hallucinated_imports = hall_report.hallucinated_imports
+        result.hallucination_count = hall_report.total
+
+    # Step 2: Q&A LLM judge with rubric
+    if run_judge and eval_criteria.llm_judge:
+        try:
+            from .llm_judge import judge_qa_run
+            qa_result = await judge_qa_run(
+                task_description=task.prompt,
+                response_text=conversation_text,
+                rubric=eval_criteria.rubric,
+                rubric_weights=eval_criteria.rubric_weights,
+                detail_level=eval_criteria.min_detail_level,
+            )
+            result.llm_judge_score = qa_result.score
+            result.llm_judge_reasoning = qa_result.reasoning
+            result.rubric_coverage = {
+                topic: info.get("covered", "no")
+                for topic, info in qa_result.rubric_coverage.items()
+            }
+            result.factual_issues = qa_result.factual_issues
+            result.specificity_score = qa_result.specificity_score
+
+            # Compute rubric_score as weighted coverage
+            result.rubric_score = _compute_rubric_score(
+                qa_result.rubric_coverage,
+                eval_criteria.rubric_weights,
+                eval_criteria.rubric,
+            )
+        except ImportError:
+            logger.warning("LLM judge not available")
+            result.llm_judge_score = 5.0
+            result.llm_judge_reasoning = "Judge not available"
+    else:
+        result.rubric_score = 0.5  # Neutral when judge is skipped
+
+    # Step 3: Q&A composite scoring
+    score = score_qa_run(result, baseline_tokens=baseline_tokens, baseline_turns=baseline_turns)
+    result.composite_score = score.composite
+
+    return result
+
+
+def _compute_rubric_score(
+    rubric_coverage: dict[str, dict],
+    rubric_weights: dict[str, float],
+    rubric_topics: list[str],
+) -> float:
+    """Compute weighted rubric coverage score (0-1).
+
+    Args:
+        rubric_coverage: From judge — topic -> {"covered": "yes"|"no"|"partial", ...}
+        rubric_weights: topic -> weight (should sum to ~1.0)
+        rubric_topics: Ordered list of expected topics
+
+    Returns:
+        Score from 0.0 (nothing covered) to 1.0 (everything fully covered)
+    """
+    if not rubric_topics:
+        return 0.5  # No rubric = neutral
+
+    coverage_values = {"yes": 1.0, "partial": 0.5, "no": 0.0}
+    total_weight = 0.0
+    weighted_score = 0.0
+
+    for topic in rubric_topics:
+        weight = rubric_weights.get(topic, 1.0 / len(rubric_topics))
+        total_weight += weight
+
+        coverage_info = rubric_coverage.get(topic, {})
+        covered = coverage_info.get("covered", "no") if isinstance(coverage_info, dict) else str(coverage_info)
+        weighted_score += weight * coverage_values.get(covered, 0.0)
+
+    if total_weight == 0:
+        return 0.5
+    return weighted_score / total_weight

@@ -1,0 +1,83 @@
+# suites/tier5_rewrite/flask-rewrite-error-handlers.yaml
+id: rewrite-flask-error-handlers
+name: "Rewrite Flask error handling with centralized ErrorHandler class"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: flask
+
+prompt: |
+  Rewrite Flask's error handling in src/flask/app.py to use a more structured
+  approach with a centralized ErrorHandler class that supports custom error
+  formatters for JSON and HTML responses.
+
+  Currently, Flask handles errors through `handle_exception()`,
+  `handle_http_exception()`, and `handle_user_exception()` methods directly
+  on the Flask app class in src/flask/app.py. Error handlers are registered
+  via `@app.errorhandler(code)` and stored in a dict.
+
+  Rewrite as follows:
+
+  1. Create a new file `src/flask/error_handler.py` that defines:
+     a. An `ErrorFormatter` protocol/ABC with a method
+        `format_error(self, error, status_code, request) -> Response`
+     b. A `JSONErrorFormatter` that returns JSON responses with fields:
+        `{"error": {"code": status_code, "name": error_name, "description": message}}`
+     c. An `HTMLErrorFormatter` that returns HTML responses using the existing
+        Flask error page rendering.
+     d. A `NegotiatingErrorFormatter` that chooses JSON or HTML based on the
+        request's Accept header.
+     e. A `CentralErrorHandler` class that:
+        - Holds a registry of error handlers (like the current app.error_handler_spec)
+        - Holds a default `ErrorFormatter` instance
+        - Has `register(code_or_exception, handler)` method
+        - Has `handle(error, request) -> Response` that looks up the handler,
+          falls back to the default formatter, and logs the error
+        - Supports per-blueprint error handler overrides
+
+  2. In `src/flask/app.py`:
+     a. Add a `error_handler` attribute (CentralErrorHandler instance) to the
+        Flask class, initialized in `__init__`.
+     b. Refactor `handle_exception()` and `handle_http_exception()` to
+        delegate to `self.error_handler.handle()`.
+     c. Keep the `@app.errorhandler()` decorator working by having it call
+        `self.error_handler.register()` internally.
+     d. Add a property `error_formatter` that gets/sets the default formatter
+        on the CentralErrorHandler.
+
+  3. Update `src/flask/__init__.py` to export `CentralErrorHandler`,
+     `ErrorFormatter`, `JSONErrorFormatter`, `HTMLErrorFormatter`, and
+     `NegotiatingErrorFormatter`.
+
+  4. Add tests in `tests/test_error_handler.py`:
+     a. Test JSON error responses when Accept: application/json is sent.
+     b. Test HTML error responses for browser requests.
+     c. Test content negotiation with the NegotiatingErrorFormatter.
+     d. Test custom error handlers registered via the existing decorator.
+     e. Test per-blueprint error handler overrides.
+     f. Test that unhandled exceptions return a proper 500 response.
+
+  5. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_error_handler.py"
+    - "tests/test_basic.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "src/flask/app.py"
+    - "src/flask/__init__.py"
+  must_not_modify:
+    - "src/flask/sessions.py"
+    - "src/flask/config.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, flask, error-handling, content-negotiation]
+expected_turns_range: [3, 20]

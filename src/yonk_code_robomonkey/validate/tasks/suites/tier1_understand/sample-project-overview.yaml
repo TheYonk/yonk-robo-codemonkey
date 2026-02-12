@@ -1,0 +1,44 @@
+# suites/tier1_understand/sample-project-overview.yaml
+id: understand-sample-project-overview
+name: "RoboMonkey Project Overview"
+difficulty: simple
+category: understand
+task_type: qa
+target_repo: sample
+
+prompt: >
+  Tell me about this project. What does it do, what's the tech stack,
+  how is it organized, and what are the main entry points?
+
+  Examine the repository structure, configuration files (pyproject.toml,
+  setup.cfg, setup.py, docker-compose files), and top-level source
+  directories. Identify the purpose of the project, the core technologies
+  and runtime dependencies it relies on (Python, Postgres, pgvector,
+  tree-sitter, MCP protocol, etc.), how the source tree is laid out, and
+  the primary entry points a developer or user would interact with (CLI
+  commands, MCP server, web UI, etc.).
+
+  Do not modify any files. Provide a clear, structured answer.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "project purpose"
+    - "tech stack and dependencies"
+    - "directory structure"
+    - "main entry points"
+  rubric_weights:
+    "project purpose": 0.30
+    "tech stack and dependencies": 0.25
+    "directory structure": 0.25
+    "main entry points": 0.20
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["understanding", "project-overview", "sample"]
+expected_turns_range: [1, 5]

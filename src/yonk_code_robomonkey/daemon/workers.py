@@ -170,9 +170,11 @@ class WorkerPool:
                 await self._maybe_enqueue_summary_regen(job)
 
             # Auto-enqueue file/symbol summaries after DOCS_SCAN
+            # Also bridge repo docs to the knowledge base
             if job.job_type == "DOCS_SCAN":
                 await self._maybe_enqueue_file_summaries(job)
                 await self._maybe_enqueue_symbol_summaries(job)
+                await self._maybe_enqueue_kb_docs(job)
 
             # Auto-enqueue summary embeddings after summary generation
             if job.job_type in ["SUMMARIZE_FILES", "SUMMARIZE_SYMBOLS"]:
@@ -393,6 +395,68 @@ class WorkerPool:
             priority=3,  # After summaries but before comprehensive review
             dedup_key=f"{job.repo_name}:embed_summaries"
         )
+
+    async def _maybe_enqueue_kb_docs(self, job: Job):
+        """Bridge repo markdown docs into the knowledge base after DOCS_SCAN.
+
+        Finds .md and .rst files in the repo directory and enqueues DOC_INDEX
+        jobs in the KB queue so they appear on the /knowledge-base page.
+        """
+        if not self.kb_queue:
+            return
+
+        # Get repo root path from registry
+        async with self.pool.acquire() as conn:
+            root_path = await conn.fetchval(
+                "SELECT root_path FROM robomonkey_control.repo_registry WHERE name = $1",
+                job.repo_name
+            )
+
+        if not root_path:
+            return
+
+        from pathlib import Path
+        repo_root = Path(root_path)
+        if not repo_root.exists():
+            return
+
+        # Find markdown/rst documentation files (skip SQL — not useful for KB)
+        doc_extensions = {".md", ".rst", ".adoc"}
+        exclude_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
+        enqueued = 0
+
+        for ext in doc_extensions:
+            for file_path in repo_root.rglob(f"*{ext}"):
+                if not file_path.is_file():
+                    continue
+                # Skip excluded directories
+                try:
+                    relative = file_path.relative_to(repo_root)
+                    if any(part in exclude_dirs for part in relative.parts):
+                        continue
+                except ValueError:
+                    continue
+
+                # Use repo-scoped name for deduplication
+                source_name = f"{job.repo_name}:{relative}"
+                await self.kb_queue.enqueue(
+                    job_type="DOC_INDEX",
+                    source_name=source_name,
+                    file_path=str(file_path),
+                    payload={
+                        "doc_type": "repo_doc",
+                        "description": f"Documentation from {job.repo_name}: {relative}",
+                        "metadata": {"repo_name": job.repo_name, "relative_path": str(relative)},
+                    },
+                    priority=3,
+                    dedup_key=f"kb:{job.repo_name}:{relative}",
+                )
+                enqueued += 1
+
+        if enqueued:
+            logger.info(
+                f"Enqueued {enqueued} doc files from {job.repo_name} into knowledge base"
+            )
 
     async def _worker_loop(self, worker_id: str, job_types: list[str], skip_global_semaphore: bool = False):
         """Worker loop: claim and process jobs (both repo and KB).

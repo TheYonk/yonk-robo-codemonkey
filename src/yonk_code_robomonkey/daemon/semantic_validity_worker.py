@@ -168,7 +168,7 @@ async def semantic_validity_worker(config: DaemonConfig) -> None:
                                             embeddings_provider=config.embeddings.provider,
                                             embeddings_model=config.embeddings.model,
                                             embeddings_base_url=_get_embeddings_url(config),
-                                            embeddings_api_key=config.embeddings.vllm.api_key if config.embeddings.provider == "vllm" else "",
+                                            embeddings_api_key=_get_embeddings_api_key(config),
                                             schema_name=schema_name
                                         )
 
@@ -244,8 +244,20 @@ def _get_embeddings_url(config: DaemonConfig) -> str:
     """Get embeddings provider URL from config."""
     if config.embeddings.provider == "ollama":
         return config.embeddings.ollama.base_url
-    else:
+    elif config.embeddings.provider == "vllm":
         return config.embeddings.vllm.base_url
+    else:  # openai
+        return config.embeddings.openai.base_url
+
+
+def _get_embeddings_api_key(config: DaemonConfig) -> str:
+    """Get embeddings API key from config based on provider."""
+    if config.embeddings.provider == "ollama":
+        return ""
+    elif config.embeddings.provider == "vllm":
+        return config.embeddings.vllm.api_key
+    else:  # openai
+        return config.embeddings.openai.api_key
 
 
 async def validate_document_semantically(
@@ -350,7 +362,7 @@ async def validate_document_semantically(
                 embeddings_provider=config.embeddings.provider,
                 embeddings_model=config.embeddings.model,
                 embeddings_base_url=_get_embeddings_url(config),
-                embeddings_api_key=config.embeddings.vllm.api_key if config.embeddings.provider == "vllm" else "",
+                embeddings_api_key=_get_embeddings_api_key(config),
                 schema_name=schema_name
             )
 

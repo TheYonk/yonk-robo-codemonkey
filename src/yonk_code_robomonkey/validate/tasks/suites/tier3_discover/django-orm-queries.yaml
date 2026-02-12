@@ -1,0 +1,63 @@
+# suites/tier3_discover/django-orm-queries.yaml
+id: discover-django-orm-queries
+name: "Discover Django's ORM query system"
+difficulty: medium
+category: discover
+task_type: qa
+target_repo: django
+
+prompt: |
+  Find and explain how Django's ORM builds and executes queries. Your
+  analysis should trace through the actual source code in the repository.
+
+  Specifically:
+
+  1. Identify the core files that implement QuerySet and query compilation.
+     Where are QuerySet, Query, SQLCompiler, and related classes defined?
+  2. Explain QuerySet's lazy evaluation mechanism. When does a QuerySet
+     actually hit the database? What triggers evaluation (iteration,
+     slicing, len, bool, etc.)? Where is this implemented?
+  3. Trace how a filter() call modifies the internal query. How does
+     QuerySet.filter() create Q objects and add them to the WHERE clause?
+     What is the role of the Query class in building the SQL?
+  4. Explain how the SQLCompiler transforms the internal Query
+     representation into actual SQL. Walk through the as_sql() method
+     and describe the compilation pipeline.
+  5. How do chained QuerySet operations work (e.g., filter().exclude().
+     order_by())? How does cloning preserve immutability?
+  6. How does select_related() and prefetch_related() work at the query
+     compilation level?
+
+  Cite specific file paths, class names, and method signatures from the
+  source code. Do not reference code that does not exist in the repository.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "Identifies core ORM files (QuerySet, Query, SQLCompiler locations)"
+    - "Explains lazy evaluation mechanism and evaluation triggers"
+    - "Traces filter() through Q objects to WHERE clause construction"
+    - "Describes SQLCompiler and as_sql compilation pipeline"
+    - "Covers QuerySet chaining and clone-based immutability"
+  rubric_weights:
+    "Identifies core ORM files (QuerySet, Query, SQLCompiler locations)": 0.15
+    "Explains lazy evaluation mechanism and evaluation triggers": 0.20
+    "Traces filter() through Q objects to WHERE clause construction": 0.25
+    "Describes SQLCompiler and as_sql compilation pipeline": 0.25
+    "Covers QuerySet chaining and clone-based immutability": 0.15
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: [discovery, orm, django, queryset, sql, database]
+expected_turns_range: [2, 10]

@@ -1,0 +1,87 @@
+# suites/tier5_rewrite/fastapi-rewrite-routing.yaml
+id: rewrite-fastapi-routing
+name: "Rewrite FastAPI APIRoute with built-in rate limiting"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: fastapi
+
+prompt: |
+  Rewrite the APIRoute class in fastapi/routing.py to add built-in rate
+  limiting support with configurable per-route limits.
+
+  Currently, FastAPI's `APIRoute` class in `fastapi/routing.py` handles
+  route registration, request validation, and response serialization. Rate
+  limiting must be implemented externally via middleware or dependencies.
+
+  Rewrite as follows:
+
+  1. Create a new file `fastapi/ratelimit.py` that defines:
+     a. A `RateLimitConfig` dataclass with fields:
+        - `max_requests: int` - maximum requests allowed in the window
+        - `window_seconds: int` - time window in seconds (default: 60)
+        - `key_func: Callable[[Request], str]` - function to extract the
+          rate limit key (default: client IP from `request.client.host`)
+        - `exceeded_status: int` - HTTP status when limit exceeded (default: 429)
+        - `exceeded_detail: str` - error message (default: "Rate limit exceeded")
+     b. A `RateLimitStore` protocol with methods:
+        - `async incr(key: str, window: int) -> tuple[int, int]` returns
+          (current_count, seconds_remaining)
+        - `async reset(key: str) -> None`
+     c. An `InMemoryRateLimitStore` implementation using a dict with
+        TTL-based expiration (suitable for single-process deployments).
+     d. A `RateLimitExceeded` exception class.
+
+  2. In `fastapi/routing.py`:
+     a. Add an optional `rate_limit: RateLimitConfig | None` parameter to
+        `APIRoute.__init__()` (default: None).
+     b. Add a class-level `_rate_limit_store: RateLimitStore` attribute
+        with a default `InMemoryRateLimitStore` instance.
+     c. Add a class method `set_rate_limit_store(cls, store: RateLimitStore)`
+        to allow users to swap in Redis or other backends.
+     d. Modify the route's endpoint wrapper to check the rate limit before
+        calling the actual endpoint function. If the limit is exceeded,
+        raise `RateLimitExceeded`.
+     e. Add `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
+        `X-RateLimit-Reset` response headers on every request to a
+        rate-limited route.
+
+  3. In `fastapi/applications.py`:
+     a. Add an `app.set_rate_limit_store(store)` convenience method that
+        delegates to `APIRoute.set_rate_limit_store()`.
+
+  4. Add a default exception handler in `fastapi/exception_handlers.py` for
+     `RateLimitExceeded` that returns the proper 429 response with rate
+     limit headers.
+
+  5. Add tests in `tests/test_ratelimit.py`:
+     a. Test that a rate-limited route returns 200 within the limit.
+     b. Test that exceeding the limit returns 429 with proper headers.
+     c. Test that rate limit headers are present on successful responses.
+     d. Test custom key functions (e.g., rate limit by API key header).
+     e. Test that non-rate-limited routes are unaffected.
+     f. Test the InMemoryRateLimitStore TTL expiration behavior.
+     g. Test a custom RateLimitStore implementation.
+
+  6. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_ratelimit.py"
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "fastapi/routing.py"
+  must_not_modify:
+    - "fastapi/openapi/utils.py"
+    - "fastapi/security/__init__.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, fastapi, routing, rate-limiting, middleware]
+expected_turns_range: [3, 20]

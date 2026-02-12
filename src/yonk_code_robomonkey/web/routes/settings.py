@@ -158,11 +158,21 @@ def mask_api_key(key: Optional[str]) -> Optional[str]:
 def get_embeddings_settings() -> EmbeddingsSettings:
     """Get current embeddings settings from .env."""
     env = read_env_file()
+    provider = env.get('EMBEDDINGS_PROVIDER', 'ollama')
+
+    # Return the API key that matches the configured provider
+    if provider == 'openai':
+        api_key = env.get('OPENAI_API_KEY', '')
+    elif provider == 'vllm':
+        api_key = env.get('VLLM_API_KEY', '')
+    else:
+        api_key = ''
+
     return EmbeddingsSettings(
-        provider=env.get('EMBEDDINGS_PROVIDER', 'ollama'),
+        provider=provider,
         model=env.get('EMBEDDINGS_MODEL', 'nomic-embed-text'),
         base_url=env.get('EMBEDDINGS_BASE_URL', 'http://localhost:11434'),
-        api_key=env.get('VLLM_API_KEY') or env.get('OPENAI_API_KEY'),
+        api_key=api_key,
         dimension=int(env.get('EMBEDDINGS_DIMENSION', '1536')),
     )
 

@@ -1,0 +1,60 @@
+# suites/tier2_review/flask-review-error-handling.yaml
+id: review-flask-error-handling
+name: "Review Flask error and exception handling patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: flask
+
+prompt: |
+  Review how errors and exceptions are handled across the Flask project.
+  Examine the source code in `src/flask/` with particular attention to
+  `app.py`, `debughelpers.py`, `sansio/app.py`, and any error handler
+  registration mechanisms.
+
+  In your review, please address the following:
+
+  1. What are the primary error handling patterns used in Flask? How do
+     `errorhandler`, `register_error_handler`, and `trap_http_exception`
+     work together?
+  2. How does Flask handle HTTP exceptions (from Werkzeug) vs. generic
+     Python exceptions? Trace the error propagation path from a raised
+     exception to the final response.
+  3. Are there any gaps or missing error handlers? Are there code paths
+     where exceptions could be silently swallowed or produce unhelpful
+     error messages?
+  4. How does Flask's logging integrate with error handling? Are errors
+     consistently logged with enough context for debugging?
+  5. Review the debugging helpers in `debughelpers.py` -- are they
+     comprehensive, and do they cover common developer mistakes?
+
+  Reference actual source files and code locations in your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies error handling patterns"
+    - "finds gaps or missing handlers"
+    - "notes logging practices"
+    - "references actual code locations"
+  rubric_weights:
+    "identifies error handling patterns": 0.30
+    "finds gaps or missing handlers": 0.25
+    "notes logging practices": 0.20
+    "references actual code locations": 0.25
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "error-handling", "flask", "exceptions", "tier2"]
+expected_turns_range: [2, 8]

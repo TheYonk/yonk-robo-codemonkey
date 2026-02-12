@@ -210,9 +210,19 @@ async def _ingest_sql_schema(
     rel_path = str(file_path.relative_to(repo_root))
 
     # Store the raw SQL file as a document for basic searchability
+    # Large SQL files are truncated to avoid tsvector limits (~1MB max)
+    MAX_DOCUMENT_SIZE = 500_000  # 500KB to stay well under tsvector limit
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
         title = file_path.stem  # Use filename as title
+
+        # Truncate huge files — the detailed content is in chunks anyway
+        if len(content) > MAX_DOCUMENT_SIZE:
+            logger.info(
+                f"Truncating SQL document {rel_path} from {len(content):,} to {MAX_DOCUMENT_SIZE:,} bytes "
+                f"(full content indexed via chunks)"
+            )
+            content = content[:MAX_DOCUMENT_SIZE] + f"\n\n-- [Truncated: file is {len(content):,} bytes, showing first {MAX_DOCUMENT_SIZE:,}]"
 
         # Check if document exists
         existing = await conn.fetchrow(

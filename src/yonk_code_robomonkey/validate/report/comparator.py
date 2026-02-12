@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..capture.run_result import RunResult
+from .statistics import (
+    compare_conditions,
+    detect_outliers,
+    AggregatedComparison,
+    CategoryBreakdown,
+    FullBenchmarkReport,
+)
 
 
 @dataclass
@@ -23,8 +30,10 @@ class TaskComparison:
 
     task_id: str
     target_repo: str
-    with_runs: list[RunResult]
-    without_runs: list[RunResult]
+    category: str = ""        # "understand", "review", "discover", etc.
+    task_type: str = "code_change"  # "qa" | "code_change"
+    with_runs: list[RunResult] = field(default_factory=list)
+    without_runs: list[RunResult] = field(default_factory=list)
     deltas: list[MetricDelta] = field(default_factory=list)
 
 
@@ -35,7 +44,10 @@ class SuiteComparison:
     tasks: list[TaskComparison]
     by_difficulty: dict[str, list[MetricDelta]]  # "simple" -> deltas
     by_repo: dict[str, list[MetricDelta]]  # "flask" -> deltas
-    overall: list[MetricDelta]
+    by_category: dict[str, list[MetricDelta]] = field(default_factory=dict)    # "understand" -> deltas
+    by_task_type: dict[str, list[MetricDelta]] = field(default_factory=dict)   # "qa" -> deltas
+    overall: list[MetricDelta] = field(default_factory=list)
+    statistics: FullBenchmarkReport | None = None
 
 
 def _safe_pct(with_val: float, without_val: float) -> float:
@@ -53,6 +65,8 @@ def compare_task(
     task_id: str,
     with_runs: list[RunResult],
     without_runs: list[RunResult],
+    category: str = "",
+    task_type: str = "code_change",
 ) -> TaskComparison:
     """Compare A/B results for one task."""
     w_tokens = _avg([r.tokens_total for r in with_runs if r.valid])
@@ -120,24 +134,39 @@ def compare_task(
     return TaskComparison(
         task_id=task_id,
         target_repo=repo,
+        category=category,
+        task_type=task_type,
         with_runs=with_runs,
         without_runs=without_runs,
         deltas=deltas,
     )
 
 
-def compare_suite(task_comparisons: list[TaskComparison]) -> SuiteComparison:
-    """Aggregate comparisons across all tasks."""
+def compare_suite(
+    task_comparisons: list[TaskComparison],
+    compute_statistics: bool = True,
+) -> SuiteComparison:
+    """Aggregate comparisons across all tasks.
+
+    Args:
+        task_comparisons: Per-task comparison results
+        compute_statistics: Whether to compute full statistical analysis
+    """
     by_difficulty: dict[str, list[TaskComparison]] = {}
     by_repo: dict[str, list[TaskComparison]] = {}
+    by_category: dict[str, list[TaskComparison]] = {}
+    by_task_type: dict[str, list[TaskComparison]] = {}
 
     for tc in task_comparisons:
-        # Group by difficulty (parse from task_id prefix)
+        # Group by difficulty (parse from task_id prefix or infer)
         for prefix in ("simple", "medium", "hard"):
             if tc.task_id.startswith(prefix):
                 by_difficulty.setdefault(prefix, []).append(tc)
                 break
         by_repo.setdefault(tc.target_repo, []).append(tc)
+        if tc.category:
+            by_category.setdefault(tc.category, []).append(tc)
+        by_task_type.setdefault(tc.task_type, []).append(tc)
 
     def avg_deltas(comparisons: list[TaskComparison]) -> list[MetricDelta]:
         if not comparisons:
@@ -158,9 +187,66 @@ def compare_suite(task_comparisons: list[TaskComparison]) -> SuiteComparison:
             for m, ds in metrics.items()
         ]
 
+    # Build statistical report if requested
+    statistics = None
+    if compute_statistics and task_comparisons:
+        all_with = [r for tc in task_comparisons for r in tc.with_runs if r.valid]
+        all_without = [r for tc in task_comparisons for r in tc.without_runs if r.valid]
+
+        # Compute per-grouping statistical breakdowns
+        stat_by_tier: dict[str, CategoryBreakdown] = {}
+        for cat, tcs in by_category.items():
+            cat_with = [r for tc in tcs for r in tc.with_runs if r.valid]
+            cat_without = [r for tc in tcs for r in tc.without_runs if r.valid]
+            stat_by_tier[cat] = CategoryBreakdown(
+                category=cat,
+                task_count=len(tcs),
+                comparisons=compare_conditions(cat_with, cat_without),
+            )
+
+        stat_by_difficulty: dict[str, CategoryBreakdown] = {}
+        for diff, tcs in by_difficulty.items():
+            d_with = [r for tc in tcs for r in tc.with_runs if r.valid]
+            d_without = [r for tc in tcs for r in tc.without_runs if r.valid]
+            stat_by_difficulty[diff] = CategoryBreakdown(
+                category=diff,
+                task_count=len(tcs),
+                comparisons=compare_conditions(d_with, d_without),
+            )
+
+        stat_by_repo: dict[str, CategoryBreakdown] = {}
+        for repo, tcs in by_repo.items():
+            r_with = [r for tc in tcs for r in tc.with_runs if r.valid]
+            r_without = [r for tc in tcs for r in tc.without_runs if r.valid]
+            stat_by_repo[repo] = CategoryBreakdown(
+                category=repo,
+                task_count=len(tcs),
+                comparisons=compare_conditions(r_with, r_without),
+            )
+
+        # Determine runs per condition (use max across tasks)
+        runs_per = max(
+            (len(tc.with_runs) for tc in task_comparisons),
+            default=1,
+        )
+
+        statistics = FullBenchmarkReport(
+            total_tasks=len(task_comparisons),
+            total_runs=len(all_with) + len(all_without),
+            runs_per_condition=runs_per,
+            by_tier=stat_by_tier,
+            by_difficulty=stat_by_difficulty,
+            by_repo=stat_by_repo,
+            overall=compare_conditions(all_with, all_without),
+            outliers=detect_outliers(all_with + all_without),
+        )
+
     return SuiteComparison(
         tasks=task_comparisons,
         by_difficulty={k: avg_deltas(v) for k, v in by_difficulty.items()},
         by_repo={k: avg_deltas(v) for k, v in by_repo.items()},
+        by_category={k: avg_deltas(v) for k, v in by_category.items()},
+        by_task_type={k: avg_deltas(v) for k, v in by_task_type.items()},
         overall=avg_deltas(task_comparisons),
+        statistics=statistics,
     )

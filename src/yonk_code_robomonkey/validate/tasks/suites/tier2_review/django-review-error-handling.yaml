@@ -1,0 +1,61 @@
+# suites/tier2_review/django-review-error-handling.yaml
+id: review-django-error-handling
+name: "Review Django error and exception handling patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: django
+
+prompt: |
+  Review how errors and exceptions are handled across the Django project.
+  Examine the source code with particular attention to
+  `django/core/handlers/exception.py`, `django/views/defaults.py`,
+  `django/utils/log.py`, and the middleware-based error handling pipeline.
+
+  In your review, please address the following:
+
+  1. What are the primary error handling patterns in Django? How does the
+     exception middleware pipeline work, and how do `convert_exception_to_response`
+     and `response_for_exception` process errors?
+  2. How does Django handle HTTP errors (400, 403, 404, 500)? Trace the path
+     from a raised `Http404` or `PermissionDenied` through to the error
+     response template rendering.
+  3. Are there gaps in error handling? Are there code paths where exceptions
+     could be silently swallowed, produce unhelpful error pages, or leak
+     sensitive information (especially in DEBUG vs. production modes)?
+  4. How does Django's logging framework integrate with error handling?
+     Review the `django.utils.log` module and the default `LOGGING`
+     configuration -- are errors logged consistently with enough context?
+  5. How does the `technical_500_response` debug view work, and what
+     safeguards prevent it from running in production?
+
+  Reference actual source files and code locations in your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies error handling patterns"
+    - "finds gaps or missing handlers"
+    - "notes logging practices"
+    - "references actual code locations"
+  rubric_weights:
+    "identifies error handling patterns": 0.30
+    "finds gaps or missing handlers": 0.25
+    "notes logging practices": 0.20
+    "references actual code locations": 0.25
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "error-handling", "django", "exceptions", "tier2"]
+expected_turns_range: [2, 8]

@@ -40,6 +40,9 @@ def _mcp_config_path() -> Path:
     return _validate_base() / "validate_mcp.json"
 
 
+# Prefix applied to all validation repo names so they're identifiable and easy to clean up.
+VALIDATE_PREFIX = "tmp_"
+
 # Repo URLs and pinned commits
 REPO_REGISTRY = {
     "flask": {"url": "https://github.com/pallets/flask.git", "commit": "main"},
@@ -47,6 +50,13 @@ REPO_REGISTRY = {
     "django": {"url": "https://github.com/django/django.git", "commit": "main"},
     "sample": {"url": None, "commit": "HEAD"},  # Bundled
 }
+
+
+def _prefixed_name(name: str) -> str:
+    """Return the validation-prefixed repo name (idempotent)."""
+    if name.startswith(VALIDATE_PREFIX):
+        return name
+    return f"{VALIDATE_PREFIX}{name}"
 
 
 async def _index_and_embed_repo(name: str, repo_dir: Path) -> None:
@@ -178,8 +188,9 @@ async def setup_custom_repo(
             raise FileNotFoundError(f"Directory not found: {source}")
         repo_name = name or source_path.name
 
-    # Sanitize name for filesystem/DB
+    # Sanitize name for filesystem/DB and add validation prefix
     repo_name = repo_name.replace(" ", "-").lower()
+    repo_name = _prefixed_name(repo_name)
     repo_dir = repos_dir / repo_name
 
     if repo_dir.exists():
@@ -277,25 +288,26 @@ async def validate_setup(
         if not info:
             print(f"  Unknown repo: {name}", file=sys.stderr)
             continue
-        repo_dir = repos_dir / name
+        prefixed = _prefixed_name(name)
+        repo_dir = repos_dir / prefixed
         if repo_dir.exists():
             if repo_dir.is_symlink():
-                print(f"  Removing unsafe symlink for {name} (will create proper clone)")
+                print(f"  Removing unsafe symlink for {prefixed} (will create proper clone)")
                 repo_dir.unlink()
             else:
-                print(f"  {name} already exists")
+                print(f"  {prefixed} already exists")
                 continue
         if info["url"]:
-            print(f"  Cloning {name}...")
+            print(f"  Cloning {prefixed}...")
             proc = await asyncio.create_subprocess_exec(
                 "git", "clone", "--depth", "1", info["url"], str(repo_dir),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
             if proc.returncode == 0:
-                print(f"  Cloned {name}")
+                print(f"  Cloned {prefixed}")
             else:
-                print(f"  Failed to clone {name}", file=sys.stderr)
+                print(f"  Failed to clone {prefixed}", file=sys.stderr)
         elif name == "sample":
             project_root = Path(__file__).resolve().parents[3]
             print(f"  Cloning sample from {project_root}...")
@@ -309,18 +321,19 @@ async def validate_setup(
             else:
                 print(f"  Failed to clone sample: run from within the RoboMonkey project", file=sys.stderr)
         else:
-            print(f"  {name}: no URL configured and not a bundled repo")
+            print(f"  {prefixed}: no URL configured and not a bundled repo")
 
     # Probe embedding dimension once for all repos
     await _probe_embedding_dimension()
 
     # Index and embed each repo (blocking — completes before proceeding)
     for name in targets:
-        repo_dir = repos_dir / name
+        prefixed = _prefixed_name(name)
+        repo_dir = repos_dir / prefixed
         if not repo_dir.exists():
             continue
         try:
-            await _index_and_embed_repo(name, repo_dir)
+            await _index_and_embed_repo(prefixed, repo_dir)
         except Exception:
             continue  # logged inside helper
 
@@ -486,7 +499,7 @@ async def validate_run(
         print("  Checking embedding readiness...")
         all_ready = True
         for rname in sorted(target_repos):
-            ready, msg = await _check_embedding_readiness(rname)
+            ready, msg = await _check_embedding_readiness(_prefixed_name(rname))
             if ready:
                 print(f"    {msg}")
             else:
@@ -516,9 +529,10 @@ async def validate_run(
             tasks_by_repo.setdefault(task.target_repo, []).append(task)
 
         for repo_name, repo_tasks in tasks_by_repo.items():
-            repo_dir = repos_dir / repo_name
+            prefixed = _prefixed_name(repo_name)
+            repo_dir = repos_dir / prefixed
             if not repo_dir.exists():
-                print(f"  Repo not found: {repo_name}. Run 'validate setup' first.", file=sys.stderr)
+                print(f"  Repo not found: {prefixed}. Run 'validate setup' first.", file=sys.stderr)
                 continue
 
             def progress(tid, cond, run_num, current, total):
@@ -564,9 +578,10 @@ async def validate_run(
         orch = Orchestrator(driver, config)
 
         for i, task in enumerate(tasks, 1):
-            repo_dir = repos_dir / task.target_repo
+            prefixed = _prefixed_name(task.target_repo)
+            repo_dir = repos_dir / prefixed
             if not repo_dir.exists():
-                print(f"  Repo not found: {task.target_repo}. Run 'validate setup' first.", file=sys.stderr)
+                print(f"  Repo not found: {prefixed}. Run 'validate setup' first.", file=sys.stderr)
                 continue
 
             def progress(tid, cond, run_num, current, total):
@@ -734,37 +749,55 @@ async def validate_list(
 
 
 async def validate_clean(repo: str | None = None, all: bool = False) -> None:
-    """Clean up validation artifacts (filesystem + DB schemas)."""
-    targets = list(REPO_REGISTRY.keys()) if all else ([repo] if repo else [])
+    """Clean up validation artifacts (filesystem + DB schemas).
 
-    # Clean DB schemas for target repos
-    if targets:
+    When --all is used, finds ALL schemas with the tmp_ validation prefix
+    rather than relying solely on the hardcoded registry.
+    """
+    try:
+        import asyncpg
+        from dotenv import load_dotenv
+        load_dotenv()
+        from yonk_code_robomonkey.config import Settings
+        db_url = Settings().database_url
+        conn = await asyncpg.connect(dsn=db_url)
         try:
-            import asyncpg
-            from dotenv import load_dotenv
-            load_dotenv()
-            from yonk_code_robomonkey.config import Settings
-            db_url = Settings().database_url
-            conn = await asyncpg.connect(dsn=db_url)
-            try:
-                for name in targets:
-                    schema = f"robomonkey_{name.replace('-', '_')}"
-                    exists = await conn.fetchval(
-                        "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)",
-                        schema,
-                    )
-                    if exists:
-                        await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-                        print(f"  Dropped DB schema: {schema}")
-                    # Also remove from registry if present
-                    await conn.execute(
-                        "DELETE FROM robomonkey_control.repo_registry WHERE name = $1",
-                        name,
-                    )
-            finally:
-                await conn.close()
-        except Exception as e:
-            print(f"  DB cleanup warning: {e}")
+            if all:
+                # Find ALL validation schemas by scanning for the tmp_ prefix pattern.
+                # Schema names use underscores: robomonkey_tmp_<name>
+                prefix_pattern = f"robomonkey_{VALIDATE_PREFIX}%"
+                rows = await conn.fetch(
+                    "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE $1",
+                    prefix_pattern,
+                )
+                for row in rows:
+                    schema = row["schema_name"]
+                    await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+                    print(f"  Dropped DB schema: {schema}")
+                # Also clean any registry entries with the validation prefix
+                await conn.execute(
+                    "DELETE FROM robomonkey_control.repo_registry WHERE name LIKE $1",
+                    f"{VALIDATE_PREFIX}%",
+                )
+            elif repo:
+                prefixed = _prefixed_name(repo)
+                schema = f"robomonkey_{prefixed.replace('-', '_')}"
+                exists = await conn.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)",
+                    schema,
+                )
+                if exists:
+                    await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+                    print(f"  Dropped DB schema: {schema}")
+                # Also remove from registry if present
+                await conn.execute(
+                    "DELETE FROM robomonkey_control.repo_registry WHERE name = $1",
+                    prefixed,
+                )
+        finally:
+            await conn.close()
+    except Exception as e:
+        print(f"  DB cleanup warning: {e}")
 
     # Clean filesystem
     if all:
@@ -773,10 +806,11 @@ async def validate_clean(repo: str | None = None, all: bool = False) -> None:
             shutil.rmtree(base)
             print("  All validation data removed")
     elif repo:
-        repo_dir = _repos_dir() / repo
+        prefixed = _prefixed_name(repo)
+        repo_dir = _repos_dir() / prefixed
         if repo_dir.exists():
             shutil.rmtree(repo_dir)
-            print(f"  Removed {repo}")
+            print(f"  Removed {prefixed}")
 
 
 async def validate_status() -> None:
@@ -788,20 +822,22 @@ async def validate_status() -> None:
     # Show standard registry repos
     print("  Registry repos:")
     for name in REPO_REGISTRY:
-        repo_dir = repos_dir / name
+        prefixed = _prefixed_name(name)
+        repo_dir = repos_dir / prefixed
         status = "ready" if repo_dir.exists() else "not set up"
-        print(f"    {name:15s} {status}")
+        print(f"    {prefixed:25s} {status}")
 
-    # Show custom repos (any directory in repos_dir not in REPO_REGISTRY)
+    # Show custom repos (any tmp_ directory not matching a registry name)
+    registry_prefixed = {_prefixed_name(n) for n in REPO_REGISTRY}
     if repos_dir.exists():
         custom_repos = [
             d.name for d in sorted(repos_dir.iterdir())
-            if d.is_dir() and d.name not in REPO_REGISTRY
+            if d.is_dir() and d.name not in registry_prefixed
         ]
         if custom_repos:
             print("\n  Custom repos:")
             for name in custom_repos:
-                print(f"    {name:15s} ready")
+                print(f"    {name:25s} ready")
 
     results_file = _results_dir() / "latest.json"
     if results_file.exists():

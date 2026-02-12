@@ -1,0 +1,67 @@
+# suites/tier3_discover/sample-hybrid-search.yaml
+id: discover-sample-hybrid-search
+name: "Discover the hybrid search system"
+difficulty: medium
+category: discover
+task_type: qa
+target_repo: sample
+
+prompt: |
+  Find and explain the hybrid search system in RoboMonkey. Your analysis
+  should trace through the actual source code in the repository.
+
+  Specifically:
+
+  1. Identify all files that implement the hybrid search system. Where is
+     the main hybrid_search function defined? What supporting modules does
+     it use?
+  2. Explain how vector search works in the pipeline. How are query
+     embeddings generated, and how does pgvector similarity search
+     retrieve candidates? What distance metric is used?
+  3. Explain how full-text search (FTS) works. How is websearch_to_tsquery
+     used? What is the FTS ranking function? How are compound identifiers
+     (snake_case, CamelCase) handled?
+  4. Explain the tag boosting mechanism. How are tags used to filter and
+     boost results? What are tags_any and tags_all parameters?
+  5. Describe the score merging algorithm. What are the weights for vector,
+     FTS, and tag components? How are scores normalized before merging?
+     What are the tunable parameters (VECTOR_TOP_K, FTS_TOP_K, etc.)?
+  6. What explainability fields are returned with results (vec_rank,
+     fts_rank, matched_tags, etc.)? How does the require_text_match
+     parameter work?
+
+  Cite specific file paths, function names, and SQL patterns from the
+  source code. Do not describe features that are not implemented.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "Identifies hybrid search files (hybrid_search.py, fts_search.py, etc.)"
+    - "Explains vector search with pgvector and embedding generation"
+    - "Explains FTS with websearch_to_tsquery and compound identifier handling"
+    - "Describes tag boosting mechanism with tags_any and tags_all"
+    - "Covers score merging algorithm with weights and normalization"
+    - "Describes explainability fields and require_text_match parameter"
+  rubric_weights:
+    "Identifies hybrid search files (hybrid_search.py, fts_search.py, etc.)": 0.10
+    "Explains vector search with pgvector and embedding generation": 0.20
+    "Explains FTS with websearch_to_tsquery and compound identifier handling": 0.20
+    "Describes tag boosting mechanism with tags_any and tags_all": 0.15
+    "Covers score merging algorithm with weights and normalization": 0.20
+    "Describes explainability fields and require_text_match parameter": 0.15
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: [discovery, hybrid-search, sample, vector-search, fts, retrieval]
+expected_turns_range: [2, 10]

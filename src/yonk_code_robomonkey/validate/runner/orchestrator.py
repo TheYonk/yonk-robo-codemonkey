@@ -101,11 +101,15 @@ class Orchestrator:
             timeout_seconds=self.config.timeout_seconds,
         )
 
-        # Capture diff before cleanup (both stats and full text)
-        diff_stats = await git.get_diff_stats()
-        _, diff_text, _ = await git._run_git("diff")
+        # Capture diff before cleanup — skip for Q&A tasks (no code changes expected)
+        if task.task_type == "qa":
+            diff_stats = {}
+            diff_text = ""
+        else:
+            diff_stats = await git.get_diff_stats()
+            _, diff_text, _ = await git._run_git("diff")
 
-        # Post-clean
+        # Post-clean (always reset, even Q&A — AI may have modified files)
         valid = True
         invalidation_reason = ""
         try:

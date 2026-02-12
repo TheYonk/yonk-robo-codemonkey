@@ -1,0 +1,44 @@
+# suites/tier1_understand/fastapi-tech-stack.yaml
+id: understand-fastapi-tech-stack
+name: "FastAPI Tech Stack Deep Dive"
+difficulty: simple
+category: understand
+task_type: qa
+target_repo: fastapi
+
+prompt: >
+  What are the key technologies and libraries used in this project? Explain
+  the role of each major dependency.
+
+  Examine the project's dependency declarations (pyproject.toml,
+  requirements files, or setup.py) to identify all direct dependencies.
+  For each major dependency, explain what it does and why this project
+  depends on it. Distinguish between runtime/install dependencies and
+  development/test dependencies. Note any version constraints or pinning
+  that is applied. Pay particular attention to the relationship between
+  FastAPI and its core dependencies like Starlette and Pydantic.
+
+  Do not modify any files. Provide a clear, structured answer.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "identifies major dependencies"
+    - "explains role of each dependency"
+    - "notes version constraints"
+    - "identifies dev vs runtime deps"
+  rubric_weights:
+    "identifies major dependencies": 0.30
+    "explains role of each dependency": 0.30
+    "notes version constraints": 0.20
+    "identifies dev vs runtime deps": 0.20
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["understanding", "tech-stack", "fastapi"]
+expected_turns_range: [1, 5]

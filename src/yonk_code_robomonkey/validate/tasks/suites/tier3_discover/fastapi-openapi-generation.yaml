@@ -1,0 +1,63 @@
+# suites/tier3_discover/fastapi-openapi-generation.yaml
+id: discover-fastapi-openapi-generation
+name: "Discover FastAPI's OpenAPI schema generation"
+difficulty: medium
+category: discover
+task_type: qa
+target_repo: fastapi
+
+prompt: |
+  Find and explain how FastAPI generates OpenAPI/Swagger documentation
+  automatically. Your analysis should trace through the actual source code.
+
+  Specifically:
+
+  1. Identify the core files responsible for OpenAPI schema generation.
+     Where is the main get_openapi() function defined? What modules does
+     it depend on?
+  2. Explain how route information is extracted and transformed into
+     OpenAPI path items. How does FastAPI convert Python type annotations
+     and Pydantic models into JSON Schema for the OpenAPI spec?
+  3. How are request parameters (path, query, header, cookie) represented
+     in the generated schema? Where does this extraction happen?
+  4. How are request body schemas and response model schemas generated?
+     Trace the flow from a route decorator with response_model to the
+     final OpenAPI JSON.
+  5. How does FastAPI serve the Swagger UI and ReDoc documentation pages?
+     What routes are registered and what templates/assets are used?
+  6. How do tags, summary, description, and other OpenAPI metadata from
+     route decorators flow into the generated spec?
+
+  Cite specific file paths, function names, and class names from the source
+  code. Do not reference files or functions that do not exist in the repo.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "Identifies core OpenAPI generation files and get_openapi function"
+    - "Explains route-to-OpenAPI path item transformation"
+    - "Describes request parameter extraction (path, query, header, cookie)"
+    - "Covers request body and response model schema generation"
+    - "Explains Swagger UI and ReDoc serving mechanism"
+  rubric_weights:
+    "Identifies core OpenAPI generation files and get_openapi function": 0.20
+    "Explains route-to-OpenAPI path item transformation": 0.25
+    "Describes request parameter extraction (path, query, header, cookie)": 0.20
+    "Covers request body and response model schema generation": 0.20
+    "Explains Swagger UI and ReDoc serving mechanism": 0.15
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: [discovery, openapi, swagger, fastapi, documentation, schema]
+expected_turns_range: [2, 10]

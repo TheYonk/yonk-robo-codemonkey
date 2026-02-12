@@ -1,0 +1,95 @@
+# suites/tier5_rewrite/fastapi-rewrite-dependency-resolution.yaml
+id: rewrite-fastapi-dependency-resolution
+name: "Rewrite FastAPI dependency resolution with TTL caching"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: fastapi
+
+prompt: |
+  Rewrite the dependency resolution in fastapi/dependencies/utils.py to add
+  dependency caching with configurable TTL per dependency.
+
+  Currently, FastAPI resolves dependencies on every request by calling the
+  dependency function. The `use_cache` parameter in `Depends()` only caches
+  within a single request (so the same dependency called twice in one request
+  is resolved once). There is no cross-request caching with TTL support.
+
+  Rewrite as follows:
+
+  1. Create a new file `fastapi/dependencies/cache.py` that defines:
+     a. A `CacheEntry` dataclass with fields:
+        - `value: Any` - the cached dependency result
+        - `created_at: float` - timestamp when cached
+        - `ttl: float` - time-to-live in seconds
+        - `key: str` - cache key
+     b. A `DependencyCache` protocol with methods:
+        - `async get(key: str) -> CacheEntry | None`
+        - `async set(key: str, value: Any, ttl: float) -> None`
+        - `async invalidate(key: str) -> None`
+        - `async clear() -> None`
+     c. An `InMemoryDependencyCache` implementation using a dict with
+        automatic TTL expiration (lazy eviction on access + periodic cleanup).
+     d. A `CachedDepends` function (alternative to `Depends`) that accepts:
+        - `dependency: Callable` - the dependency function
+        - `ttl: float` - cache TTL in seconds
+        - `cache_key: Callable[..., str] | None` - optional custom key
+          generator (receives the same args as the dependency)
+        - `use_cache: bool = True` - enable/disable caching
+
+  2. In `fastapi/dependencies/utils.py`:
+     a. Modify `solve_dependencies()` to check the dependency cache before
+        calling the dependency function when the dependency was declared
+        via `CachedDepends`.
+     b. After resolving a `CachedDepends` dependency, store the result in
+        the cache with the configured TTL.
+     c. Generate cache keys by combining the dependency function's qualified
+        name with a hash of its input parameters (or use the custom key
+        function if provided).
+     d. Add a `dependency_cache` parameter to `solve_dependencies()` that
+        accepts a `DependencyCache` instance (default: a module-level
+        `InMemoryDependencyCache` singleton).
+
+  3. In `fastapi/dependencies/__init__.py`:
+     a. Export `CachedDepends`, `DependencyCache`, and
+        `InMemoryDependencyCache`.
+
+  4. In `fastapi/params.py`:
+     a. Add a `CachedDepends` class (parallel to the existing `Depends`)
+        with `ttl: float`, `cache_key: Callable | None`, and
+        `use_cache: bool` attributes.
+
+  5. Add tests in `tests/test_dependency_cache.py`:
+     a. Test that a CachedDepends dependency is called only once within TTL.
+     b. Test that the dependency is re-called after TTL expires.
+     c. Test custom cache key functions.
+     d. Test cache invalidation.
+     e. Test that regular Depends() still works without caching.
+     f. Test concurrent requests sharing cached dependencies.
+     g. Test nested CachedDepends (dependency that depends on another
+        cached dependency).
+     h. Test that use_cache=False bypasses the cache.
+
+  6. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_dependency_cache.py"
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "fastapi/dependencies/utils.py"
+    - "fastapi/params.py"
+  must_not_modify:
+    - "fastapi/routing.py"
+    - "fastapi/applications.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, fastapi, dependency-injection, caching, ttl]
+expected_turns_range: [3, 20]

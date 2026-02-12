@@ -1,0 +1,63 @@
+# suites/tier2_review/django-review-routing.yaml
+id: review-django-routing
+name: "Review Django URL dispatching and routing patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: django
+
+prompt: |
+  Review the URL routing and dispatching system in the Django project. Examine
+  the source code in `django/urls/` (particularly `resolvers.py`, `conf.py`,
+  and `converters.py`) and how URL configuration ties into the request
+  handling pipeline in `django/core/handlers/`.
+
+  In your review, please address the following:
+
+  1. What is the core URL routing mechanism? How does Django resolve a URL
+     path to a view function, including the role of `URLPattern`,
+     `URLResolver`, and `ResolverMatch`?
+  2. List the main URL registration patterns -- `path()`, `re_path()`,
+     `include()`, namespace handling, and app_name conventions used
+     throughout Django's own apps (admin, auth, etc.).
+  3. How do URL converters (path converters) work? What built-in converters
+     exist and how is the converter registry organized?
+  4. Identify any inconsistencies or areas where the URL dispatch system
+     could be confusing -- for example, differences between `path()` and
+     `re_path()`, namespace resolution edge cases, or include() behavior
+     with nested namespaces.
+  5. Suggest concrete improvements to the URL routing architecture, with
+     references to specific files and functions.
+
+  Reference actual source files and line ranges in your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies routing mechanism"
+    - "lists route registration patterns"
+    - "notes inconsistencies"
+    - "suggests improvements"
+    - "references actual files"
+  rubric_weights:
+    "identifies routing mechanism": 0.25
+    "lists route registration patterns": 0.25
+    "notes inconsistencies": 0.20
+    "suggests improvements": 0.15
+    "references actual files": 0.15
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "routing", "django", "url-dispatch", "tier2"]
+expected_turns_range: [2, 8]

@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS chunk (
   end_line INT NOT NULL,
   content TEXT NOT NULL,
   content_hash TEXT NOT NULL,
+  -- Chunk sequence tracking for reconstruction of multi-chunk symbols
+  chunk_sequence INT NOT NULL DEFAULT 0,  -- 0-indexed position in sequence
+  total_chunks INT NOT NULL DEFAULT 1,    -- Total chunks for this symbol/header
   fts tsvector,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

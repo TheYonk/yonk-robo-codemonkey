@@ -34,8 +34,6 @@ class ClaudeCodeDriver(BaseDriver):
         ]
         if mcp_config:
             cmd.extend(["--mcp-config", mcp_config])
-        else:
-            cmd.extend(["--strict-mcp-config", "--mcp-config", "{}"])
         return cmd
 
     async def run(

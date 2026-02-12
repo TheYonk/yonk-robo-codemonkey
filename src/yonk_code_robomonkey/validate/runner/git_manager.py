@@ -30,7 +30,17 @@ class GitManager:
         rc, _, err = await self._run_git("checkout", commit, "--detach")
         if rc != 0:
             raise RuntimeError(f"git checkout failed: {err}")
-        rc, _, err = await self._run_git("clean", "-fdx")
+        # Reset tracked files to commit state
+        rc, _, err = await self._run_git("reset", "--hard")
+        if rc != 0:
+            raise RuntimeError(f"git reset failed: {err}")
+        # Clean untracked files but preserve common development artifacts
+        rc, _, err = await self._run_git(
+            "clean", "-fdx",
+            "--exclude=.venv",
+            "--exclude=.env",
+            "--exclude=node_modules",
+        )
         if rc != 0:
             raise RuntimeError(f"git clean failed: {err}")
 

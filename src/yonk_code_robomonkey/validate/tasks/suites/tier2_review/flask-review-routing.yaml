@@ -1,0 +1,60 @@
+# suites/tier2_review/flask-review-routing.yaml
+id: review-flask-routing
+name: "Review Flask routing and URL dispatching patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: flask
+
+prompt: |
+  Review the routing and URL dispatching system in the Flask project. Examine
+  the source code in `src/flask/` (particularly `app.py`, `blueprints.py`,
+  `scaffold.py`, and the `sansio/` directory) to understand how routes are
+  defined, registered, and dispatched.
+
+  In your review, please address the following:
+
+  1. What is the core routing mechanism? How does Flask register URL rules and
+     dispatch incoming requests to view functions?
+  2. List the main route registration patterns used throughout the project
+     (decorators, explicit add_url_rule, blueprints, etc.) and explain how
+     they relate to each other.
+  3. How do blueprints participate in routing? How are blueprint URL prefixes
+     and subdomain routing handled?
+  4. Identify any inconsistencies, redundancies, or areas where the routing
+     API surface could be confusing to users.
+  5. Suggest concrete improvements to the routing architecture or API, with
+     references to specific files and functions.
+
+  Reference actual source files and line ranges in your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies routing mechanism"
+    - "lists route registration patterns"
+    - "notes inconsistencies"
+    - "suggests improvements"
+    - "references actual files"
+  rubric_weights:
+    "identifies routing mechanism": 0.25
+    "lists route registration patterns": 0.25
+    "notes inconsistencies": 0.20
+    "suggests improvements": 0.15
+    "references actual files": 0.15
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "routing", "flask", "url-dispatch", "tier2"]
+expected_turns_range: [2, 8]

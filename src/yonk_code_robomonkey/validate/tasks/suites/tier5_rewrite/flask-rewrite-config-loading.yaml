@@ -1,0 +1,86 @@
+# suites/tier5_rewrite/flask-rewrite-config-loading.yaml
+id: rewrite-flask-config-loading
+name: "Rewrite Flask config loading to support YAML and TOML"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: flask
+
+prompt: |
+  Rewrite the configuration loading in src/flask/config.py to support YAML
+  and TOML config files in addition to the existing Python-object-based
+  configuration.
+
+  Currently, Flask's `Config` class in src/flask/config.py supports loading
+  configuration from:
+  - Python objects (`from_object`)
+  - Python files (`from_pyfile`)
+  - Environment variables (`from_prefixed_env`)
+  - Mapping dicts (`from_mapping`)
+  - JSON files (`from_file` with json.load)
+
+  Rewrite the configuration system as follows:
+
+  1. In `src/flask/config.py`:
+     a. Add a `ConfigLoader` protocol/ABC with a method
+        `load(self, filepath: str | os.PathLike) -> dict` that reads a
+        config file and returns a dictionary of uppercase config keys.
+     b. Implement `YAMLConfigLoader` that uses PyYAML (with safe_load) to
+        parse `.yaml` / `.yml` files. Nested keys should be flattened with
+        underscore separators (e.g., `database.host` -> `DATABASE_HOST`).
+     c. Implement `TOMLConfigLoader` that uses `tomllib` (stdlib in 3.11+)
+        to parse `.toml` files with the same flattening behavior.
+     d. Implement `JSONConfigLoader` as a wrapper around the existing
+        json-loading behavior for consistency.
+     e. Add a `_loader_registry: dict[str, ConfigLoader]` class variable
+        that maps file extensions to loaders: `.yaml`, `.yml`, `.toml`, `.json`.
+     f. Add a `register_loader(cls, extension: str, loader: ConfigLoader)`
+        class method to allow users to register custom loaders.
+     g. Rewrite `from_file()` to auto-detect the loader based on file
+        extension when no explicit `load` callable is provided. If the
+        extension is not in the registry, raise a `ValueError` with a
+        helpful message listing supported extensions.
+     h. Add a `from_yaml(self, filename, silent=False)` convenience method.
+     i. Add a `from_toml(self, filename, silent=False)` convenience method.
+
+  2. Update `src/flask/__init__.py` to export `ConfigLoader`,
+     `YAMLConfigLoader`, and `TOMLConfigLoader`.
+
+  3. Add tests in `tests/test_config_loaders.py`:
+     a. Test loading a YAML config file with nested keys and verify flattening.
+     b. Test loading a TOML config file and verify uppercase key conversion.
+     c. Test auto-detection of loader by file extension.
+     d. Test registering a custom loader for a new extension.
+     e. Test that `from_file` raises ValueError for unknown extensions.
+     f. Test `silent=True` behavior when config file does not exist.
+     g. Test that existing `from_object`, `from_pyfile`, and `from_mapping`
+        still work unchanged.
+
+  4. Ensure all existing tests continue to pass.
+
+  Note: PyYAML is an optional dependency. If `import yaml` fails, the
+  YAMLConfigLoader should raise an ImportError with a message suggesting
+  `pip install pyyaml`.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_config_loaders.py"
+    - "tests/test_config.py"
+  lint: true
+  type_check: false
+  max_files_changed: 4
+  must_modify:
+    - "src/flask/config.py"
+    - "src/flask/__init__.py"
+  must_not_modify:
+    - "src/flask/app.py"
+    - "src/flask/sessions.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, flask, config, yaml, toml, extensibility]
+expected_turns_range: [3, 20]

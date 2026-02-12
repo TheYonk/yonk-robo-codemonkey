@@ -391,15 +391,17 @@ class DocIndexProcessor(KBJobProcessor):
                     version = payload.get("version")
                     metadata = payload.get("metadata", {})
 
+                    repo_name = metadata.get("repo_name", "global") if metadata else "global"
                     await conn.execute("""
                         INSERT INTO robomonkey_docs.doc_source (
                             id, name, file_path, doc_type, description,
-                            content_hash, version, metadata, status
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'processing')
+                            content_hash, version, metadata, status, repo_name
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'processing', $9)
                     """,
                         source_id, source_name, str(path), doc_type,
                         description, content_hash, version,
-                        json.dumps(metadata) if metadata else '{}'
+                        json.dumps(metadata) if metadata else '{}',
+                        repo_name
                     )
             else:
                 # Update existing source to processing

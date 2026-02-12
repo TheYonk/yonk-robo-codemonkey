@@ -78,21 +78,31 @@ async def embed_chunks(
         if not chunks:
             return {"embedded": 0, "skipped": 0}
 
-        # Prepare texts and IDs, truncating long chunks
+        # Prepare texts and IDs
+        # With model-aware chunking, chunks should already be correctly sized.
+        # If truncation is needed, it indicates a need to reindex.
         chunk_ids = []
         chunk_texts = []
-        skipped_count = 0
+        truncated_count = 0
 
         for row in chunks:
             content = row["content"]
             if len(content) > max_chunk_length:
-                # Truncate to max length
-                print(f"  WARNING: Truncating chunk {row['id']} from {len(content)} to {max_chunk_length} chars")
+                # Truncate as fallback for legacy data, but warn prominently
+                truncated_count += 1
+                if truncated_count <= 5:  # Only show first 5 warnings
+                    print(f"  ⚠️  TRUNCATING chunk {row['id']} from {len(content)} to {max_chunk_length} chars")
+                    print(f"      Consider reindexing to use model-aware chunking")
                 chunk_ids.append(row["id"])
                 chunk_texts.append(content[:max_chunk_length])
             else:
                 chunk_ids.append(row["id"])
                 chunk_texts.append(content)
+
+        if truncated_count > 5:
+            print(f"  ⚠️  ... and {truncated_count - 5} more chunks truncated")
+        if truncated_count > 0:
+            print(f"  ⚠️  {truncated_count} chunks exceeded model limit. Reindex with --force to fix.")
 
         total_chunks = len(chunk_texts)
         print(f"Embedding {total_chunks} chunks in batches of {settings.embedding_batch_size}...")
@@ -225,27 +235,36 @@ async def embed_documents(
         if not documents:
             return {"embedded": 0, "skipped": 0}
 
-        # Prepare texts and IDs, truncating long documents
+        # Prepare texts and IDs
+        # With model-aware chunking, documents should already be correctly sized.
         doc_ids = []
         doc_texts = []
         skipped_count = 0
+        truncated_count = 0
 
         for row in documents:
             content = row["content"]
             # Skip empty or very short documents
             if not content or len(content.strip()) < 10:
-                print(f"  WARNING: Skipping document {row['id']} (empty or too short: {len(content)} chars)")
+                print(f"  ⚠️  Skipping document {row['id']} (empty or too short: {len(content)} chars)")
                 skipped_count += 1
                 continue
 
             if len(content) > max_chunk_length:
-                # Truncate to max length
-                print(f"  WARNING: Truncating document {row['id']} from {len(content)} to {max_chunk_length} chars")
+                # Truncate as fallback, but warn
+                truncated_count += 1
+                if truncated_count <= 5:
+                    print(f"  ⚠️  TRUNCATING document {row['id']} from {len(content)} to {max_chunk_length} chars")
                 doc_ids.append(row["id"])
                 doc_texts.append(content[:max_chunk_length])
             else:
                 doc_ids.append(row["id"])
                 doc_texts.append(content)
+
+        if truncated_count > 5:
+            print(f"  ⚠️  ... and {truncated_count - 5} more documents truncated")
+        if truncated_count > 0:
+            print(f"  ⚠️  {truncated_count} documents exceeded model limit. Consider re-chunking.")
 
         total_docs = len(doc_texts)
         print(f"Embedding {total_docs} documents in batches of {settings.embedding_batch_size}...")

@@ -1,0 +1,62 @@
+# suites/tier2_review/sample-review-error-handling.yaml
+id: review-sample-error-handling
+name: "Review RoboMonkey error and exception handling patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: sample
+
+prompt: |
+  Review how errors and exceptions are handled across this project. Examine
+  the source code in `src/yonk_code_robomonkey/` with particular attention to
+  the web routes (`web/routes/`), MCP tools (`mcp/tools.py`), CLI commands
+  (`cli/commands.py`), database layer (`db/`), and the indexing pipeline
+  (`indexer/`).
+
+  In your review, please address the following:
+
+  1. What are the primary error handling patterns used? How do the web routes
+     handle exceptions (HTTP error responses, try/except blocks)? How do MCP
+     tools report errors back to the client?
+  2. How does the database layer handle connection failures, query errors,
+     and transaction rollbacks? Are there consistent patterns in `db/queries.py`
+     and `db/vector.py`?
+  3. Are there gaps in error handling? Are there code paths where exceptions
+     could be silently swallowed, produce unhelpful error messages, or crash
+     the server?
+  4. How is logging used in error paths across the project? Are errors logged
+     consistently with enough context for debugging, and is the log level
+     appropriate (error vs. warning vs. info)?
+  5. Are there any places where sensitive information (database credentials,
+     file paths, stack traces) could leak through error responses?
+
+  Reference actual source files and code locations in your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies error handling patterns"
+    - "finds gaps or missing handlers"
+    - "notes logging practices"
+    - "references actual code locations"
+  rubric_weights:
+    "identifies error handling patterns": 0.30
+    "finds gaps or missing handlers": 0.25
+    "notes logging practices": 0.20
+    "references actual code locations": 0.25
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "error-handling", "sample", "exceptions", "tier2"]
+expected_turns_range: [2, 8]

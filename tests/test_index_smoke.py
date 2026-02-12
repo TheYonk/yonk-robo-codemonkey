@@ -1,10 +1,13 @@
 """Smoke tests for indexing pipeline."""
 import pytest
+import pytest_asyncio
 import asyncpg
 from pathlib import Path
 from dotenv import load_dotenv
 
 from yonk_code_robomonkey.indexer.indexer import index_repository
+
+SCHEMA_NAME = "robomonkey_test_repo"
 
 
 @pytest.fixture(scope="module")
@@ -20,6 +23,22 @@ def database_url():
 def test_repo_path():
     """Get path to test fixture repository."""
     return str(Path(__file__).parent / "fixtures" / "test_repo")
+
+
+@pytest.fixture(autouse=True, scope="module")
+def cleanup_schema():
+    """Drop the test schema after all tests in this module complete."""
+    yield
+    import asyncio
+    import os
+    db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5436/robomonkey")
+    async def _drop():
+        conn = await asyncpg.connect(dsn=db_url)
+        try:
+            await conn.execute(f'DROP SCHEMA IF EXISTS "{SCHEMA_NAME}" CASCADE')
+        finally:
+            await conn.close()
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(_drop())
 
 
 @pytest.mark.asyncio

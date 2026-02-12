@@ -1,0 +1,65 @@
+# suites/tier3_discover/django-auth-system.yaml
+id: discover-django-auth-system
+name: "Discover Django's authentication system"
+difficulty: medium
+category: discover
+task_type: qa
+target_repo: django
+
+prompt: |
+  Find the authentication system in Django's source code. Explain how
+  login/logout works, what files are involved, and what middleware supports
+  it.
+
+  Specifically:
+
+  1. Identify the key files in django/contrib/auth/ that implement the
+     authentication system. What are the main modules and what role does
+     each play?
+  2. Explain how the login() function works. Trace from the view through
+     to session creation. How is the user attached to the request?
+  3. Explain how the logout() function works. What session data is cleared
+     and what signals are sent?
+  4. Describe the AuthenticationMiddleware. Where is it defined, what does
+     it do on each request, and how does it populate request.user?
+  5. Explain the authentication backends system. How does authenticate()
+     iterate over backends? What is the ModelBackend and how does it
+     verify credentials?
+  6. How does the @login_required decorator work? Where is it defined and
+     how does it redirect unauthenticated users?
+
+  Cite specific file paths, class names, and function signatures from the
+  repository. Do not describe behavior not present in the code.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "Identifies key auth files in django/contrib/auth/"
+    - "Explains login() flow including session creation and user attachment"
+    - "Explains logout() flow including session cleanup and signals"
+    - "Describes AuthenticationMiddleware and request.user population"
+    - "Covers authentication backends system and ModelBackend"
+    - "Explains login_required decorator implementation"
+  rubric_weights:
+    "Identifies key auth files in django/contrib/auth/": 0.10
+    "Explains login() flow including session creation and user attachment": 0.20
+    "Explains logout() flow including session cleanup and signals": 0.15
+    "Describes AuthenticationMiddleware and request.user population": 0.20
+    "Covers authentication backends system and ModelBackend": 0.20
+    "Explains login_required decorator implementation": 0.15
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: [discovery, authentication, django, middleware, security]
+expected_turns_range: [2, 10]

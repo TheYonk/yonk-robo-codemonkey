@@ -1,0 +1,109 @@
+# suites/tier5_rewrite/sample-rewrite-embedder.yaml
+id: rewrite-sample-embedder
+name: "Rewrite embedding pipeline with retry logic and rate limit handling"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: sample
+
+prompt: |
+  Rewrite the embedding pipeline in
+  src/yonk_code_robomonkey/embeddings/embedder.py to add retry logic with
+  exponential backoff, batch progress reporting, and graceful handling of
+  rate limits.
+
+  Currently, the embedding pipeline in `embedder.py` processes chunks and
+  documents by calling the embedding provider in batches. If a batch fails,
+  the entire operation fails. There is no retry logic, no progress reporting,
+  and no special handling for rate limits (HTTP 429).
+
+  Rewrite as follows:
+
+  1. Create a new file `src/yonk_code_robomonkey/embeddings/retry.py`:
+     a. Define a `RetryConfig` dataclass with fields:
+        - `max_retries: int = 3` - maximum retry attempts
+        - `initial_delay: float = 1.0` - initial backoff delay in seconds
+        - `max_delay: float = 60.0` - maximum backoff delay
+        - `backoff_factor: float = 2.0` - exponential backoff multiplier
+        - `jitter: bool = True` - add random jitter to delays
+        - `retry_on: tuple[type[Exception], ...] = (Exception,)` - exception
+          types to retry on
+     b. Define a `RetryState` dataclass tracking:
+        - `attempt: int` - current attempt number
+        - `total_retries: int` - total retries performed
+        - `last_error: Exception | None` - last error encountered
+        - `next_delay: float` - computed next delay
+     c. Define an `async retry_with_backoff(func, config, on_retry=None)`
+        async function that:
+        - Calls `func()` and returns the result on success
+        - On failure, computes exponential backoff with optional jitter
+        - Calls `on_retry(state)` callback before each retry
+        - Raises the last exception after exhausting retries
+     d. Define a `RateLimitHandler` class that:
+        - Detects rate limit responses (HTTP 429, "rate_limit" in error)
+        - Parses `Retry-After` headers when available
+        - Provides `async wait_if_needed()` that sleeps for the appropriate
+          duration
+
+  2. In `src/yonk_code_robomonkey/embeddings/embedder.py`:
+     a. Add a `ProgressReporter` protocol with methods:
+        - `on_batch_start(batch_num: int, batch_size: int, total: int)`
+        - `on_batch_complete(batch_num: int, embedded_count: int, total: int)`
+        - `on_batch_error(batch_num: int, error: Exception, will_retry: bool)`
+        - `on_complete(total_embedded: int, total_skipped: int, total_errors: int)`
+     b. Implement a `ConsoleProgressReporter` that prints progress:
+        `Embedding batch 3/10 (150/500 chunks)... [====------] 30%`
+     c. Add `retry_config: RetryConfig | None` parameter to the main
+        embedding functions (default: RetryConfig with sensible defaults).
+     d. Add `progress: ProgressReporter | None` parameter to the main
+        embedding functions.
+     e. Wrap each batch embedding call with `retry_with_backoff()`:
+        - On HTTP 429, use `RateLimitHandler` to wait before retrying
+        - On transient errors (connection, timeout), retry with backoff
+        - On permanent errors (400, 401), fail immediately
+     f. Collect per-batch results into a summary:
+        - `total_embedded: int` - successfully embedded chunks
+        - `total_skipped: int` - skipped (content hash unchanged)
+        - `total_errors: int` - failed after all retries
+        - `errors: list[tuple[str, Exception]]` - chunk_id + error pairs
+     g. Return the summary dict from the embedding functions instead of
+        just a count.
+
+  3. Update `src/yonk_code_robomonkey/cli/commands.py`:
+     a. Add `--max-retries` option to the embed command (default: 3).
+     b. Add `--no-progress` flag to disable progress output.
+     c. Print the embedding summary at the end.
+
+  4. Add tests in `tests/test_embedder_retry.py`:
+     a. Test successful embedding with no retries needed.
+     b. Test retry on transient error with eventual success.
+     c. Test max retries exhausted raises the last exception.
+     d. Test exponential backoff delay calculation.
+     e. Test rate limit detection and Retry-After parsing.
+     f. Test progress reporting callbacks are called correctly.
+     g. Test that content-hash skipping still works.
+     h. Test the summary dict contains correct counts.
+
+  5. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_embedder_retry.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "src/yonk_code_robomonkey/embeddings/embedder.py"
+    - "src/yonk_code_robomonkey/cli/commands.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/retrieval/hybrid_search.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, sample, embeddings, retry, rate-limiting, progress]
+expected_turns_range: [3, 20]

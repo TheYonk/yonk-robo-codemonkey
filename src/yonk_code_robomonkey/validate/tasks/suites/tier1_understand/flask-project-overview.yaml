@@ -1,0 +1,43 @@
+# suites/tier1_understand/flask-project-overview.yaml
+id: understand-flask-project-overview
+name: "Flask Project Overview"
+difficulty: simple
+category: understand
+task_type: qa
+target_repo: flask
+
+prompt: >
+  Tell me about this project. What does it do, what's the tech stack,
+  how is it organized, and what are the main entry points?
+
+  Examine the repository structure, configuration files (setup.cfg,
+  pyproject.toml, or setup.py), and top-level source directories. Identify
+  the purpose of the project, the core technologies and runtime dependencies
+  it relies on, how the source tree is laid out, and the primary entry points
+  a developer or user would interact with (CLI commands, importable modules,
+  WSGI app objects, etc.).
+
+  Do not modify any files. Provide a clear, structured answer.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "project purpose"
+    - "tech stack and dependencies"
+    - "directory structure"
+    - "main entry points"
+  rubric_weights:
+    "project purpose": 0.30
+    "tech stack and dependencies": 0.25
+    "directory structure": 0.25
+    "main entry points": 0.20
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["understanding", "project-overview", "flask"]
+expected_turns_range: [1, 5]

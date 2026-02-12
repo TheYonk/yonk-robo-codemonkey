@@ -209,7 +209,8 @@ async function loadRepos() {
         if (reposList.length === 0) {
             content.innerHTML = `
                 <div class="text-center py-8">
-                    <p class="text-slate-400 mb-4">No repositories registered</p>
+                    <p class="text-slate-400 mb-4">No repositories found</p>
+                    <p class="text-sm text-slate-500 mb-4">Index a repo via CLI (<code class="bg-slate-700 border border-slate-600 px-2 py-1 rounded text-slate-300">robomonkey index</code>) or add one here.</p>
                     <button onclick="showAddRepoModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
                         + Add Your First Repository
                     </button>
@@ -235,39 +236,56 @@ async function loadRepos() {
                         ${reposList.map(repo => `
                             <tr class="hover:bg-slate-700/50">
                                 <td class="px-4 py-3">
-                                    <button onclick="showDetails('${repo.name}')" class="font-medium text-blue-400 hover:text-blue-300">
-                                        ${repo.name}
-                                    </button>
+                                    <div class="flex items-center gap-2">
+                                        <button onclick="showDetails('${repo.name}')" class="font-medium text-blue-400 hover:text-blue-300">
+                                            ${repo.name}
+                                        </button>
+                                        ${repo.source === 'schema'
+                                            ? '<span class="px-1.5 py-0.5 bg-amber-900/50 text-amber-400 border border-amber-700 rounded text-[10px] font-medium" title="Indexed via CLI, not managed by daemon">CLI</span>'
+                                            : ''
+                                        }
+                                    </div>
                                 </td>
                                 <td class="px-4 py-3 text-sm text-slate-400 font-mono truncate max-w-xs" title="${repo.root_path}">
-                                    ${repo.root_path}
+                                    ${repo.root_path || '<span class="text-slate-600 italic">not set</span>'}
                                 </td>
                                 <td class="px-4 py-3">
-                                    ${repo.enabled
-                                        ? '<span class="px-2 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded text-xs font-medium">Enabled</span>'
-                                        : '<span class="px-2 py-1 bg-slate-700 text-slate-400 border border-slate-600 rounded text-xs font-medium">Disabled</span>'
+                                    ${repo.source === 'schema'
+                                        ? '<span class="px-2 py-1 bg-amber-900/30 text-amber-400 border border-amber-700 rounded text-xs font-medium">Unmanaged</span>'
+                                        : repo.enabled
+                                            ? '<span class="px-2 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded text-xs font-medium">Enabled</span>'
+                                            : '<span class="px-2 py-1 bg-slate-700 text-slate-400 border border-slate-600 rounded text-xs font-medium">Disabled</span>'
                                     }
                                 </td>
                                 <td class="px-4 py-3 text-sm">
-                                    <span class="${repo.auto_index ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Index">I</span>
-                                    <span class="${repo.auto_embed ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Embed">E</span>
-                                    <span class="${repo.auto_watch ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Watch">W</span>
-                                    <span class="${repo.auto_summaries ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Summaries">S</span>
+                                    ${repo.source === 'schema'
+                                        ? '<span class="text-slate-600">-</span>'
+                                        : `<span class="${repo.auto_index ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Index">I</span>
+                                           <span class="${repo.auto_embed ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Embed">E</span>
+                                           <span class="${repo.auto_watch ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Watch">W</span>
+                                           <span class="${repo.auto_summaries ? 'text-emerald-400' : 'text-slate-600'}" title="Auto Summaries">S</span>`
+                                    }
                                 </td>
                                 <td class="px-4 py-3 text-sm text-slate-400">
                                     ${repo.updated_at ? formatRelative(repo.updated_at) : 'Never'}
                                 </td>
                                 <td class="px-4 py-3">
                                     <div class="flex gap-1">
-                                        <button onclick="showJobModal('${repo.name}')" class="px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded" title="Trigger Job">
-                                            Run
-                                        </button>
-                                        <button onclick="showEditModal('${repo.name}')" class="px-2 py-1 text-xs bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded" title="Edit">
-                                            Edit
-                                        </button>
-                                        <button onclick="showDeleteModal('${repo.name}')" class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded" title="Delete">
-                                            Del
-                                        </button>
+                                        ${repo.source === 'schema' ? `
+                                            <button onclick="showDetails('${repo.name}')" class="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 border border-slate-600 rounded" title="View Details">
+                                                View
+                                            </button>
+                                        ` : `
+                                            <button onclick="showJobModal('${repo.name}')" class="px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded" title="Trigger Job">
+                                                Run
+                                            </button>
+                                            <button onclick="showEditModal('${repo.name}')" class="px-2 py-1 text-xs bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded" title="Edit">
+                                                Edit
+                                            </button>
+                                            <button onclick="showDeleteModal('${repo.name}')" class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded" title="Delete">
+                                                Del
+                                            </button>
+                                        `}
                                     </div>
                                 </td>
                             </tr>
@@ -275,7 +293,7 @@ async function loadRepos() {
                     </tbody>
                 </table>
             </div>
-            <p class="text-xs text-slate-500 mt-3">Auto: I=Index, E=Embed, W=Watch, S=Summaries</p>
+            <p class="text-xs text-slate-500 mt-3">Auto: I=Index, E=Embed, W=Watch, S=Summaries | <span class="text-amber-400">CLI</span> = indexed via CLI, not daemon-managed</p>
         `;
     } catch (error) {
         content.innerHTML = `<p class="text-red-400">Error loading repositories: ${error.message}</p>`;
@@ -390,10 +408,37 @@ async function showDetails(repoName) {
     content.innerHTML = '<p class="text-slate-400">Loading...</p>';
     modal.classList.remove('hidden');
 
+    // Find this repo in the cached list to check its source
+    const cachedRepo = reposList.find(r => r.name === repoName);
+    const isSchemaOnly = cachedRepo && cachedRepo.source === 'schema';
+
     try {
-        const response = await fetch(`/api/registry/${repoName}`);
-        if (!response.ok) throw new Error('Failed to load details');
-        const repo = await response.json();
+        let repo;
+
+        if (isSchemaOnly) {
+            // Schema-only repos don't exist in the registry — use /api/repos/{name}/stats
+            const response = await fetch(`/api/repos/${repoName}/stats`);
+            if (!response.ok) throw new Error('Failed to load details');
+            const data = await response.json();
+            repo = {
+                name: data.repo_name,
+                schema_name: data.schema,
+                root_path: cachedRepo.root_path || '',
+                enabled: false,
+                schema_exists: true,
+                source: 'schema',
+                stats: data.stats,
+                languages: data.languages,
+                created_at: null,
+                updated_at: cachedRepo.updated_at,
+                last_seen_at: null
+            };
+        } else {
+            const response = await fetch(`/api/registry/${repoName}`);
+            if (!response.ok) throw new Error('Failed to load details');
+            repo = await response.json();
+            repo.source = 'registry';
+        }
 
         content.innerHTML = `
             <div class="space-y-4">
@@ -408,45 +453,53 @@ async function showDetails(repoName) {
                     </div>
                 </div>
 
+                ${repo.source === 'schema' ? `
+                    <div class="p-3 bg-amber-900/20 border border-amber-700 rounded">
+                        <p class="text-sm text-amber-400">This repository was indexed via the CLI and is not managed by the daemon.</p>
+                    </div>
+                ` : ''}
+
                 <div>
                     <p class="text-sm text-slate-400">Root Path</p>
-                    <p class="font-mono text-sm text-slate-300 break-all">${repo.root_path}</p>
+                    <p class="font-mono text-sm text-slate-300 break-all">${repo.root_path || '<span class="text-slate-600 italic">not set</span>'}</p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-sm text-slate-400">Status</p>
-                        <p>${repo.enabled
-                            ? '<span class="px-2 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded text-xs">Enabled</span>'
-                            : '<span class="px-2 py-1 bg-slate-700 text-slate-400 border border-slate-600 rounded text-xs">Disabled</span>'
-                        }</p>
+                ${repo.source !== 'schema' ? `
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-sm text-slate-400">Status</p>
+                            <p>${repo.enabled
+                                ? '<span class="px-2 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700 rounded text-xs">Enabled</span>'
+                                : '<span class="px-2 py-1 bg-slate-700 text-slate-400 border border-slate-600 rounded text-xs">Disabled</span>'
+                            }</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-slate-400">Schema Exists</p>
+                            <p>${repo.schema_exists
+                                ? '<span class="text-emerald-400">Yes</span>'
+                                : '<span class="text-amber-400">No (not indexed yet)</span>'
+                            }</p>
+                        </div>
                     </div>
-                    <div>
-                        <p class="text-sm text-slate-400">Schema Exists</p>
-                        <p>${repo.schema_exists
-                            ? '<span class="text-emerald-400">Yes</span>'
-                            : '<span class="text-amber-400">No (not indexed yet)</span>'
-                        }</p>
-                    </div>
-                </div>
 
-                <div class="border-t border-slate-700 pt-4">
-                    <p class="text-sm font-medium text-slate-300 mb-2">Auto-Processing</p>
-                    <div class="flex gap-4 text-sm">
-                        <span class="${repo.auto_index ? 'text-emerald-400' : 'text-slate-500'}">
-                            ${repo.auto_index ? '✓' : '✗'} Index
-                        </span>
-                        <span class="${repo.auto_embed ? 'text-emerald-400' : 'text-slate-500'}">
-                            ${repo.auto_embed ? '✓' : '✗'} Embed
-                        </span>
-                        <span class="${repo.auto_watch ? 'text-emerald-400' : 'text-slate-500'}">
-                            ${repo.auto_watch ? '✓' : '✗'} Watch
-                        </span>
-                        <span class="${repo.auto_summaries ? 'text-emerald-400' : 'text-slate-500'}">
-                            ${repo.auto_summaries ? '✓' : '✗'} Summaries
-                        </span>
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-sm font-medium text-slate-300 mb-2">Auto-Processing</p>
+                        <div class="flex gap-4 text-sm">
+                            <span class="${repo.auto_index ? 'text-emerald-400' : 'text-slate-500'}">
+                                ${repo.auto_index ? '✓' : '✗'} Index
+                            </span>
+                            <span class="${repo.auto_embed ? 'text-emerald-400' : 'text-slate-500'}">
+                                ${repo.auto_embed ? '✓' : '✗'} Embed
+                            </span>
+                            <span class="${repo.auto_watch ? 'text-emerald-400' : 'text-slate-500'}">
+                                ${repo.auto_watch ? '✓' : '✗'} Watch
+                            </span>
+                            <span class="${repo.auto_summaries ? 'text-emerald-400' : 'text-slate-500'}">
+                                ${repo.auto_summaries ? '✓' : '✗'} Summaries
+                            </span>
+                        </div>
                     </div>
-                </div>
+                ` : ''}
 
                 ${repo.stats ? `
                     <div class="border-t border-slate-700 pt-4">
@@ -476,22 +529,37 @@ async function showDetails(repoName) {
                     </div>
                 ` : ''}
 
+                ${repo.languages && repo.languages.length > 0 ? `
+                    <div class="border-t border-slate-700 pt-4">
+                        <p class="text-sm font-medium text-slate-300 mb-2">Languages</p>
+                        <div class="flex flex-wrap gap-2">
+                            ${repo.languages.map(l => `
+                                <span class="px-2 py-1 bg-slate-700 text-slate-300 rounded text-xs">${l.language}: ${l.count}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+
                 <div class="border-t border-slate-700 pt-4 text-xs text-slate-500">
                     <p>Created: ${repo.created_at ? new Date(repo.created_at).toLocaleString() : 'N/A'}</p>
                     <p>Updated: ${repo.updated_at ? new Date(repo.updated_at).toLocaleString() : 'N/A'}</p>
-                    <p>Last Seen: ${repo.last_seen_at ? new Date(repo.last_seen_at).toLocaleString() : 'Never'}</p>
+                    ${repo.source !== 'schema' ? `<p>Last Seen: ${repo.last_seen_at ? new Date(repo.last_seen_at).toLocaleString() : 'Never'}</p>` : ''}
                 </div>
 
                 <div class="border-t border-slate-700 pt-4 flex gap-2">
-                    <button onclick="closeDetailsModal(); showJobModal('${repo.name}')" class="px-3 py-2 bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded text-sm">
-                        Trigger Job
-                    </button>
-                    <button onclick="closeDetailsModal(); showEditModal('${repo.name}')" class="px-3 py-2 bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded text-sm">
-                        Edit
-                    </button>
-                    <button onclick="closeDetailsModal(); showDeleteModal('${repo.name}')" class="px-3 py-2 bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded text-sm">
-                        Delete
-                    </button>
+                    ${repo.source !== 'schema' ? `
+                        <button onclick="closeDetailsModal(); showJobModal('${repo.name}')" class="px-3 py-2 bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-700 rounded text-sm">
+                            Trigger Job
+                        </button>
+                        <button onclick="closeDetailsModal(); showEditModal('${repo.name}')" class="px-3 py-2 bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 border border-blue-700 rounded text-sm">
+                            Edit
+                        </button>
+                        <button onclick="closeDetailsModal(); showDeleteModal('${repo.name}')" class="px-3 py-2 bg-red-900/50 hover:bg-red-800/50 text-red-400 border border-red-700 rounded text-sm">
+                            Delete
+                        </button>
+                    ` : `
+                        <p class="text-sm text-slate-500 italic">Manage this repo by registering it via "+ Add Repository" with the same name.</p>
+                    `}
                 </div>
             </div>
         `;

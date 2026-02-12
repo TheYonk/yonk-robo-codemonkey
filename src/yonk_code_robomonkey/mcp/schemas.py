@@ -1068,8 +1068,8 @@ RETURNS: Structured answer with: top documentation results with summaries, top c
                 "summary_format": {
                     "type": "string",
                     "enum": ["files", "prose", "both"],
-                    "description": "Summary format: 'files' (structured file list, default), 'prose' (LLM narrative), or 'both' (prose followed by file list)",
-                    "default": "files"
+                    "description": "Summary format: 'files' (structured file list), 'prose' (LLM narrative), or 'both' (prose + file list, default)",
+                    "default": "both"
                 }
             },
             "required": ["question", "repo"]

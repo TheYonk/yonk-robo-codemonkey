@@ -1,0 +1,92 @@
+# suites/tier5_rewrite/django-rewrite-cache-framework.yaml
+id: rewrite-django-cache-framework
+name: "Rewrite Django cache backend with async support and connection pooling"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: django
+
+prompt: |
+  Rewrite Django's cache backend interface in
+  django/core/cache/backends/base.py to add async support with proper async
+  context managers and connection pooling.
+
+  Currently, Django's `BaseCache` class in
+  `django/core/cache/backends/base.py` defines synchronous methods (`get`,
+  `set`, `delete`, `get_many`, `set_many`, `clear`, etc.). Django 5.x has
+  begun async support in other areas (views, ORM), but the cache framework
+  remains fully synchronous.
+
+  Rewrite as follows:
+
+  1. In `django/core/cache/backends/base.py`:
+     a. Add async counterparts for all major cache methods:
+        - `async aget(key, default=None, version=None)`
+        - `async aset(key, value, timeout=DEFAULT_TIMEOUT, version=None)`
+        - `async adelete(key, version=None)`
+        - `async aget_many(keys, version=None)`
+        - `async aset_many(mapping, timeout=DEFAULT_TIMEOUT, version=None)`
+        - `async adelete_many(keys, version=None)`
+        - `async aclear()`
+        - `async ahas_key(key, version=None)`
+        - `async aincr(key, delta=1, version=None)`
+        - `async adecr(key, delta=1, version=None)`
+     b. Default async implementations should wrap the sync versions using
+        `asyncio.to_thread()` (or `sync_to_async` from asgiref) so all
+        existing backends get async support automatically.
+     c. Add an `AsyncCacheConnectionPool` class that:
+        - Manages a pool of cache connections for async backends
+        - Has `async acquire() -> connection` and `release(connection)`
+        - Implements `async __aenter__` and `async __aexit__`
+        - Configurable `max_connections` (default: 10)
+        - Tracks active and idle connections
+     d. Add a `pool` property to BaseCache that returns an
+        `AsyncCacheConnectionPool` instance (lazily initialized).
+     e. Add `async aclose()` method to clean up the connection pool.
+     f. Implement `__aenter__` and `__aexit__` on BaseCache for use as
+        an async context manager.
+
+  2. In `django/core/cache/__init__.py`:
+     a. Update `CacheHandler` to support async cache access:
+        - Add `async aget_cache(alias)` method
+        - Ensure thread-safety for the cache connection pool
+
+  3. In `django/core/cache/backends/locmem.py`:
+     a. Override the async methods with truly async implementations that
+        use an `asyncio.Lock` instead of `threading.Lock` for the local
+        memory cache, demonstrating how a backend can provide native async.
+
+  4. Add tests in `tests/cache/test_async_cache.py`:
+     a. Test `aget` and `aset` with the default (sync-wrapped) behavior.
+     b. Test `aget_many` and `aset_many`.
+     c. Test the async context manager protocol.
+     d. Test the connection pool acquire/release lifecycle.
+     e. Test pool exhaustion behavior (max_connections reached).
+     f. Test the locmem backend's native async implementation.
+     g. Test that sync methods still work unchanged.
+     h. Test concurrent async access with multiple tasks.
+
+  5. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/cache/test_async_cache.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "django/core/cache/backends/base.py"
+    - "django/core/cache/__init__.py"
+    - "django/core/cache/backends/locmem.py"
+  must_not_modify:
+    - "django/core/cache/backends/db.py"
+    - "django/conf/global_settings.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, django, cache, async, connection-pooling, context-manager]
+expected_turns_range: [3, 20]

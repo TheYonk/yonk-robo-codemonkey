@@ -1,0 +1,107 @@
+# suites/tier5_rewrite/django-rewrite-management-commands.yaml
+id: rewrite-django-management-commands
+name: "Rewrite Django management commands with JSON output and CI support"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: django
+
+prompt: |
+  Rewrite the base management command class in
+  django/core/management/base.py to add structured JSON output support,
+  progress reporting, and proper exit codes for CI/CD integration.
+
+  Currently, Django's `BaseCommand` class in
+  `django/core/management/base.py` outputs text via `self.stdout.write()`
+  and `self.stderr.write()`, with basic `--verbosity` support and styling
+  methods (`style.SUCCESS`, `style.ERROR`, etc.). There is no structured
+  output mode, no built-in progress reporting, and exit codes are limited
+  to 0 (success) or 1 (error).
+
+  Rewrite as follows:
+
+  1. In `django/core/management/base.py`:
+     a. Add a `--format` argument to `BaseCommand.create_parser()` that
+        accepts `text` (default) or `json`. When `json` is selected, all
+        output should be structured JSON.
+     b. Add an `OutputManager` inner class (or separate class) that:
+        - Has `info(message, **data)` - informational output
+        - Has `success(message, **data)` - success output
+        - Has `warning(message, **data)` - warning output
+        - Has `error(message, **data)` - error output
+        - Has `data(key, value)` - add a key-value pair to structured output
+        - Has `table(headers, rows)` - output tabular data
+        - In `text` mode, these delegate to the existing stdout/stderr/style
+        - In `json` mode, these build a JSON document that is flushed at
+          the end, with structure:
+          ```json
+          {
+            "status": "success|error|warning",
+            "command": "command_name",
+            "messages": [...],
+            "data": {...},
+            "duration_ms": 1234,
+            "exit_code": 0
+          }
+          ```
+     c. Add a `ProgressReporter` class that:
+        - Has `start(total, description)` to begin a progress operation
+        - Has `update(n=1)` to increment progress
+        - Has `finish()` to complete the progress operation
+        - In `text` mode, prints progress bars to stderr:
+          `Processing... [####------] 40% (40/100)`
+        - In `json` mode, emits progress events as newline-delimited JSON
+        - Can be used as a context manager: `with self.progress(100) as p:`
+     d. Add `self.output` attribute (OutputManager) initialized in
+        `execute()` before calling `handle()`.
+     e. Add `self.progress(total, description)` method that returns a
+        ProgressReporter.
+     f. Define proper exit codes as class constants:
+        - `EXIT_SUCCESS = 0`
+        - `EXIT_ERROR = 1`
+        - `EXIT_WARNING = 2`
+        - `EXIT_PARTIAL = 3` (some operations succeeded, some failed)
+        - `EXIT_SKIPPED = 4` (nothing to do)
+     g. Wrap `handle()` in timing logic so `duration_ms` is always
+        available in JSON output.
+     h. Ensure backward compatibility: existing commands that use
+        `self.stdout.write()` directly continue to work.
+
+  2. In `django/core/management/__init__.py`:
+     a. Update `call_command()` to accept `format="json"` and return the
+        structured output dict when JSON format is used.
+
+  3. Add tests in `tests/management/test_structured_output.py`:
+     a. Test JSON output format for a simple command.
+     b. Test that text format produces the same output as before.
+     c. Test the OutputManager methods in both text and json modes.
+     d. Test progress reporting in text mode.
+     e. Test progress reporting in json mode.
+     f. Test exit codes (SUCCESS, ERROR, WARNING, PARTIAL, SKIPPED).
+     g. Test `call_command` with `format="json"` returns structured dict.
+     h. Test that existing commands work unchanged without `--format`.
+     i. Test duration_ms is present in JSON output.
+
+  4. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/management/test_structured_output.py"
+  lint: true
+  type_check: false
+  max_files_changed: 4
+  must_modify:
+    - "django/core/management/base.py"
+    - "django/core/management/__init__.py"
+  must_not_modify:
+    - "django/core/management/color.py"
+    - "django/conf/global_settings.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, django, management-commands, json-output, ci-cd, progress]
+expected_turns_range: [3, 20]

@@ -1,0 +1,61 @@
+# suites/tier2_review/fastapi-review-routing.yaml
+id: review-fastapi-routing
+name: "Review FastAPI routing and URL dispatching patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: fastapi
+
+prompt: |
+  Review the routing and URL dispatching system in the FastAPI project. Examine
+  the source code in `fastapi/` (particularly `applications.py`, `routing.py`,
+  `apiRouter` classes, and the relationship with Starlette's routing).
+
+  In your review, please address the following:
+
+  1. What is the core routing mechanism? How does FastAPI build on Starlette's
+     Router class to register and dispatch routes?
+  2. List the main route registration patterns -- decorator-based (`@app.get`,
+     `@app.post`, etc.), explicit `add_api_route`, `APIRouter` includes, and
+     any other patterns found in the codebase.
+  3. How does `APIRouter` work for modular routing? How are routers included
+     into the main application, and how are prefixes, tags, and dependencies
+     propagated?
+  4. Identify any inconsistencies, redundancies, or areas where the routing
+     API could be confusing -- for example, differences between `APIRoute` and
+     Starlette's `Route`, or parameter handling quirks.
+  5. Suggest concrete improvements to the routing architecture or API, with
+     references to specific files and functions.
+
+  Reference actual source files and line ranges in your analysis.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies routing mechanism"
+    - "lists route registration patterns"
+    - "notes inconsistencies"
+    - "suggests improvements"
+    - "references actual files"
+  rubric_weights:
+    "identifies routing mechanism": 0.25
+    "lists route registration patterns": 0.25
+    "notes inconsistencies": 0.20
+    "suggests improvements": 0.15
+    "references actual files": 0.15
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "routing", "fastapi", "url-dispatch", "tier2"]
+expected_turns_range: [2, 8]

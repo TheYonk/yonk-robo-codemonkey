@@ -20,11 +20,11 @@ def test_build_command_with_mcp():
 
 
 def test_build_command_without_mcp():
-    """Command uses strict-mcp-config with empty config when no MCP."""
+    """Command omits mcp-config when no MCP config provided."""
     driver = ClaudeCodeDriver()
     cmd = driver._build_command("prompt", "/work", None, 10, 2.0)
-    assert "--strict-mcp-config" in cmd
-    assert "{}" in cmd
+    assert "--mcp-config" not in cmd
+    assert "--strict-mcp-config" not in cmd
 
 
 def test_parse_output_valid_json():

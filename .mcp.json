@@ -1,20 +1,20 @@
 {
   "mcpServers": {
-    "yonk-code-robomonkey": {
+    "robomonkey": {
       "type": "stdio",
-      "command": "/home/yonk/code-retro/codegraph-mcp/.venv/bin/python",
+      "command": "/Users/matt.yonkovit/yonk-tools/yonk-robo-codemonkey/.venv/bin/python",
       "args": [
         "-m",
         "yonk_code_robomonkey.mcp.server"
       ],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/robomonkey",
-        "EMBEDDINGS_PROVIDER": "ollama",
-        "EMBEDDINGS_MODEL": "snowflake-arctic-embed2:latest",
-        "EMBEDDINGS_BASE_URL": "http://localhost:11434",
-        "EMBEDDINGS_DIMENSION": "1024",
-        "LLM_MODEL": "qwen3-coder:30b",
-        "DEFAULT_REPO": "codegraph-mcp"
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5436/robomonkey",
+        "EMBEDDINGS_PROVIDER": "openai",
+        "EMBEDDINGS_MODEL": "text-embedding-3-small",
+        "EMBEDDINGS_BASE_URL": "https://api.openai.com",
+        "EMBEDDINGS_DIMENSION": "1536",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "DEFAULT_REPO": "Robo-Monkey"
       }
     }
   }

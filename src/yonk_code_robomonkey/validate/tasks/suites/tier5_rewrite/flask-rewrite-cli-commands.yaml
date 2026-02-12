@@ -1,0 +1,87 @@
+# suites/tier5_rewrite/flask-rewrite-cli-commands.yaml
+id: rewrite-flask-cli-commands
+name: "Rewrite Flask CLI with type annotations and plugin system"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: flask
+
+prompt: |
+  Rewrite the Flask CLI in src/flask/cli.py to add proper type annotations
+  throughout and refactor the command registration to use a decorator-based
+  plugin system.
+
+  Currently, Flask's CLI in src/flask/cli.py defines commands using Click
+  decorators, with the `FlaskGroup` class managing command loading. The
+  module has minimal type annotations and no formal plugin registration
+  mechanism.
+
+  Rewrite as follows:
+
+  1. In `src/flask/cli.py`:
+     a. Add comprehensive type annotations to ALL functions, methods, and
+        class attributes. Use modern Python typing (3.11+ style):
+        - Use `str | None` instead of `Optional[str]`
+        - Use `list[str]` instead of `List[str]`
+        - Annotate return types for all functions
+        - Annotate callback parameters with proper callable signatures
+     b. Create a `CLIPlugin` protocol class that defines the interface:
+        - `name: str` - plugin identifier
+        - `commands: dict[str, click.Command]` - commands to register
+        - `init(app: Flask) -> None` - called when app is available
+     c. Add a `PluginRegistry` class:
+        - `register(plugin: CLIPlugin) -> None` - register a plugin
+        - `unregister(name: str) -> None` - remove by name
+        - `get_commands() -> dict[str, click.Command]` - all plugin commands
+        - Class-level singleton via `_instance` pattern
+     d. Add a `@cli_plugin` decorator that converts a decorated function
+        into a CLIPlugin:
+        ```
+        @cli_plugin("my-plugin")
+        def my_plugin(app):
+            @click.command()
+            def my_command():
+                ...
+            return {"my-command": my_command}
+        ```
+     e. Modify `FlaskGroup.list_commands()` to also include commands from
+        the PluginRegistry.
+     f. Modify `FlaskGroup.get_command()` to look up plugin commands when
+        the command is not found in the default set.
+
+  2. Update `src/flask/__init__.py` to export `CLIPlugin`,
+     `PluginRegistry`, and `cli_plugin`.
+
+  3. Add tests in `tests/test_cli_plugin.py`:
+     a. Test registering a plugin and verifying its command appears in
+        `FlaskGroup.list_commands()`.
+     b. Test executing a plugin command through the CLI runner.
+     c. Test unregistering a plugin removes its commands.
+     d. Test the `@cli_plugin` decorator creates a valid CLIPlugin.
+     e. Test that plugin commands receive the Flask app context.
+     f. Test that built-in commands (run, shell, routes) still work.
+
+  4. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_cli_plugin.py"
+    - "tests/test_cli.py"
+  lint: true
+  type_check: false
+  max_files_changed: 4
+  must_modify:
+    - "src/flask/cli.py"
+    - "src/flask/__init__.py"
+  must_not_modify:
+    - "src/flask/app.py"
+    - "src/flask/config.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, flask, cli, typing, plugin-system]
+expected_turns_range: [3, 20]

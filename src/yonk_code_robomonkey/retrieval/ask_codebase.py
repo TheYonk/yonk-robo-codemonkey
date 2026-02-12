@@ -98,7 +98,7 @@ async def ask_codebase(
     top_symbols: int = 5,
     use_llm_summary: bool = True,
     use_vector_search: bool = True,
-    summary_format: str = "files"  # "files", "prose", or "both"
+    summary_format: str = "both"  # "files", "prose", or "both"
 ) -> CodebaseAnswer:
     """Answer a natural language question about the codebase.
 

@@ -11,12 +11,19 @@ class TaskDifficulty(str, Enum):
 
 
 class TaskCategory(str, Enum):
+    # Existing code-change categories
     FIND = "find"
     EXPLAIN = "explain"
     FIX = "fix"
     FEATURE = "feature"
     REFACTOR = "refactor"
     PERFORMANCE = "performance"
+    # Q&A tiers (no code changes produced)
+    UNDERSTAND = "understand"    # Tier 1: project-level Q&A
+    REVIEW = "review"            # Tier 2: code review & summarize
+    DISCOVER = "discover"        # Tier 3: find feature + explain
+    # Code-change tier
+    REWRITE = "rewrite"          # Tier 5: code rewrite
 
 
 @dataclass
@@ -38,6 +45,11 @@ class TaskEval:
     must_not_modify: list[str] = field(default_factory=list)
     hallucination_check: bool = True
     llm_judge: bool = True
+    # Q&A evaluation fields (used when task_type == "qa")
+    rubric: list[str] = field(default_factory=list)                    # Must-cover topics
+    rubric_weights: dict[str, float] = field(default_factory=dict)     # topic -> weight
+    min_detail_level: str = "moderate"                                  # "brief" | "moderate" | "thorough"
+    factual_grounding: bool = True                                      # Check claims against repo
 
 
 @dataclass
@@ -51,5 +63,6 @@ class TaskDefinition:
     prompt: str
     setup: TaskSetup
     eval: TaskEval
+    task_type: str = "code_change"  # "code_change" | "qa"
     tags: list[str] = field(default_factory=list)
     expected_turns_range: tuple[int, int] = (1, 30)

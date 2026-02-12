@@ -3124,7 +3124,7 @@ async def ask_codebase_tool(
     format_as_markdown: bool = True,
     min_validity_score: int | None = None,
     require_text_match: bool = False,
-    summary_format: str = "files"
+    summary_format: str = "both"
 ) -> dict[str, Any]:
     """Ask a natural language question about the codebase and get comprehensive answers.
 

@@ -1,0 +1,61 @@
+# suites/tier2_review/django-review-testing.yaml
+id: review-django-testing
+name: "Review Django testing approach and patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: django
+
+prompt: |
+  Review the testing approach used in the Django project. Examine the `tests/`
+  directory structure, the test runner in `django/test/`, and how Django's own
+  test utilities (`TestCase`, `TransactionTestCase`, `SimpleTestCase`, `Client`)
+  are used within the project's own test suite.
+
+  In your review, please address the following:
+
+  1. What testing framework is used, and how is the test suite organized?
+     Describe the top-level `tests/` directory structure and how test modules
+     map to Django components.
+  2. What is the coverage strategy? Are tests organized by Django app, by
+     feature, or by some other principle? How comprehensive is the coverage
+     across core modules?
+  3. What fixture and setup patterns are used? How do `TestCase`,
+     `TransactionTestCase`, and `SimpleTestCase` differ in their usage
+     throughout the suite? Are there shared fixtures or data setup patterns?
+  4. Identify notable testing patterns -- the custom test runner, database
+     creation/migration handling, settings overrides (`@override_settings`),
+     and any test isolation mechanisms.
+  5. Are there coverage gaps? Are there modules or features that appear
+     under-tested compared to others?
+
+  Reference actual test files and specific test classes in your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies test framework"
+    - "describes test organization"
+    - "notes fixture and setup patterns"
+    - "identifies coverage gaps"
+  rubric_weights:
+    "identifies test framework": 0.25
+    "describes test organization": 0.25
+    "notes fixture and setup patterns": 0.25
+    "identifies coverage gaps": 0.25
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "testing", "django", "pytest", "tier2"]
+expected_turns_range: [2, 8]

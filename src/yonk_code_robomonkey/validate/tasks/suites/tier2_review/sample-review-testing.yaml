@@ -1,0 +1,63 @@
+# suites/tier2_review/sample-review-testing.yaml
+id: review-sample-testing
+name: "Review RoboMonkey testing approach and patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: sample
+
+prompt: |
+  Review the testing approach used in this project. Examine the `tests/`
+  directory, `conftest.py` fixtures, and all test files to understand the
+  testing strategy.
+
+  In your review, please address the following:
+
+  1. What testing framework is used, and how is the test suite organized?
+     Describe the test file naming conventions and how test modules map to
+     source modules.
+  2. What is the coverage strategy? Which areas of the codebase have
+     dedicated test files, and which areas appear to lack test coverage
+     entirely?
+  3. What fixture and setup patterns are used in `conftest.py`? How are
+     database connections, test data, and schema setup handled? Are fixtures
+     session-scoped, module-scoped, or function-scoped, and is that
+     appropriate?
+  4. Identify notable testing patterns -- how are database-dependent tests
+     isolated? Are there mocks for external services (embedding providers,
+     LLM calls)? How are async operations tested?
+  5. What are the biggest coverage gaps? Which modules (e.g., MCP tools,
+     web routes, daemon, CLI commands) lack tests, and what kinds of tests
+     would be most valuable to add?
+
+  Reference actual test files, fixture definitions, and source modules in
+  your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies test framework"
+    - "describes test organization"
+    - "notes fixture and setup patterns"
+    - "identifies coverage gaps"
+  rubric_weights:
+    "identifies test framework": 0.25
+    "describes test organization": 0.25
+    "notes fixture and setup patterns": 0.25
+    "identifies coverage gaps": 0.25
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "testing", "sample", "pytest", "tier2"]
+expected_turns_range: [2, 8]

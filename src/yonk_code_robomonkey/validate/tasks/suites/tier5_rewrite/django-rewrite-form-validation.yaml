@@ -1,0 +1,98 @@
+# suites/tier5_rewrite/django-rewrite-form-validation.yaml
+id: rewrite-django-form-validation
+name: "Rewrite Django form validation with async validators and pipeline"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: django
+
+prompt: |
+  Rewrite the form validation logic in django/forms/forms.py to support async
+  validators and add a validation pipeline that allows chaining validators
+  with short-circuit behavior.
+
+  Currently, Django's `BaseForm` class in `django/forms/forms.py` validates
+  through `full_clean()` -> `_clean_fields()` -> `_clean_form()` ->
+  `_post_clean()`. All validators are synchronous and run sequentially. There
+  is no way to short-circuit validation (if one validator fails, the rest
+  still run for that field).
+
+  Rewrite as follows:
+
+  1. Create a new file `django/forms/validation_pipeline.py` that defines:
+     a. A `ValidationStep` protocol with methods:
+        - `validate(value, field_name: str, form) -> value` (sync)
+        - `async avalidate(value, field_name: str, form) -> value` (async)
+        - `short_circuit: bool` - if True, stop the pipeline for this field
+          on failure (default: False)
+        - `priority: int` - execution order (lower = earlier, default: 100)
+     b. A `ValidationPipeline` class that:
+        - Holds an ordered list of `ValidationStep` instances
+        - Has `add(step: ValidationStep)` method
+        - Has `run(value, field_name, form) -> tuple[value, list[ValidationError]]`
+          that runs all steps in priority order, collecting errors, and
+          stopping early if a short-circuiting step fails
+        - Has `async arun(value, field_name, form) -> tuple[value, list[ValidationError]]`
+          async version that can run async validators
+     c. Helper decorators:
+        - `@sync_validator(priority=100, short_circuit=False)` to create a
+          ValidationStep from a function
+        - `@async_validator(priority=100, short_circuit=False)` to create a
+          ValidationStep from an async function
+
+  2. In `django/forms/forms.py`:
+     a. Add a `validation_pipeline: ValidationPipeline | None` attribute to
+        `BaseForm` (default: None, for backward compatibility).
+     b. Add `_build_pipeline()` method that constructs a default
+        ValidationPipeline from the form's existing validators and
+        clean_<field> methods.
+     c. Add `async afull_clean()` method that:
+        - Calls `async _aclean_fields()` which uses the pipeline's `arun()`
+        - Calls `async _aclean_form()` for cross-field validation
+        - Calls `async _apost_clean()`
+     d. Add `async ais_valid()` that calls `afull_clean()`.
+     e. Ensure the existing sync `full_clean()`, `is_valid()` continue to
+        work identically when no async validators are used.
+     f. When `validation_pipeline` is set, `_clean_fields()` should use
+        the pipeline's `run()` method instead of the default sequential
+        validation.
+
+  3. In `django/forms/fields.py`:
+     a. Add an `async_validators` list attribute to `Field` (default: []).
+     b. Modify `Field.run_validators()` to remain synchronous.
+     c. Add `Field.async arun_validators()` that runs both sync validators
+        (via sync_to_async) and async validators.
+
+  4. Add tests in `tests/forms/test_validation_pipeline.py`:
+     a. Test sync validation pipeline with multiple steps.
+     b. Test short-circuit behavior stops on failure.
+     c. Test priority ordering of validation steps.
+     d. Test async validators with `ais_valid()`.
+     e. Test mixed sync and async validators in one pipeline.
+     f. Test that existing sync forms work unchanged.
+     g. Test cross-field async validation via `_aclean_form()`.
+     h. Test the `@sync_validator` and `@async_validator` decorators.
+
+  5. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/forms/test_validation_pipeline.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "django/forms/forms.py"
+    - "django/forms/fields.py"
+  must_not_modify:
+    - "django/forms/widgets.py"
+    - "django/forms/models.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, django, forms, validation, async, pipeline, short-circuit]
+expected_turns_range: [3, 20]

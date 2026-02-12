@@ -1,0 +1,117 @@
+# suites/tier5_rewrite/sample-rewrite-context-packer.yaml
+id: rewrite-sample-context-packer
+name: "Rewrite context packer with priority queue and symbol importance"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: sample
+
+prompt: |
+  Rewrite the context packing in
+  src/yonk_code_robomonkey/retrieval/context_pack.py to add a priority queue
+  that considers symbol importance (callers count, centrality) when selecting
+  which context to include within the token budget.
+
+  Currently, the context packer in `context_pack.py` fills the token budget
+  by iterating through search results in their ranked order, adding each
+  chunk until the budget is exhausted. It deduplicates by
+  (file_id, start_line, end_line) but does not consider the structural
+  importance of symbols in the codebase graph.
+
+  Rewrite as follows:
+
+  1. Create a new file `src/yonk_code_robomonkey/retrieval/importance.py`:
+     a. Define an `ImportanceScore` dataclass with fields:
+        - `symbol_id: int | None`
+        - `file_id: int`
+        - `callers_count: int` - number of incoming CALLS edges
+        - `callees_count: int` - number of outgoing CALLS edges
+        - `import_count: int` - number of times imported by other files
+        - `centrality: float` - computed centrality score (0.0 to 1.0)
+        - `is_public_api: bool` - whether the symbol is part of public API
+          (exported in __init__.py or __all__)
+     b. Define an `async compute_importance(conn, repo_id, symbol_ids)`
+        function that:
+        - Queries the edge table for callers/callees/imports counts
+        - Computes a centrality score using a simplified PageRank-like
+          algorithm: `centrality = 0.4 * norm(callers) + 0.3 * norm(imports)
+          + 0.2 * norm(callees) + 0.1 * is_public_api`
+        - Returns a dict mapping symbol_id -> ImportanceScore
+     c. Define an `async compute_file_importance(conn, repo_id, file_ids)`
+        function that aggregates symbol importance per file (max or mean).
+
+  2. Create a new file `src/yonk_code_robomonkey/retrieval/priority_queue.py`:
+     a. Define a `ContextCandidate` dataclass with fields:
+        - `chunk` - the chunk/document data
+        - `search_score: float` - original search ranking score
+        - `importance_score: float` - graph-based importance score
+        - `token_count: int` - estimated token count
+        - `priority: float` - final combined priority
+     b. Define a `PriorityConfig` dataclass with fields:
+        - `search_weight: float = 0.60` - weight for search relevance
+        - `importance_weight: float = 0.30` - weight for graph importance
+        - `size_penalty_weight: float = 0.10` - penalty for large chunks
+          (prefer smaller, focused context)
+     c. Define a `ContextPriorityQueue` class that:
+        - Uses a heap-based priority queue (heapq)
+        - Has `push(candidate: ContextCandidate)` method
+        - Has `pop() -> ContextCandidate` method
+        - Has `fill_budget(budget_tokens: int) -> list[ContextCandidate]`
+          that greedily fills the budget by popping highest-priority
+          candidates that fit
+        - Handles the knapsack-like problem: if the next candidate is too
+          large, skip it and try the next one (bounded by a max_skip
+          parameter to avoid scanning the entire queue)
+
+  3. In `src/yonk_code_robomonkey/retrieval/context_pack.py`:
+     a. Add an `importance_aware: bool = False` parameter to the main
+        context packing function (default: False for backward compatibility).
+     b. When `importance_aware=True`:
+        - Compute importance scores for all candidate symbols/files
+        - Create ContextCandidate objects with combined priority scores
+        - Use ContextPriorityQueue to fill the token budget
+        - Include importance metadata in the packed context output
+     c. When `importance_aware=False`, use the existing sequential
+        fill behavior (backward compatible).
+     d. Add `importance_score`, `callers_count`, and `centrality` to the
+        explainability fields in the packed context output.
+     e. Add a `PriorityConfig` parameter for tuning the priority weights.
+
+  4. Update `src/yonk_code_robomonkey/mcp/tools.py`:
+     a. Add an `importance_aware: bool = False` parameter to the
+        `symbol_context` MCP tool.
+     b. Pass it through to the context packer.
+
+  5. Add tests in `tests/test_context_priority.py`:
+     a. Test importance computation with mock graph edges.
+     b. Test the priority queue fills budget correctly.
+     c. Test that high-importance symbols are included before low-importance.
+     d. Test the skip behavior for chunks that don't fit.
+     e. Test backward compatibility (importance_aware=False).
+     f. Test with empty graph (no edges) -- should fall back gracefully.
+     g. Test the combined priority score calculation.
+     h. Test PriorityConfig weight tuning.
+
+  6. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_context_priority.py"
+  lint: true
+  type_check: false
+  max_files_changed: 6
+  must_modify:
+    - "src/yonk_code_robomonkey/retrieval/context_pack.py"
+    - "src/yonk_code_robomonkey/mcp/tools.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/db/ddl.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, sample, context-packing, priority-queue, graph-importance, centrality]
+expected_turns_range: [3, 20]

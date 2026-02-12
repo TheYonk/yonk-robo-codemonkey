@@ -1,0 +1,103 @@
+# suites/tier5_rewrite/sample-rewrite-hybrid-search.yaml
+id: rewrite-sample-hybrid-search
+name: "Rewrite hybrid search with configurable weights and recency boost"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: sample
+
+prompt: |
+  Rewrite the hybrid search in
+  src/yonk_code_robomonkey/retrieval/hybrid_search.py to make the scoring
+  weights configurable per-query and add support for boosting recent files.
+
+  Currently, the hybrid search in `hybrid_search.py` uses hardcoded scoring
+  weights (0.55 * vec_norm + 0.35 * fts_norm + 0.10 * tag_boost) and has no
+  awareness of file recency. The weights are constants defined at module level.
+
+  Rewrite as follows:
+
+  1. Create a new file `src/yonk_code_robomonkey/retrieval/scoring.py`:
+     a. Define a `ScoringWeights` dataclass with fields:
+        - `vector_weight: float = 0.55`
+        - `fts_weight: float = 0.35`
+        - `tag_weight: float = 0.10`
+        - `recency_weight: float = 0.0` (disabled by default)
+        - A `validate()` method that checks weights sum to 1.0 (within
+          tolerance of 0.01) and raises ValueError if not
+     b. Define a `RecencyConfig` dataclass with fields:
+        - `enabled: bool = False`
+        - `max_age_days: int = 365` - files older than this get no boost
+        - `decay: str = "linear"` - decay function: "linear", "exponential",
+          or "step"
+        - `step_thresholds: list[tuple[int, float]]` - for step decay,
+          list of (days, boost_factor) pairs
+     c. Define a `ScoringProfile` dataclass that bundles:
+        - `weights: ScoringWeights`
+        - `recency: RecencyConfig`
+        - `name: str` - profile name for logging
+     d. Define preset profiles:
+        - `DEFAULT` - current behavior (0.55/0.35/0.10/0.0)
+        - `CODE_SEARCH` - optimized for code (0.50/0.40/0.10/0.0)
+        - `DOC_SEARCH` - optimized for docs (0.45/0.35/0.10/0.10 with
+          linear recency)
+        - `RECENT_FIRST` - heavily favors recent files (0.40/0.25/0.05/0.30
+          with exponential recency)
+
+  2. In `src/yonk_code_robomonkey/retrieval/hybrid_search.py`:
+     a. Add a `scoring: ScoringProfile | None` parameter to the main
+        `hybrid_search()` function (default: None, uses DEFAULT profile).
+     b. Replace the hardcoded weight constants with values from the
+        scoring profile.
+     c. Add recency scoring logic:
+        - Query the file's `mtime` (or git commit date) from the database
+        - Compute a recency score between 0.0 and 1.0 based on the decay
+          function and max_age_days
+        - Include the recency score in the weighted combination
+     d. Add `recency_score` and `scoring_profile` to the explainability
+        fields in the result.
+     e. Add `weights_used: dict` to each result showing the actual weights
+        applied.
+     f. Preserve backward compatibility: calling `hybrid_search()` without
+        the new parameter should produce identical results to the current
+        implementation.
+
+  3. Update `src/yonk_code_robomonkey/mcp/tools.py`:
+     a. Add an optional `scoring_profile` parameter to the `hybrid_search`
+        MCP tool (accepts: "default", "code_search", "doc_search",
+        "recent_first", or a custom weights dict).
+     b. Parse the parameter and construct the appropriate ScoringProfile.
+
+  4. Add tests in `tests/test_scoring.py`:
+     a. Test ScoringWeights validation (sum to 1.0).
+     b. Test each recency decay function (linear, exponential, step).
+     c. Test the DEFAULT profile produces same results as before.
+     d. Test RECENT_FIRST profile boosts newer files.
+     e. Test custom weights via dict parameter.
+     f. Test explainability fields include scoring details.
+     g. Test backward compatibility (no scoring parameter = default).
+     h. Test edge cases: all files same age, files with no mtime.
+
+  5. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_scoring.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "src/yonk_code_robomonkey/retrieval/hybrid_search.py"
+    - "src/yonk_code_robomonkey/mcp/tools.py"
+  must_not_modify:
+    - "src/yonk_code_robomonkey/mcp/server.py"
+    - "src/yonk_code_robomonkey/db/ddl.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, sample, hybrid-search, scoring, recency, configurability]
+expected_turns_range: [3, 20]

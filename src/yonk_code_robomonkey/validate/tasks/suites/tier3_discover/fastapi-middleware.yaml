@@ -1,0 +1,63 @@
+# suites/tier3_discover/fastapi-middleware.yaml
+id: discover-fastapi-middleware
+name: "Discover FastAPI's middleware system"
+difficulty: medium
+category: discover
+task_type: qa
+target_repo: fastapi
+
+prompt: |
+  Find and explain how FastAPI handles middleware. Your analysis should be
+  grounded in the actual source code of the repository.
+
+  Specifically:
+
+  1. Identify the files and classes involved in middleware registration and
+     execution. How does app.add_middleware() work? Where is it defined?
+  2. Explain the different types of middleware FastAPI supports:
+     a. ASGI middleware (pure ASGI callables)
+     b. Starlette BaseHTTPMiddleware-style middleware
+     c. Any FastAPI-specific middleware patterns
+  3. How is the middleware stack built? In what order are middleware layers
+     applied to incoming requests?
+  4. Trace a request through the middleware stack. What happens at each
+     layer, and how does the response travel back through the stack?
+  5. What built-in middleware does FastAPI include or configure by default
+     (e.g., CORS, exception handlers, server errors)?
+  6. How does middleware interact with FastAPI's dependency injection and
+     exception handling systems?
+
+  Cite specific file paths, class names, and method signatures from the
+  repository. Do not describe middleware implementations that are not
+  present in the codebase.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "Identifies middleware registration files and add_middleware implementation"
+    - "Explains different middleware types (ASGI, BaseHTTPMiddleware)"
+    - "Describes middleware stack construction and execution order"
+    - "Traces request/response flow through the middleware stack"
+    - "Covers built-in middleware and interaction with DI/exception handling"
+  rubric_weights:
+    "Identifies middleware registration files and add_middleware implementation": 0.15
+    "Explains different middleware types (ASGI, BaseHTTPMiddleware)": 0.25
+    "Describes middleware stack construction and execution order": 0.20
+    "Traces request/response flow through the middleware stack": 0.20
+    "Covers built-in middleware and interaction with DI/exception handling": 0.20
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: [discovery, middleware, fastapi, asgi, request-pipeline]
+expected_turns_range: [2, 10]

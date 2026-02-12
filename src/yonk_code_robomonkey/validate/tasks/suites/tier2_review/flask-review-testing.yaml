@@ -1,0 +1,56 @@
+# suites/tier2_review/flask-review-testing.yaml
+id: review-flask-testing
+name: "Review Flask testing approach and patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: flask
+
+prompt: |
+  Review the testing approach used in the Flask project. Examine the `tests/`
+  directory, `conftest.py` files, and the test client implementation in
+  `src/flask/testing.py`.
+
+  In your review, please address the following:
+
+  1. What testing framework is used, and how is the test suite organized?
+     Describe the directory structure and any naming conventions.
+  2. What is the coverage strategy? Are there separate test files for each
+     module, or are tests grouped by feature/concern?
+  3. What fixture and setup patterns are used? How does Flask's own test
+     client (`FlaskClient`) work, and how is it used in the test suite?
+  4. Identify any notable testing patterns -- parametrized tests, factory
+     patterns, app creation helpers, etc.
+  5. Are there coverage gaps? Are there modules or features that appear
+     under-tested compared to others?
+
+  Reference actual test files and fixture definitions in your analysis.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies test framework"
+    - "describes test organization"
+    - "notes fixture and setup patterns"
+    - "identifies coverage gaps"
+  rubric_weights:
+    "identifies test framework": 0.25
+    "describes test organization": 0.25
+    "notes fixture and setup patterns": 0.25
+    "identifies coverage gaps": 0.25
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "testing", "flask", "pytest", "tier2"]
+expected_turns_range: [2, 8]

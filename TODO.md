@@ -194,6 +194,60 @@ Implemented schema-per-repo isolation for testing migration assessment with mult
 - [x] Validation report (SCHEMA_ISOLATION_VALIDATION.md)
 - [ ] Full end-to-end MCP server test with updated tools
 
+## Validation Framework (A/B Benchmarking) ✓ COMPLETE
+
+Proves RoboMonkey's value by running identical tasks with vs without the MCP server, measuring quality, tokens, and hallucination deltas with statistical rigor.
+
+### Core Engine (Phases 1-8)
+- [x] Task model + YAML registry with difficulty/category/tier taxonomy
+- [x] Claude Code subprocess driver (prompt → response + metrics)
+- [x] A/B Orchestrator: conditions × runs with git reset between each
+- [x] Metric collection: tokens, turns, wall clock, files read/modified, tool calls
+- [x] Hallucination detection: verify files, symbols, imports exist in repo
+- [x] Evaluation pipeline: tests, lint, type check, diff analysis
+- [x] LLM Judge: quality scoring with rubric for Q&A tasks
+- [x] Composite scorer: weighted combination of all quality signals
+
+### Reporting (Phase 8)
+- [x] CLI report with statistical tables (mean±std, effect size, significance)
+- [x] Markdown report with per-tier/per-repo breakdowns
+- [x] JSON export for external analysis
+- [x] Cohen's d effect size + Welch's t-test significance
+- [x] Outlier detection (CV > 0.5)
+- [x] Prominent box-drawn summary banner auto-displayed after runs
+
+### CLI Interface (Phase 9)
+- [x] `validate setup` — clone + index + embed target repos
+- [x] `validate run` — execute A/B benchmarks with filtering
+- [x] `validate report` — generate reports from saved results
+- [x] `validate list` — browse available tasks by tier/type/repo
+- [x] `validate status` — show setup state
+- [x] `validate clean` — tear down repos + schemas
+
+### Task Suites (Phase 10)
+- [x] 48+ YAML tasks across 4 repos (flask, fastapi, django, sample)
+- [x] 5 tiers: understand, review, discover, refactor, rewrite
+- [x] Difficulty levels: simple (find/explain), medium (endpoint/schema), hard (refactor/debug)
+- [x] Q&A tasks with rubric + factual grounding evaluation
+
+### Custom Repo Support
+- [x] `--dir /path/to/repo` — benchmark against any local directory
+- [x] `--github org/repo` — clone from GitHub and benchmark
+- [x] `--name custom-name` — custom repo naming
+- [x] Generic task generator: 9 portable Q&A tasks (3 understand, 3 review, 3 discover)
+- [x] Blocking setup: fully indexes + embeds (including docs) before running tasks
+- [x] Auto-display summary banner + full report after runs complete
+- [x] Custom repos shown in `validate status`
+
+### Architecture
+- `validate/tasks/` — Task definitions, registry, generic task generator
+- `validate/runner/` — Driver, orchestrator, git manager
+- `validate/capture/` — Metric collection, hallucination detection
+- `validate/evaluate/` — Test runner, LLM judge, scorer, pipeline
+- `validate/report/` — Comparator, statistics, report gen, summary banner
+- `validate/cli.py` — CLI entrypoint
+- Design docs: `docs/plans/validate-*.md` (13 documents)
+
 ## Phase 10 — Knowledge Base (Docs-Only RAG)
 Standalone documentation knowledge bases for RAG-style searchable content. Unlike code repos, knowledge bases accept file uploads (PDF, Markdown, HTML, text) and web scraping.
 

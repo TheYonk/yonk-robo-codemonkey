@@ -1,0 +1,44 @@
+# suites/tier1_understand/django-architecture.yaml
+id: understand-django-architecture
+name: "Django Architecture Overview"
+difficulty: simple
+category: understand
+task_type: qa
+target_repo: django
+
+prompt: >
+  Describe the high-level architecture of this project. What are the main
+  modules/packages and how do they interact?
+
+  Examine the source tree to identify the major packages, modules, and
+  sub-packages. Explain the responsibility of each top-level module and
+  how data or control flows between them. Identify any design patterns
+  in use (e.g., MVC/MTV, middleware pipeline, ORM, signal dispatch,
+  management command framework). Note how the codebase is layered or
+  separated into concerns (e.g., models vs views vs templates, contrib
+  apps vs core framework, database backends vs ORM layer).
+
+  Do not modify any files. Provide a clear, structured answer.
+
+setup:
+  commit: "main"
+  branch: "validate/baseline"
+
+eval:
+  llm_judge: true
+  hallucination_check: true
+  rubric:
+    - "identifies main modules"
+    - "explains interactions and data flow"
+    - "identifies design patterns"
+    - "notes layering and separation of concerns"
+  rubric_weights:
+    "identifies main modules": 0.30
+    "explains interactions and data flow": 0.25
+    "identifies design patterns": 0.25
+    "notes layering and separation of concerns": 0.20
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["understanding", "architecture", "django"]
+expected_turns_range: [1, 5]

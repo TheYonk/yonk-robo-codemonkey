@@ -29,9 +29,14 @@ def database_url():
 
 @pytest_asyncio.fixture
 async def db_connection(database_url):
-    """Create a fresh database connection for each test."""
+    """Create a fresh database connection for each test, with cleanup."""
     conn = await asyncpg.connect(dsn=database_url)
     yield conn
+    # Clean up any test_repo entries created during this test
+    try:
+        await conn.execute("DELETE FROM public.repo WHERE name = 'test_repo'")
+    except Exception:
+        pass
     await conn.close()
 
 

@@ -66,7 +66,12 @@ class TriggerRepoJobRequest(BaseModel):
 
 @router.get("/registry")
 async def list_registry() -> dict[str, Any]:
-    """List all repositories in the registry (robomonkey_control.repo_registry)."""
+    """List all repositories — merges daemon registry with schema-discovered repos.
+
+    Repos added via the daemon appear from robomonkey_control.repo_registry.
+    Repos indexed via the CLI only have schemas, so we also discover those
+    and mark them as source="schema" (unmanaged).
+    """
     settings = Settings()
     conn = await asyncpg.connect(dsn=settings.database_url)
 
@@ -80,27 +85,22 @@ async def list_registry() -> dict[str, Any]:
             )
         """)
 
-        if not has_registry:
-            return {
-                "enabled": False,
-                "message": "Registry not configured. Run: robomonkey daemon init",
-                "repos": []
-            }
+        # Collect registry repos (if registry exists)
+        registry_repos = []
+        registry_schemas: set[str] = set()
 
-        repos = await conn.fetch("""
-            SELECT
-                name, schema_name, root_path, enabled,
-                auto_index, auto_embed, auto_watch, auto_summaries,
-                config, created_at, updated_at, last_seen_at
-            FROM robomonkey_control.repo_registry
-            ORDER BY name
-        """)
-
-        return {
-            "enabled": True,
-            "count": len(repos),
-            "repos": [
-                {
+        if has_registry:
+            rows = await conn.fetch("""
+                SELECT
+                    name, schema_name, root_path, enabled,
+                    auto_index, auto_embed, auto_watch, auto_summaries,
+                    config, created_at, updated_at, last_seen_at
+                FROM robomonkey_control.repo_registry
+                ORDER BY name
+            """)
+            for r in rows:
+                registry_schemas.add(r["schema_name"])
+                registry_repos.append({
                     "name": r["name"],
                     "schema_name": r["schema_name"],
                     "root_path": r["root_path"],
@@ -112,10 +112,37 @@ async def list_registry() -> dict[str, Any]:
                     "config": r["config"] if r["config"] else {},
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                     "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
-                    "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None
-                }
-                for r in repos
-            ]
+                    "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+                    "source": "registry"
+                })
+
+        # Discover schema-only repos not in the registry
+        schema_repos = await list_repo_schemas(conn)
+        for sr in schema_repos:
+            if sr["schema_name"] not in registry_schemas:
+                registry_repos.append({
+                    "name": sr["repo_name"],
+                    "schema_name": sr["schema_name"],
+                    "root_path": sr.get("root_path", ""),
+                    "enabled": True,
+                    "auto_index": False,
+                    "auto_embed": False,
+                    "auto_watch": False,
+                    "auto_summaries": False,
+                    "config": {},
+                    "created_at": None,
+                    "updated_at": sr["last_indexed_at"].isoformat() if sr.get("last_indexed_at") else None,
+                    "last_seen_at": None,
+                    "source": "schema"
+                })
+
+        # Sort merged list by name
+        registry_repos.sort(key=lambda r: r["name"])
+
+        return {
+            "enabled": True,
+            "count": len(registry_repos),
+            "repos": registry_repos
         }
 
     finally:

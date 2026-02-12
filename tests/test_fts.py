@@ -35,9 +35,16 @@ async def indexed_repo(database_url):
         if not repo_row:
             raise RuntimeError(f"Repo {repo_name} not found in schema {schema_name}")
 
-        return {"repo_id": repo_row["id"], "schema_name": schema_name}
+        yield {"repo_id": repo_row["id"], "schema_name": schema_name}
     finally:
         await conn.close()
+
+    # Cleanup: drop the test schema
+    cleanup_conn = await asyncpg.connect(dsn=database_url)
+    try:
+        await cleanup_conn.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+    finally:
+        await cleanup_conn.close()
 
 
 @pytest.mark.asyncio

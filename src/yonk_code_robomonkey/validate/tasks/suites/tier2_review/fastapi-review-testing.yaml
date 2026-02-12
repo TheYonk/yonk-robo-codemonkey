@@ -1,0 +1,56 @@
+# suites/tier2_review/fastapi-review-testing.yaml
+id: review-fastapi-testing
+name: "Review FastAPI testing approach and patterns"
+difficulty: medium
+category: review
+task_type: qa
+target_repo: fastapi
+
+prompt: |
+  Review the testing approach used in the FastAPI project. Examine the `tests/`
+  directory structure, fixture files, and how the test client is used.
+
+  In your review, please address the following:
+
+  1. What testing framework is used, and how is the test suite organized?
+     Describe the directory structure, sub-directories, and naming conventions.
+  2. What is the coverage strategy? How are tests grouped -- by feature, by
+     module, by HTTP method, or by some other principle?
+  3. What fixture and setup patterns are used? How is `TestClient` (from
+     Starlette) used in the tests, and are there shared conftest fixtures
+     or app factory patterns?
+  4. Identify notable testing patterns -- parametrized tests, dependency
+     override patterns, async test patterns, test app creation helpers, etc.
+  5. Are there coverage gaps? Are there modules, features, or edge cases
+     that appear under-tested compared to others?
+
+  Reference actual test files and fixture definitions in your analysis.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  tests: []
+  lint: false
+  type_check: false
+  max_files_changed: 0
+  must_modify: []
+  must_not_modify: []
+  hallucination_check: true
+  llm_judge: true
+  rubric:
+    - "identifies test framework"
+    - "describes test organization"
+    - "notes fixture and setup patterns"
+    - "identifies coverage gaps"
+  rubric_weights:
+    "identifies test framework": 0.25
+    "describes test organization": 0.25
+    "notes fixture and setup patterns": 0.25
+    "identifies coverage gaps": 0.25
+  min_detail_level: "moderate"
+  factual_grounding: true
+
+tags: ["review", "testing", "fastapi", "pytest", "tier2"]
+expected_turns_range: [2, 8]

@@ -18,6 +18,16 @@ SCORE_WEIGHTS = {
     "llm_judge":          0.10,
 }
 
+QA_SCORE_WEIGHTS = {
+    "llm_judge":           0.40,   # Quality of explanation
+    "no_hallucinations":   0.20,   # Factual accuracy
+    "rubric_coverage":     0.15,   # % of rubric topics covered
+    "token_efficiency":    0.10,   # Don't waste tokens
+    "turn_efficiency":     0.05,   # Don't take too many turns
+    "no_redundant_io":     0.05,   # Don't read same file repeatedly
+    "specificity":         0.05,   # References actual paths/symbols
+}
+
 @dataclass
 class ScoreBreakdown:
     """Individual signal scores and final composite."""
@@ -35,7 +45,7 @@ def score_run(
     baseline_tokens: int | None = None,
     baseline_turns: int | None = None,
 ) -> ScoreBreakdown:
-    """Compute composite score for a single run.
+    """Compute composite score for a single code-change run.
 
     Args:
         result: The RunResult to score
@@ -92,5 +102,58 @@ def score_run(
 
     # Weighted composite
     composite = sum(signals[k] * SCORE_WEIGHTS[k] for k in SCORE_WEIGHTS)
+
+    return ScoreBreakdown(signals=signals, composite=composite)
+
+
+def score_qa_run(
+    result: RunResult,
+    baseline_tokens: int | None = None,
+    baseline_turns: int | None = None,
+) -> ScoreBreakdown:
+    """Compute composite score for a Q&A task run.
+
+    Q&A tasks have different scoring weights — the LLM judge and
+    rubric coverage matter much more than tests/lint/diff which
+    are irrelevant for pure Q&A responses.
+
+    Args:
+        result: The RunResult to score (with Q&A fields populated)
+        baseline_tokens: Token count from paired condition
+        baseline_turns: Turn count from paired condition
+    """
+    signals = {}
+
+    # LLM judge (0-10 scale -> 0-1)
+    signals["llm_judge"] = result.llm_judge_score / 10.0
+
+    # Hallucinations
+    signals["no_hallucinations"] = _decay(result.hallucination_count, 5)
+
+    # Rubric coverage (already 0-1 from pipeline)
+    signals["rubric_coverage"] = result.rubric_score
+
+    # Token efficiency
+    if baseline_tokens and baseline_tokens > 0:
+        ratio = result.tokens_total / baseline_tokens
+        signals["token_efficiency"] = max(0.0, min(1.0, 2.0 - ratio))
+    else:
+        signals["token_efficiency"] = 0.5
+
+    # Turn efficiency
+    if baseline_turns and baseline_turns > 0:
+        ratio = result.conversation_turns / baseline_turns
+        signals["turn_efficiency"] = max(0.0, min(1.0, 2.0 - ratio))
+    else:
+        signals["turn_efficiency"] = 0.5
+
+    # Redundant IO
+    signals["no_redundant_io"] = _decay(result.redundant_reads, 10)
+
+    # Specificity (0-10 scale -> 0-1)
+    signals["specificity"] = result.specificity_score / 10.0
+
+    # Weighted composite
+    composite = sum(signals[k] * QA_SCORE_WEIGHTS[k] for k in QA_SCORE_WEIGHTS)
 
     return ScoreBreakdown(signals=signals, composite=composite)

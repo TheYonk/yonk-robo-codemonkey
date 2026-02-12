@@ -1,0 +1,94 @@
+# suites/tier5_rewrite/fastapi-rewrite-exception-handlers.yaml
+id: rewrite-fastapi-exception-handlers
+name: "Rewrite FastAPI exception handling with structured error responses"
+difficulty: hard
+category: rewrite
+task_type: code_change
+target_repo: fastapi
+
+prompt: |
+  Rewrite the exception handling system in fastapi/exception_handlers.py to
+  support structured error responses with error codes, field-level validation
+  details, and request correlation IDs.
+
+  Currently, FastAPI's exception handlers in `fastapi/exception_handlers.py`
+  return simple JSON responses with `{"detail": ...}`. Validation errors
+  include a list of error objects, but there is no standardized error envelope,
+  no error codes, and no correlation tracking.
+
+  Rewrite as follows:
+
+  1. Create a new file `fastapi/error_models.py` that defines:
+     a. A `StructuredError` Pydantic model with fields:
+        - `error_code: str` - machine-readable error code (e.g., "VALIDATION_ERROR",
+          "NOT_FOUND", "RATE_LIMITED", "INTERNAL_ERROR")
+        - `message: str` - human-readable error message
+        - `details: list[FieldError] | None` - field-level validation errors
+        - `correlation_id: str` - unique request correlation ID (UUID4)
+        - `timestamp: datetime` - UTC timestamp of the error
+        - `path: str` - the request path that caused the error
+        - `method: str` - the HTTP method
+     b. A `FieldError` Pydantic model with fields:
+        - `field: str` - dot-notated field path (e.g., "body.user.email")
+        - `message: str` - validation error message
+        - `error_type: str` - validator type (e.g., "value_error", "type_error")
+        - `context: dict | None` - additional context from the validator
+     c. An `ErrorCodeRegistry` class:
+        - Maps HTTP status codes to default error codes
+        - Has `register(status_code: int, error_code: str)` for custom mappings
+        - Has `lookup(status_code: int) -> str` to get the error code
+
+  2. In `fastapi/exception_handlers.py`:
+     a. Rewrite `http_exception_handler()` to return a `StructuredError`
+        response with the proper error code, correlation ID, and timestamp.
+     b. Rewrite `request_validation_error_handler()` to convert Pydantic
+        validation errors into `FieldError` objects with dot-notated field
+        paths, and wrap them in a `StructuredError` envelope.
+     c. Add a `websocket_exception_handler()` that sends structured error
+        JSON before closing the WebSocket connection.
+     d. Add a `generic_exception_handler()` for unhandled exceptions that
+        returns a 500 `StructuredError` (hiding internal details in
+        production, showing them in debug mode).
+     e. Extract correlation IDs from the `X-Correlation-ID` request header
+        if present; otherwise generate a new UUID4.
+     f. Add the correlation ID to the response as `X-Correlation-ID` header.
+
+  3. In `fastapi/applications.py`:
+     a. Add a `structured_errors: bool = False` parameter to `FastAPI.__init__()`.
+     b. When `structured_errors=True`, automatically register the rewritten
+        exception handlers.
+     c. Add a `debug: bool = False` parameter that controls whether internal
+        error details are exposed in 500 responses.
+
+  4. Add tests in `tests/test_structured_errors.py`:
+     a. Test that validation errors return the StructuredError envelope.
+     b. Test field-level error details with nested Pydantic models.
+     c. Test that correlation IDs are echoed from request headers.
+     d. Test that correlation IDs are generated when not provided.
+     e. Test 404 errors return proper error codes.
+     f. Test 500 errors hide details when debug=False.
+     g. Test 500 errors show details when debug=True.
+     h. Test custom error code registration via ErrorCodeRegistry.
+
+  5. Ensure all existing tests continue to pass.
+
+setup:
+  commit: "master"
+  branch: "validate/baseline"
+
+eval:
+  tests:
+    - "tests/test_structured_errors.py"
+  lint: true
+  type_check: false
+  max_files_changed: 5
+  must_modify:
+    - "fastapi/exception_handlers.py"
+  must_not_modify:
+    - "fastapi/routing.py"
+    - "fastapi/security/__init__.py"
+  hallucination_check: true
+  llm_judge: true
+
+tags: [rewrite, hard, fastapi, error-handling, structured-errors, correlation-id]
+expected_turns_range: [3, 20]

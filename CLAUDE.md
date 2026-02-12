@@ -222,15 +222,18 @@ The call graph (CALLS edges) extraction status by language:
 
 Refer to TODO.md for detailed phase breakdown. High-level:
 - Phase 0: DB setup ✓
-- Phase 1: Indexing MVP (symbols + chunks)
-- Phase 2: Embeddings (pgvector)
-- Phase 3: Full-text search
-- Phase 4: Graph edges (CALLS, IMPORTS, INHERITS)
-- Phase 5: Documentation layer
-- Phase 6: Tagging
-- Phase 7: Hybrid search + context packing
-- Phase 8: MCP server integration
-- Phase 9: Watch mode (incremental updates)
+- Phase 1: Indexing MVP (symbols + chunks) ✓
+- Phase 2: Embeddings (pgvector) ✓
+- Phase 3: Full-text search ✓
+- Phase 4: Graph edges (CALLS, IMPORTS, INHERITS) ✓
+- Phase 5: Documentation layer ✓
+- Phase 6: Tagging ✓
+- Phase 7: Hybrid search + context packing ✓
+- Phase 8: MCP server integration ✓
+- Phase 9: Watch mode (incremental updates) ✓
+- Migration Assessment Feature ✓
+- Schema Isolation (multi-repo) ✓
+- **Validation Framework** (A/B benchmarking + custom repos) ✓
 
 ## Configuration (.env)
 
@@ -358,6 +361,153 @@ embeddings:
   rebuild_hnsw_ef_construction: 64  # HNSW build-time search width
 ```
 
+## Validation Framework (A/B Benchmarking)
+
+The validation framework measures RoboMonkey's impact by running the same coding/Q&A tasks with and without the MCP server, then comparing quality, token usage, and hallucination rates.
+
+### Quick Start
+
+```bash
+# Standard: set up hardcoded repos (flask, fastapi, django, sample)
+robomonkey validate setup
+
+# Custom repo: point at any local directory
+robomonkey validate run --dir /path/to/myrepo --tier understand --runs 1
+
+# Custom repo: clone from GitHub
+robomonkey validate run --github pallets/flask --tier understand --runs 1
+
+# Run against pre-configured repos
+robomonkey validate run --tier understand,review --condition both --runs 3
+
+# View results
+robomonkey validate report --format cli
+robomonkey validate report --format markdown --output ./reports
+
+# List available tasks
+robomonkey validate list --tier understand
+
+# Check setup status
+robomonkey validate status
+
+# Cleanup
+robomonkey validate clean --repo myrepo
+robomonkey validate clean --all
+```
+
+### CLI Flags
+
+**`validate setup`:**
+- `--repos` - Registry repos to set up (default: "all")
+- `--dir PATH` - Local directory to index as custom repo
+- `--github org/repo` - GitHub repo to clone and index
+- `--name NAME` - Custom name for the repo
+
+**`validate run`:**
+- `--dir PATH` / `--github org/repo` - Custom repo (auto-generates generic tasks)
+- `--task ID` - Run a specific task by ID
+- `--suite simple|medium|hard|all` - Filter by difficulty
+- `--repo NAME` - Filter by target repository
+- `--runs N` - Runs per condition (default: 3)
+- `--condition both|with|without` - Which conditions to run
+- `--tier understand,review,discover,refactor,rewrite` - Filter by tier
+- `--type qa|code_change` - Filter by task type
+
+### How Custom Repos Work
+
+When using `--dir` or `--github`, the framework:
+
+1. **Clones/copies** the repo to `~/.robomonkey/validate/repos/{name}` (isolated copy)
+2. **Indexes** the repo (code + documentation files like README, .md, .rst)
+3. **Generates embeddings** for all chunks and docs (blocking — fully completes)
+4. **Generates 9 generic Q&A tasks** covering 3 tiers:
+   - **Understand (3):** project overview, tech stack, architecture
+   - **Review (3):** code quality, error handling, testing approach
+   - **Discover (3):** entry points, configuration, data flow
+5. **Runs tasks** through the A/B orchestrator
+6. **Auto-displays** a prominent summary banner + full report
+
+For standard repos, tasks come from YAML files in `validate/tasks/suites/`.
+
+### Architecture
+
+```
+validate/
+├── tasks/
+│   ├── task_model.py        # TaskDefinition, TaskSetup, TaskEval dataclasses
+│   ├── registry.py          # YAML task discovery + filtering
+│   ├── generic_tasks.py     # Generate 9 portable Q&A tasks for any repo
+│   └── suites/              # 48+ YAML task definitions
+│       ├── simple/           # Tier: find, explain, fix, docstring
+│       ├── medium/           # Tier: add endpoint, fix bug, extend schema
+│       ├── hard/             # Tier: refactor, cross-cutting, debug multifile
+│       ├── tier1_understand/ # Q&A: project overview, tech stack, architecture
+│       ├── tier2_review/     # Q&A: code quality, error handling, testing
+│       ├── tier3_discover/   # Q&A: entry points, config, data flow
+│       └── tier5_rewrite/    # Code: rewrite modules
+├── runner/
+│   ├── base_driver.py       # Abstract driver interface
+│   ├── claude_code.py       # Claude Code subprocess driver
+│   ├── orchestrator.py      # A/B run engine (conditions × runs)
+│   └── git_manager.py       # Git reset/clean between runs
+├── capture/
+│   ├── run_result.py        # RunResult dataclass (all metrics)
+│   ├── collector.py         # Extract metrics from driver results
+│   ├── session_parser.py    # Parse Claude Code session output
+│   └── hallucination.py     # Detect hallucinated files/symbols/imports
+├── evaluate/
+│   ├── pipeline.py          # Orchestrate all evaluation phases
+│   ├── scorer.py            # Composite score calculation
+│   ├── llm_judge.py         # LLM-based quality assessment
+│   ├── test_runner.py       # Run pytest for code-change tasks
+│   ├── lint_checker.py      # Lint check results
+│   └── diff_analyzer.py     # Analyze code diffs
+├── report/
+│   ├── comparator.py        # A/B comparison logic (MetricDelta, SuiteComparison)
+│   ├── statistics.py        # Mean, stddev, CI, Cohen's d, Welch's t-test
+│   ├── report_gen.py        # CLI, Markdown, JSON report generation
+│   └── summary_banner.py    # Prominent box-drawn end-of-run banner
+└── cli.py                   # CLI entrypoint (setup, run, report, list, clean, status)
+```
+
+### Key Data Flow
+
+```
+TaskDefinition → Orchestrator → ClaudeCodeDriver → collect_metrics()
+                                                        ↓
+                                                   evaluate_run()
+                                                   (tests, lint, hallucinations, LLM judge)
+                                                        ↓
+                                                   RunResult
+                                                        ↓
+                                                   compare_task() → compare_suite()
+                                                        ↓
+                                                   generate_summary_banner()
+                                                   generate_cli_report()
+```
+
+### Scoring Weights (composite_score)
+
+For code-change tasks:
+- Tests pass/fail: 30%
+- LLM judge score: 30%
+- Hallucination penalty: 20%
+- Correct files modified: 10%
+- Lint clean: 10%
+
+For Q&A tasks:
+- LLM judge score: 40%
+- Rubric coverage: 30%
+- Factual grounding: 20%
+- Specificity: 10%
+
+### Design Documents
+
+Detailed design docs in `docs/plans/`:
+- `validate-features-overview.md` - Features F1-F10, scoring, data flow
+- `validate-implementation-plan.md` - Phased build strategy
+- `validate-phase-01-task-definitions.md` through `-10` - Per-phase specs
+
 ## Testing
 
 Tests are in `tests/` directory:
@@ -367,6 +517,55 @@ Tests are in `tests/` directory:
 - `test_fts.py` - Full-text search
 - `test_hybrid_search.py` - Hybrid retrieval
 - `test_tags.py` - Tagging system
+- `test_validate_driver.py` - Validation framework driver
+
+## Using RoboMonkey MCP Tools (Self-Indexed)
+
+This project is indexed into its own RoboMonkey instance. **Use these MCP tools to understand the codebase before making changes.** The default repo is `Robo-Monkey`.
+
+### When to Use Which Tool
+
+| Task | Tool | Example |
+|------|------|---------|
+| Find code by meaning or keywords | `hybrid_search` | "where is user authentication implemented?" |
+| Ask a question about the codebase | `ask_codebase` | "how does the embedding pipeline work?" |
+| Find a specific function/class | `symbol_lookup` | Look up `embed_repo` by FQN |
+| Understand a function + who calls it | `symbol_context` | Get `hybrid_search_impl` with callers/callees |
+| What calls this function? | `callers` | Impact analysis before changing a function |
+| What does this function call? | `callees` | Understand dependencies |
+| Search documentation (README, .md) | `doc_search` | "setup instructions" or "configuration options" |
+| Deep dive into a feature area | `feature_context` | "authentication", "embedding pipeline", "tagging" |
+| Get architecture overview | `comprehensive_review` | High-level understanding of the whole project |
+| Multi-strategy deep search | `universal_search` | When `hybrid_search` misses results |
+| See all indexed repos | `list_repos` | Check what's available |
+| Check indexing health | `index_status` | Verify repo is fully indexed before searching |
+| Not sure which tool? | `suggest_tool` | Describe what you need, get a recommendation |
+
+### Recommended Workflow
+
+1. **Before modifying code:** Use `hybrid_search` or `symbol_context` to understand the area you're about to change. Check `callers` to assess impact.
+2. **Exploring a feature:** Use `feature_context` with the feature name (e.g., "hybrid search", "validation framework", "embeddings").
+3. **Finding implementations:** Use `hybrid_search` with `require_text_match=true` when searching for specific constructs (e.g., `DBMS_UTILITY`, function names).
+4. **Understanding architecture:** Use `comprehensive_review` for the full picture, or `module_summary` for a specific directory.
+5. **Checking documentation:** Use `doc_search` to find relevant docs before writing new ones.
+
+### Tool Parameters
+
+Most tools accept an optional `repo` parameter. Since `DEFAULT_REPO=Robo-Monkey` is set, you can omit it for this project. Key parameters:
+
+- `hybrid_search`: `query` (required), `repo`, `tags_any`, `tags_all`, `require_text_match`, `final_top_k`
+- `ask_codebase`: `question` (required), `repo`, `summary_format` ("files", "prose", "both")
+- `symbol_lookup`: `fqn` (fully qualified name, e.g., "EmbeddingsConfig.validate_dimension")
+- `symbol_context`: `fqn`, `max_depth` (default 2), `budget_tokens` (default 12000)
+- `feature_context`: `repo` (required), `query` (required), `top_k_files` (default 25)
+- `doc_search`: `query` (required), `repo`, `top_k` (default 10)
+
+### Configuration
+
+- **MCP config:** `.mcp.json` in project root
+- **Embeddings:** Reads from `.env` (EMBEDDINGS_PROVIDER, EMBEDDINGS_MODEL, etc.)
+- **Daemon config:** `config/robomonkey-daemon.yaml` (embeddings also fall back to `.env`)
+- **Both UI and daemon share `.env`** as the single source of truth for embeddings config
 
 ## Notes for Future Claude Instances
 
@@ -377,3 +576,5 @@ Tests are in `tests/` directory:
 - Tree-sitter parsers are language-specific. See `indexer/treesitter/parsers.py` for supported languages.
 - For incremental indexing, delete per-file entities first, then insert new (see indexing pipeline).
 - MCP server runs on stdio - test with Claude Desktop, Cline, or other MCP clients.
+- **Validation framework** supports custom repos via `--dir`/`--github`. Setup is fully blocking (index + embed completes before tasks run). Generic tasks are generated in Python, not YAML. Repo docs (.md, .rst) are auto-indexed for doc search.
+- **RoboMonkey MCP tools** are available in this project. Use them to search, understand, and navigate the codebase before making changes. See "Using RoboMonkey MCP Tools" section above.

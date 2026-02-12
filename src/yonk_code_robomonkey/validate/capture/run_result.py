@@ -61,6 +61,13 @@ class RunResult:
     # Composite (filled by scorer)
     composite_score: float = 0.0
 
+    # Q&A evaluation (filled for qa tasks only)
+    response_text: str = ""                                          # Full AI response
+    rubric_coverage: dict[str, str] = field(default_factory=dict)    # topic -> "yes"|"no"|"partial"
+    rubric_score: float = 0.0                                        # 0-1, weighted rubric coverage
+    factual_issues: list[str] = field(default_factory=list)
+    specificity_score: float = 0.0                                   # 0-1, references actual code
+
     # Validity
     valid: bool = True
     invalidation_reason: str = ""
