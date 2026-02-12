@@ -382,7 +382,8 @@ async def db_init(database_url: str) -> None:
             f"Expected location: scripts/init_db.sql"
         )
 
-    # Check for docs schema file
+    # Check for control and docs schema files
+    control_ddl_path = DDL_PATH.parent / "init_control.sql"
     docs_ddl_path = DDL_PATH.parent / "init_docs_schema.sql"
 
     # Read DDL
@@ -410,7 +411,18 @@ async def db_init(database_url: str) -> None:
         await conn.execute(sql)
         print("✓ Database schema initialized successfully")
 
-        # Initialize docs schema if file exists
+        # Initialize control schema (must come before docs schema due to FK references)
+        if control_ddl_path.exists():
+            try:
+                control_sql = control_ddl_path.read_text(encoding="utf-8")
+                await conn.execute(control_sql)
+                print("✓ Control schema initialized successfully")
+            except asyncpg.PostgresError as e:
+                print(f"⚠ Warning: Failed to initialize control schema: {e}")
+        else:
+            print("⚠ Control schema file not found, skipping")
+
+        # Initialize docs schema (depends on control schema for repo_registry FK)
         if docs_ddl_path.exists():
             try:
                 docs_sql = docs_ddl_path.read_text(encoding="utf-8")

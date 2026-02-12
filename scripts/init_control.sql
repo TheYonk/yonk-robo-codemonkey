@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS repo_registry (
     CONSTRAINT valid_schema_name CHECK (schema_name ~ '^[a-z][a-z0-9_]*$')
 );
 
-CREATE INDEX idx_repo_registry_enabled ON repo_registry(enabled) WHERE enabled = true;
-CREATE INDEX idx_repo_registry_updated_at ON repo_registry(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_repo_registry_enabled ON repo_registry(enabled) WHERE enabled = true;
+CREATE INDEX IF NOT EXISTS idx_repo_registry_updated_at ON repo_registry(updated_at DESC);
 
 -- ============================================================================
 -- Job Queue: Durable queue for all background work
@@ -88,14 +88,14 @@ CREATE TABLE IF NOT EXISTS job_queue (
 );
 
 -- Indexes for efficient queue processing
-CREATE INDEX idx_job_queue_claim ON job_queue(status, priority DESC, run_after, created_at)
+CREATE INDEX IF NOT EXISTS idx_job_queue_claim ON job_queue(status, priority DESC, run_after, created_at)
     WHERE status = 'PENDING';
 
-CREATE INDEX idx_job_queue_repo ON job_queue(repo_name, status, created_at DESC);
-CREATE INDEX idx_job_queue_status ON job_queue(status, created_at DESC);
-CREATE UNIQUE INDEX idx_job_queue_dedup ON job_queue(repo_name, job_type, dedup_key)
+CREATE INDEX IF NOT EXISTS idx_job_queue_repo ON job_queue(repo_name, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_queue_status ON job_queue(status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_queue_dedup ON job_queue(repo_name, job_type, dedup_key)
     WHERE status IN ('PENDING', 'CLAIMED') AND dedup_key IS NOT NULL;
-CREATE INDEX idx_job_queue_completed ON job_queue(completed_at DESC)
+CREATE INDEX IF NOT EXISTS idx_job_queue_completed ON job_queue(completed_at DESC)
     WHERE status IN ('DONE', 'FAILED');
 
 -- ============================================================================
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS source_mounts (
     CONSTRAINT valid_container_path CHECK (container_path LIKE '/sources/%')
 );
 
-CREATE INDEX idx_source_mounts_enabled ON source_mounts(enabled) WHERE enabled = true;
+CREATE INDEX IF NOT EXISTS idx_source_mounts_enabled ON source_mounts(enabled) WHERE enabled = true;
 
 -- ============================================================================
 -- Daemon State: Track daemon instances and health
@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS daemon_instance (
     CONSTRAINT valid_daemon_status CHECK (status IN ('STARTING', 'RUNNING', 'STOPPING', 'STOPPED'))
 );
 
-CREATE INDEX idx_daemon_instance_heartbeat ON daemon_instance(last_heartbeat DESC)
+CREATE INDEX IF NOT EXISTS idx_daemon_instance_heartbeat ON daemon_instance(last_heartbeat DESC)
     WHERE status IN ('STARTING', 'RUNNING');
 
 -- ============================================================================
@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS job_stats (
     PRIMARY KEY (repo_name, job_type, date)
 );
 
-CREATE INDEX idx_job_stats_date ON job_stats(date DESC);
+CREATE INDEX IF NOT EXISTS idx_job_stats_date ON job_stats(date DESC);
 
 -- ============================================================================
 -- Functions: Helper functions for queue management
@@ -313,6 +313,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS repo_registry_updated_at ON repo_registry;
 CREATE TRIGGER repo_registry_updated_at
     BEFORE UPDATE ON repo_registry
     FOR EACH ROW
@@ -333,8 +334,8 @@ CREATE TABLE IF NOT EXISTS mcp_tool_metrics (
     CONSTRAINT valid_tool_status CHECK (status IN ('ok', 'error'))
 );
 
-CREATE INDEX idx_mcp_tool_metrics_created ON mcp_tool_metrics(created_at DESC);
-CREATE INDEX idx_mcp_tool_metrics_tool ON mcp_tool_metrics(tool_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_metrics_created ON mcp_tool_metrics(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_metrics_tool ON mcp_tool_metrics(tool_name, created_at DESC);
 
 -- ============================================================================
 -- MCP Tool Stats: Daily rollup by tool_name
@@ -354,7 +355,7 @@ CREATE TABLE IF NOT EXISTS mcp_tool_stats (
     PRIMARY KEY (tool_name, date)
 );
 
-CREATE INDEX idx_mcp_tool_stats_date ON mcp_tool_stats(date DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_stats_date ON mcp_tool_stats(date DESC);
 
 -- ============================================================================
 -- LLM Call Metrics: Per-call log for LLM API invocations
@@ -377,8 +378,8 @@ CREATE TABLE IF NOT EXISTS llm_call_metrics (
     CONSTRAINT valid_llm_status CHECK (status IN ('ok', 'error'))
 );
 
-CREATE INDEX idx_llm_call_metrics_created ON llm_call_metrics(created_at DESC);
-CREATE INDEX idx_llm_call_metrics_model ON llm_call_metrics(provider, model, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_call_metrics_created ON llm_call_metrics(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_call_metrics_model ON llm_call_metrics(provider, model, created_at DESC);
 
 -- ============================================================================
 -- LLM Call Stats: Daily rollup by provider/model/task_type
@@ -403,7 +404,7 @@ CREATE TABLE IF NOT EXISTS llm_call_stats (
     PRIMARY KEY (provider, model, task_type, date)
 );
 
-CREATE INDEX idx_llm_call_stats_date ON llm_call_stats(date DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_call_stats_date ON llm_call_stats(date DESC);
 
 -- ============================================================================
 -- Embedding Call Metrics: Per-call log for embedding API invocations
@@ -422,8 +423,8 @@ CREATE TABLE IF NOT EXISTS embedding_call_metrics (
     CONSTRAINT valid_embed_status CHECK (status IN ('ok', 'error'))
 );
 
-CREATE INDEX idx_embedding_call_metrics_created ON embedding_call_metrics(created_at DESC);
-CREATE INDEX idx_embedding_call_metrics_model ON embedding_call_metrics(provider, model, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_embedding_call_metrics_created ON embedding_call_metrics(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_embedding_call_metrics_model ON embedding_call_metrics(provider, model, created_at DESC);
 
 -- ============================================================================
 -- Embedding Call Stats: Daily rollup by provider/model
@@ -446,7 +447,7 @@ CREATE TABLE IF NOT EXISTS embedding_call_stats (
     PRIMARY KEY (provider, model, date)
 );
 
-CREATE INDEX idx_embedding_call_stats_date ON embedding_call_stats(date DESC);
+CREATE INDEX IF NOT EXISTS idx_embedding_call_stats_date ON embedding_call_stats(date DESC);
 
 -- ============================================================================
 -- Cleanup function for granular metrics data
