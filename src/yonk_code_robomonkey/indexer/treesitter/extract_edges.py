@@ -165,38 +165,80 @@ def _extract_python_inheritance(source: bytes, root: any) -> Iterator[Edge]:
 
 
 def _extract_python_calls(source: bytes, root: any) -> Iterator[Edge]:
-    """Extract Python function calls (best-effort, simple names only)."""
-    # Track function/method definitions to get caller context
-    current_function = None
+    """Extract Python function/method calls with proper scope tracking.
 
+    Walks the tree for `call` nodes, then resolves the enclosing function
+    by traversing parent nodes.  This avoids the flat-state bugs where a
+    bare ``current_function`` variable leaks across sibling definitions.
+    """
     for node in _traverse_tree(root):
-        # Track current function context
-        if node.type == "function_definition":
-            name_node = _find_child(node, "identifier")
+        if node.type != "call":
+            continue
+
+        # Determine the enclosing function FQN (ClassName.method or func)
+        caller_fqn = _find_enclosing_python_function_fqn(source, node)
+        if not caller_fqn:
+            continue  # call at module level — skip
+
+        # Extract the called name from the first child of the call node
+        func_node = node.children[0] if node.children else None
+        if not func_node:
+            continue
+
+        called_name = None
+        confidence = 0.5
+
+        if func_node.type == "identifier":
+            # Simple call: foo()
+            called_name = _get_text(source, func_node)
+            confidence = 0.6
+        elif func_node.type == "attribute":
+            # Attribute call: self.method(), obj.func(), module.function()
+            # attribute children: [expression, ".", identifier]
+            # We want the rightmost identifier (the method/attr name)
+            for child in reversed(func_node.children):
+                if child.type == "identifier":
+                    called_name = _get_text(source, child)
+                    break
+            confidence = 0.5
+
+        if called_name:
+            yield Edge(
+                edge_type="CALLS",
+                from_symbol_fqn=caller_fqn,
+                to_symbol_fqn=called_name,
+                confidence=confidence,
+                evidence_start_line=node.start_point[0] + 1,
+                evidence_end_line=node.end_point[0] + 1,
+            )
+
+
+def _find_enclosing_python_function_fqn(source: bytes, node: any) -> str | None:
+    """Walk up the parent chain to build the enclosing function's FQN.
+
+    Returns ``"ClassName.method_name"`` for methods or ``"func_name"`` for
+    top-level functions.  Returns ``None`` when the call is at module level.
+    """
+    func_name: str | None = None
+    class_name: str | None = None
+    current = node.parent
+
+    while current:
+        if current.type == "function_definition" and func_name is None:
+            name_node = _find_child(current, "identifier")
             if name_node:
-                current_function = _get_text(source, name_node)
+                func_name = _get_text(source, name_node)
+        elif current.type == "class_definition" and class_name is None:
+            name_node = _find_child(current, "identifier")
+            if name_node:
+                class_name = _get_text(source, name_node)
+        current = current.parent
 
-        # Find call expressions
-        if node.type == "call" and current_function:
-            # Get function being called
-            func_node = node.children[0] if node.children else None
-            if not func_node:
-                continue
-
-            # Only handle simple identifier calls (not method calls)
-            if func_node.type == "identifier":
-                called_name = _get_text(source, func_node)
-                start_line = node.start_point[0] + 1
-                end_line = node.end_point[0] + 1
-
-                yield Edge(
-                    edge_type="CALLS",
-                    from_symbol_fqn=current_function,
-                    to_symbol_fqn=called_name,
-                    confidence=0.5,  # Very best-effort
-                    evidence_start_line=start_line,
-                    evidence_end_line=end_line
-                )
+    if not func_name:
+        return None
+    if class_name:
+        return f"{class_name}.{func_name}"
+    return func_name
 
 
 # JavaScript/TypeScript edge extraction
