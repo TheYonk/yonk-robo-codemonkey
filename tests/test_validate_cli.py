@@ -76,11 +76,11 @@ async def test_validate_clean_specific_repo(isolated_home):
     """validate clean --repo removes just that repo directory."""
     repos_dir = isolated_home / ".robomonkey" / "validate" / "repos"
     repos_dir.mkdir(parents=True)
-    (repos_dir / "flask").mkdir()
-    (repos_dir / "django").mkdir()
+    (repos_dir / "tmp_flask").mkdir()
+    (repos_dir / "tmp_django").mkdir()
     await validate_clean(repo="flask")
-    assert not (repos_dir / "flask").exists()
-    assert (repos_dir / "django").exists()
+    assert not (repos_dir / "tmp_flask").exists()
+    assert (repos_dir / "tmp_django").exists()
 
 
 @pytest.mark.asyncio
