@@ -158,6 +158,10 @@ def run() -> None:
     report_p = validate_sub.add_parser("report")
     report_p.add_argument("--format", choices=["cli", "markdown", "json", "all"], default="cli")
     report_p.add_argument("--output", default=None)
+    report_p.add_argument("--run", default=None,
+                          help="Load a specific archived run (e.g. run_20260213_103045)")
+    report_p.add_argument("--list", action="store_true", dest="list_runs",
+                          help="List available archived runs")
 
     list_p = validate_sub.add_parser("list")
     list_p.add_argument("--repo", default=None)
@@ -331,7 +335,11 @@ def run() -> None:
                     parallel=getattr(args, 'parallel', False),
                 ))
             elif args.validate_cmd == "report":
-                asyncio.run(vcli.validate_report(args.format, args.output))
+                asyncio.run(vcli.validate_report(
+                    args.format, args.output,
+                    run_name=getattr(args, 'run', None),
+                    list_runs=getattr(args, 'list_runs', False),
+                ))
             elif args.validate_cmd == "list":
                 asyncio.run(vcli.validate_list(
                     args.repo, args.difficulty,

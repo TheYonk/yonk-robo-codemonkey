@@ -1,10 +1,13 @@
 from __future__ import annotations
 import asyncio
+import dataclasses
 import json
 import logging
+import os
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from .tasks.registry import discover_tasks
@@ -34,6 +37,52 @@ def _repos_dir() -> Path:
 
 def _results_dir() -> Path:
     return _validate_base() / "results"
+
+
+def _new_run_file() -> Path:
+    """Create a timestamped run file path like results/run_20260213_103045.json."""
+    results_dir = _results_dir()
+    results_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return results_dir / f"run_{stamp}.json"
+
+
+def _save_incremental(
+    run_file: Path,
+    all_results: list,
+    task_meta: dict,
+    started_at: str,
+    completed: bool = False,
+) -> None:
+    """Atomically write current results to disk (tmp + rename)."""
+    results_data = [dataclasses.asdict(r) for r in all_results]
+    export = {
+        "runs": results_data,
+        "task_meta": task_meta,
+        "started_at": started_at,
+        "completed": completed,
+    }
+    tmp_file = run_file.with_suffix(".tmp")
+    tmp_file.write_text(json.dumps(export, indent=2, default=str))
+    os.rename(str(tmp_file), str(run_file))
+
+
+def _update_latest_symlink(results_dir: Path, run_file: Path) -> None:
+    """Point results/latest.json at the given run file (symlink)."""
+    latest = results_dir / "latest.json"
+    # Remove existing file or symlink
+    if latest.is_symlink() or latest.exists():
+        latest.unlink()
+    latest.symlink_to(run_file.name)
+
+
+def _prune_old_runs(results_dir: Path, keep: int = 10) -> None:
+    """Keep only the most recent *keep* run_*.json files, delete the rest."""
+    run_files = sorted(results_dir.glob("run_*.json"))
+    if len(run_files) <= keep:
+        return
+    for old in run_files[: len(run_files) - keep]:
+        old.unlink()
 
 
 def _mcp_config_path() -> Path:
@@ -518,6 +567,12 @@ async def validate_run(
     repos_dir = _repos_dir()
     all_results = []
     total_tasks = len(tasks)
+    run_file = _new_run_file()
+    started_at = datetime.now().isoformat()
+    task_meta = {
+        t.id: {"category": t.category.value, "task_type": t.task_type}
+        for t in tasks
+    }
 
     # Parallel execution mode: use dual worktrees for A/B comparison
     if parallel and condition == "both":
@@ -567,6 +622,7 @@ async def validate_run(
                     conversation_text=sr.driver_result.response_text,
                 )
                 all_results.append(run_result)
+                _save_incremental(run_file, all_results, task_meta, started_at)
     else:
         # Sequential execution (original behavior)
         config = RunConfig(
@@ -599,18 +655,13 @@ async def validate_run(
                     conversation_text=sr.driver_result.response_text,
                 )
                 all_results.append(run_result)
+                _save_incremental(run_file, all_results, task_meta, started_at)
 
-    # Save results with task metadata for report reconstruction
-    results_file = results_dir / "latest.json"
-    import dataclasses
-    task_meta = {
-        t.id: {"category": t.category.value, "task_type": t.task_type}
-        for t in tasks
-    }
-    results_data = [dataclasses.asdict(r) for r in all_results]
-    export = {"runs": results_data, "task_meta": task_meta}
-    results_file.write_text(json.dumps(export, indent=2, default=str))
-    print(f"\n  {len(all_results)} runs completed. Results saved to {results_file}")
+    # Finalize: mark complete, update symlink, prune old runs
+    _save_incremental(run_file, all_results, task_meta, started_at, completed=True)
+    _update_latest_symlink(results_dir, run_file)
+    _prune_old_runs(results_dir, keep=10)
+    print(f"\n  {len(all_results)} runs completed. Results saved to {run_file.name}")
 
     # ── Auto-display prominent summary ────────────────────────────
     if all_results:
@@ -641,17 +692,57 @@ def _group_results_by_task(results: list) -> dict[str, dict[str, list]]:
     return groups
 
 
-async def validate_report(format: str = "cli", output_dir: str | None = None) -> None:
+async def validate_report(
+    format: str = "cli",
+    output_dir: str | None = None,
+    run_name: str | None = None,
+    list_runs: bool = False,
+) -> None:
     """Generate report from saved results."""
     results_dir = _results_dir()
-    results_file = results_dir / "latest.json"
+
+    # ── --list: show available archived runs ─────────────────────
+    if list_runs:
+        run_files = sorted(results_dir.glob("run_*.json"))
+        if not run_files:
+            print("No archived runs found.", file=sys.stderr)
+            return
+        # Determine which file latest.json points to
+        latest = results_dir / "latest.json"
+        latest_target = None
+        if latest.is_symlink():
+            latest_target = latest.resolve().name
+        print(f"\n  {'':2s} {'RUN FILE':<32s} {'STATUS':<12s} {'RESULTS':>8s}  {'STARTED'}")
+        print("  " + "-" * 78)
+        for rf in run_files:
+            try:
+                meta = json.loads(rf.read_text())
+                status = "complete" if meta.get("completed") else "partial"
+                count = len(meta.get("runs", []))
+                started = meta.get("started_at", "")[:19]
+            except (json.JSONDecodeError, KeyError):
+                status = "corrupt"
+                count = 0
+                started = ""
+            marker = "->" if rf.name == latest_target else "  "
+            print(f"  {marker} {rf.name:<32s} {status:<12s} {count:>8d}  {started}")
+        return
+
+    # ── Resolve which results file to read ───────────────────────
+    if run_name:
+        # Append .json if needed
+        if not run_name.endswith(".json"):
+            run_name += ".json"
+        results_file = results_dir / run_name
+    else:
+        results_file = results_dir / "latest.json"
+
     if not results_file.exists():
         print("No results found. Run 'validate run' first.", file=sys.stderr)
         return
 
     raw = json.loads(results_file.read_text())
     from .capture.run_result import RunResult
-    from datetime import datetime
 
     # Support both old (list) and new (dict with task_meta) formats
     if isinstance(raw, list):
@@ -841,9 +932,7 @@ async def validate_status() -> None:
 
     results_file = _results_dir() / "latest.json"
     if results_file.exists():
-        import os
         mtime = os.path.getmtime(results_file)
-        from datetime import datetime
         last = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
         print(f"\n    Last run: {last}")
     else:
