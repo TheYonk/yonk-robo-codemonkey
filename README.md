@@ -111,6 +111,25 @@ RoboMonkey MCP is an AI-powered code search and analysis tool that:
 
 ---
 
+## Benchmark Results
+
+Results will vary depending on the codebase, task complexity, and how familiar the LLM already is with the project. On **new/private codebases** that the LLM hasn't seen in training, RoboMonkey shows the most significant improvements since the LLM can't fall back on memorized knowledge and must actually read the code.
+
+In A/B benchmarks on an unfamiliar PostgreSQL extension project (pg-taskstash), comparing Claude Code **with RoboMonkey MCP** vs **without**:
+
+| Metric | With RoboMonkey | Without | Change |
+|--------|----------------|---------|--------|
+| Quality | 0.6 | 0.5 | **+21%** |
+| Tokens used | 1.8k | 5.4k | **-66%** |
+| Conversation turns | 1.3 avg | 10.0 avg | **-87%** |
+| Hallucinations | 0.0 | 0.3 | **-100%** |
+
+With RoboMonkey's hybrid search, the LLM finds what it needs in 1-2 targeted queries instead of manually reading dozens of files. This translates to meaningful savings in token usage and faster, more accurate responses — especially valuable for projects the LLM has never encountered.
+
+**Note:** These results do not include the one-time cost of indexing and embedding the repository. However, this initial processing can be handled entirely by local models (Ollama, vLLM) without incurring any cloud API spend. Once indexed, the data persists and only incremental updates are needed as the codebase changes.
+
+---
+
 ## Architecture
 
 ```
