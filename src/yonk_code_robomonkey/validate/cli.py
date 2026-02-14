@@ -608,6 +608,8 @@ async def validate_run(
             # Create a task lookup for evaluation
             task_lookup = {t.id: t for t in repo_tasks}
 
+            # Evaluate all results, then re-score per-task with baselines
+            parallel_results_by_task: dict[str, list] = {}
             for sr in single_results:
                 task = task_lookup.get(sr.task_id)
                 if not task:
@@ -621,8 +623,15 @@ async def validate_run(
                     diff_text=sr.diff_text,
                     conversation_text=sr.driver_result.response_text,
                 )
-                all_results.append(run_result)
-                _save_incremental(run_file, all_results, task_meta, started_at)
+                parallel_results_by_task.setdefault(sr.task_id, []).append(run_result)
+
+            # Re-score each task's results with cross-condition baselines
+            for tid, task_runs in parallel_results_by_task.items():
+                task = task_lookup.get(tid)
+                if task:
+                    _apply_baseline_scoring(task_runs, task_type=task.task_type)
+                all_results.extend(task_runs)
+            _save_incremental(run_file, all_results, task_meta, started_at)
     else:
         # Sequential execution (original behavior)
         config = RunConfig(
@@ -644,6 +653,7 @@ async def validate_run(
                 print(f"  [{i}/{total_tasks}] {tid} ({cond}) run {run_num} ...", flush=True)
 
             single_results = await orch.run_task(task, repo_dir, on_progress=progress)
+            task_run_results = []
             for sr in single_results:
                 run_result = collect_metrics(sr, task.target_repo, repo_dir)
 
@@ -654,8 +664,12 @@ async def validate_run(
                     diff_text=sr.diff_text,
                     conversation_text=sr.driver_result.response_text,
                 )
-                all_results.append(run_result)
-                _save_incremental(run_file, all_results, task_meta, started_at)
+                task_run_results.append(run_result)
+
+            # Re-score with cross-condition baselines now that both conditions are done
+            _apply_baseline_scoring(task_run_results, task_type=task.task_type)
+            all_results.extend(task_run_results)
+            _save_incremental(run_file, all_results, task_meta, started_at)
 
     # Finalize: mark complete, update symlink, prune old runs
     _save_incremental(run_file, all_results, task_meta, started_at, completed=True)
@@ -690,6 +704,45 @@ def _group_results_by_task(results: list) -> dict[str, dict[str, list]]:
         groups.setdefault(r.task_id, {"with_robomonkey": [], "without_robomonkey": []})
         groups[r.task_id][r.condition].append(r)
     return groups
+
+
+def _apply_baseline_scoring(
+    task_results: list,
+    task_type: str = "qa",
+) -> None:
+    """Re-score task results with cross-condition baseline tokens/turns.
+
+    After both conditions have run for a task, re-compute each result's
+    composite score using the OTHER condition's average tokens/turns as
+    the efficiency baseline. This replaces the neutral 0.5 default.
+    """
+    from .evaluate.scorer import score_run, score_qa_run
+
+    # Group by condition
+    by_condition: dict[str, list] = {}
+    for r in task_results:
+        by_condition.setdefault(r.condition, []).append(r)
+
+    if len(by_condition) < 2:
+        return  # Only one condition — no cross-baseline possible
+
+    # Compute per-condition averages
+    averages: dict[str, tuple[int, int]] = {}
+    for cond, runs in by_condition.items():
+        avg_tokens = sum(r.tokens_total for r in runs) / len(runs)
+        avg_turns = sum(r.conversation_turns for r in runs) / len(runs)
+        averages[cond] = (int(avg_tokens), int(avg_turns))
+
+    # Re-score each result with the OTHER condition's average as baseline
+    for r in task_results:
+        other = "without_robomonkey" if r.condition == "with_robomonkey" else "with_robomonkey"
+        baseline_tokens, baseline_turns = averages.get(other, (None, None))
+
+        if task_type == "qa":
+            score = score_qa_run(r, baseline_tokens=baseline_tokens, baseline_turns=baseline_turns)
+        else:
+            score = score_run(r, baseline_tokens=baseline_tokens, baseline_turns=baseline_turns)
+        r.composite_score = score.composite
 
 
 async def validate_report(

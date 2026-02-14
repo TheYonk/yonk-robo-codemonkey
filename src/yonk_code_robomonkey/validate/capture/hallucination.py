@@ -2,6 +2,7 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -23,23 +24,103 @@ FILE_PATH_PATTERN = re.compile(r'(?:^|[\s"`\'(])([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,5}
 # Pattern: Python import lines
 IMPORT_PATTERN = re.compile(r'^[+]\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))', re.MULTILINE)
 
+# Common non-path extensions to skip (version numbers, domain names, etc.)
+_SKIP_EXTENSIONS = frozenset({
+    "com", "org", "net", "io", "dev", "ai", "app",  # domains
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",  # version numbers
+})
+
+
+def _build_repo_file_index(repo_dir: Path) -> tuple[set[str], set[str]]:
+    """Build a set of basenames and relative paths for all files in repo.
+
+    Returns:
+        (basenames, relative_paths) — basenames is a set of filenames,
+        relative_paths is a set of POSIX-style paths relative to repo_dir.
+    """
+    basenames: set[str] = set()
+    relative_paths: set[str] = set()
+    try:
+        for f in repo_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            # Skip hidden dirs like .git
+            parts = f.relative_to(repo_dir).parts
+            if any(p.startswith(".") for p in parts[:-1]):
+                continue
+            rel = f.relative_to(repo_dir).as_posix()
+            basenames.add(f.name)
+            relative_paths.add(rel)
+    except Exception as e:
+        logger.warning("Failed to build repo file index: %s", e)
+    return basenames, relative_paths
+
+
+def _path_exists_in_repo(
+    path_str: str,
+    repo_dir: Path,
+    basenames: set[str],
+    relative_paths: set[str],
+) -> bool:
+    """Check if a mentioned file path exists anywhere in the repo tree.
+
+    Checks in order:
+    1. Exact path relative to repo root (original behavior)
+    2. Suffix match — any repo path ending with the candidate
+    3. Basename match — any file in the repo with the same filename
+    """
+    # 1. Exact path
+    clean = path_str.lstrip("./")
+    if clean in relative_paths:
+        return True
+
+    # 2. Suffix match (e.g., "flask/blueprints.py" matches "src/flask/blueprints.py")
+    suffix = f"/{clean}"
+    for rp in relative_paths:
+        if rp.endswith(suffix):
+            return True
+
+    # 3. Basename match (e.g., "blueprints.py" matches any blueprints.py in the tree)
+    basename = Path(path_str).name
+    if basename in basenames:
+        return True
+
+    return False
+
+
 def detect_file_hallucinations(
     text: str,
     repo_dir: Path,
 ) -> list[str]:
-    """Find file paths mentioned in text that don't exist."""
+    """Find file paths mentioned in text that don't exist in the repo tree."""
     candidates = set(FILE_PATH_PATTERN.findall(text))
+    basenames, relative_paths = _build_repo_file_index(repo_dir)
     hallucinated = []
     for path_str in candidates:
         # Skip obvious non-paths
         if path_str.startswith("http") or path_str.startswith("//"):
             continue
-        # Check relative to repo
-        full = repo_dir / path_str
-        if not full.exists() and path_str not in (".env", "requirements.txt"):
-            # Only flag paths that look like project files
-            if "/" in path_str or path_str.endswith(".py"):
-                hallucinated.append(path_str)
+        # Skip common config / virtual files
+        if path_str in (".env", "requirements.txt", "setup.py", "setup.cfg",
+                        "pyproject.toml", "package.json", "Makefile"):
+            continue
+        # Skip likely non-path extensions (domains, version numbers)
+        ext = path_str.rsplit(".", 1)[-1].lower() if "." in path_str else ""
+        if ext in _SKIP_EXTENSIONS:
+            continue
+        # Only flag paths that look like project files
+        if "/" not in path_str and not path_str.endswith(".py"):
+            continue
+        # Skip system/library headers (C/C++ includes not part of the project)
+        if ext in ("h", "hpp") and "/" in path_str:
+            # Paths like "utils/guc.h", "common/hmac.h" are typically system includes
+            # Only flag .h files if the directory prefix exists in the repo
+            dir_part = path_str.rsplit("/", 1)[0]
+            if not any(rp.startswith(dir_part + "/") for rp in relative_paths):
+                continue
+        # Check against repo tree (exact, suffix, and basename matching)
+        if not _path_exists_in_repo(path_str, repo_dir, basenames, relative_paths):
+            hallucinated.append(path_str)
     return hallucinated
 
 def detect_import_hallucinations(

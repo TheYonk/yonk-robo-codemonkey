@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 
 from .base_driver import BaseDriver, DriverResult
@@ -49,12 +50,17 @@ class ClaudeCodeDriver(BaseDriver):
         cmd = self._build_command(prompt, working_dir, mcp_config, max_turns, max_budget_usd)
         logger.info("Running Claude Code: %s", " ".join(cmd[:5]) + "...")
 
+        # Remove CLAUDECODE env var to allow nested claude invocations
+        # (e.g., when validate is run from within a Claude Code session)
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=working_dir,
+                env=env,
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout_seconds
@@ -75,13 +81,24 @@ class ClaudeCodeDriver(BaseDriver):
             )
 
         if proc.returncode != 0 and not stdout:
+            err_msg = f"Exit code {proc.returncode}: {stderr.decode()[:500]}"
+            logger.warning("Claude Code failed: %s", err_msg)
             return DriverResult(
                 response_text="",
                 success=False,
-                error=f"Exit code {proc.returncode}: {stderr.decode()[:500]}",
+                error=err_msg,
             )
 
-        return self._parse_output(stdout.decode())
+        if proc.returncode != 0:
+            logger.warning(
+                "Claude Code exited %d but produced output (%d bytes). stderr: %s",
+                proc.returncode, len(stdout), stderr.decode()[:200],
+            )
+
+        result = self._parse_output(stdout.decode())
+        if not result.response_text and not result.success:
+            logger.warning("Claude Code returned empty response: %s", result.error)
+        return result
 
     def _parse_output(self, raw: str) -> DriverResult:
         """Parse Claude Code JSON output into DriverResult."""
