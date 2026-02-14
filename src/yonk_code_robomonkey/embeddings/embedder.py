@@ -3,10 +3,77 @@
 Coordinates embedding generation and storage.
 """
 from __future__ import annotations
+import logging
 import asyncpg
 from .ollama import ollama_embed
 from .vllm_openai import vllm_embed
 from ..config import settings
+
+logger = logging.getLogger(__name__)
+
+
+async def _summarize_for_embedding(content: str, max_length: int) -> str | None:
+    """Summarize oversized content to fit within embedding model limits.
+
+    Generates a condensed summary that preserves key identifiers and
+    structure, so the embedding captures the full semantic meaning.
+    Returns None if LLM is unavailable (caller should fall back to truncation).
+
+    Uses a dedicated summarization model if configured via SUMMARIZE_PROVIDER/
+    SUMMARIZE_MODEL/SUMMARIZE_BASE_URL env vars, otherwise falls back to the
+    default "small" LLM model.
+
+    Args:
+        content: The oversized content to summarize
+        max_length: Maximum character length for the summary
+
+    Returns:
+        A condensed summary string, or None if LLM is unavailable
+    """
+    try:
+        from ..llm import call_llm
+
+        # Truncate input to LLM's own context limit
+        llm_input = content[:12000] if len(content) > 12000 else content
+        target_len = max_length // 2
+
+        prompt = (
+            f"Summarize this code/documentation concisely for a search index.\n"
+            f"Preserve key identifiers (function names, class names, variable names, API endpoints).\n"
+            f"Preserve the structure description (what it does, its dependencies, its inputs/outputs).\n"
+            f"Keep the summary under {target_len} characters.\n\n"
+            f"Content ({len(content)} chars):\n{llm_input}\n\nSummary:"
+        )
+
+        # Use dedicated summarization model if configured, else default "small"
+        config_override = None
+        if settings.summarize_provider and settings.summarize_model:
+            config_override = {
+                "provider": settings.summarize_provider,
+                "model": settings.summarize_model,
+                "base_url": settings.summarize_base_url or settings.llm_base_url,
+                "temperature": 0.3,
+                "max_tokens": max(1000, target_len // 4),
+            }
+            if settings.summarize_api_key:
+                config_override["api_key"] = settings.summarize_api_key
+
+        summary = await call_llm(
+            prompt,
+            task_type="small",
+            timeout=30.0,
+            config_override=config_override,
+        )
+        if summary and len(summary.strip()) > 50:
+            result = summary.strip()
+            # Ensure summary fits within the embedding limit
+            if len(result) > max_length:
+                result = result[:max_length]
+            return result
+        return None
+    except Exception as e:
+        logger.debug("Summarize-for-embedding failed: %s", e)
+        return None
 
 
 async def embed_chunks(
@@ -80,29 +147,43 @@ async def embed_chunks(
 
         # Prepare texts and IDs
         # With model-aware chunking, chunks should already be correctly sized.
-        # If truncation is needed, it indicates a need to reindex.
+        # Oversized chunks get summarized via LLM (preserves semantics);
+        # truncation is a last resort if LLM is unavailable.
         chunk_ids = []
         chunk_texts = []
         truncated_count = 0
+        summarized_count = 0
 
         for row in chunks:
             content = row["content"]
             if len(content) > max_chunk_length:
-                # Truncate as fallback for legacy data, but warn prominently
-                truncated_count += 1
-                if truncated_count <= 5:  # Only show first 5 warnings
-                    print(f"  ⚠️  TRUNCATING chunk {row['id']} from {len(content)} to {max_chunk_length} chars")
-                    print(f"      Consider reindexing to use model-aware chunking")
-                chunk_ids.append(row["id"])
-                chunk_texts.append(content[:max_chunk_length])
+                # Try LLM summary first, fall back to truncation
+                summary = await _summarize_for_embedding(content, max_chunk_length)
+                if summary:
+                    summarized_count += 1
+                    if summarized_count <= 5:
+                        print(f"  📝 Summarized chunk {row['id']} ({len(content)} → {len(summary)} chars)")
+                    chunk_ids.append(row["id"])
+                    chunk_texts.append(summary)
+                else:
+                    truncated_count += 1
+                    if truncated_count <= 5:
+                        print(f"  ⚠️  TRUNCATING chunk {row['id']} from {len(content)} to {max_chunk_length} chars")
+                        print(f"      Consider reindexing to use model-aware chunking")
+                    chunk_ids.append(row["id"])
+                    chunk_texts.append(content[:max_chunk_length])
             else:
                 chunk_ids.append(row["id"])
                 chunk_texts.append(content)
 
+        if summarized_count > 5:
+            print(f"  📝 ... and {summarized_count - 5} more chunks summarized")
+        if summarized_count > 0:
+            print(f"  📝 {summarized_count} oversized chunks summarized via LLM for embedding")
         if truncated_count > 5:
             print(f"  ⚠️  ... and {truncated_count - 5} more chunks truncated")
         if truncated_count > 0:
-            print(f"  ⚠️  {truncated_count} chunks exceeded model limit. Reindex with --force to fix.")
+            print(f"  ⚠️  {truncated_count} chunks truncated (LLM unavailable). Reindex with --force to fix.")
 
         total_chunks = len(chunk_texts)
         print(f"Embedding {total_chunks} chunks in batches of {settings.embedding_batch_size}...")
@@ -236,11 +317,12 @@ async def embed_documents(
             return {"embedded": 0, "skipped": 0}
 
         # Prepare texts and IDs
-        # With model-aware chunking, documents should already be correctly sized.
+        # Oversized documents get summarized via LLM; truncation is a last resort.
         doc_ids = []
         doc_texts = []
         skipped_count = 0
         truncated_count = 0
+        summarized_count = 0
 
         for row in documents:
             content = row["content"]
@@ -251,20 +333,32 @@ async def embed_documents(
                 continue
 
             if len(content) > max_chunk_length:
-                # Truncate as fallback, but warn
-                truncated_count += 1
-                if truncated_count <= 5:
-                    print(f"  ⚠️  TRUNCATING document {row['id']} from {len(content)} to {max_chunk_length} chars")
-                doc_ids.append(row["id"])
-                doc_texts.append(content[:max_chunk_length])
+                # Try LLM summary first, fall back to truncation
+                summary = await _summarize_for_embedding(content, max_chunk_length)
+                if summary:
+                    summarized_count += 1
+                    if summarized_count <= 5:
+                        print(f"  📝 Summarized document {row['id']} ({len(content)} → {len(summary)} chars)")
+                    doc_ids.append(row["id"])
+                    doc_texts.append(summary)
+                else:
+                    truncated_count += 1
+                    if truncated_count <= 5:
+                        print(f"  ⚠️  TRUNCATING document {row['id']} from {len(content)} to {max_chunk_length} chars")
+                    doc_ids.append(row["id"])
+                    doc_texts.append(content[:max_chunk_length])
             else:
                 doc_ids.append(row["id"])
                 doc_texts.append(content)
 
+        if summarized_count > 5:
+            print(f"  📝 ... and {summarized_count - 5} more documents summarized")
+        if summarized_count > 0:
+            print(f"  📝 {summarized_count} oversized documents summarized via LLM for embedding")
         if truncated_count > 5:
             print(f"  ⚠️  ... and {truncated_count - 5} more documents truncated")
         if truncated_count > 0:
-            print(f"  ⚠️  {truncated_count} documents exceeded model limit. Consider re-chunking.")
+            print(f"  ⚠️  {truncated_count} documents truncated (LLM unavailable). Consider re-chunking.")
 
         total_docs = len(doc_texts)
         print(f"Embedding {total_docs} documents in batches of {settings.embedding_batch_size}...")

@@ -28,13 +28,13 @@ MODEL_CHUNK_LIMITS: dict[str, int] = {
     "all-distilroberta-v1": 2000,
     "multi-qa-MiniLM-L6-cos-v1": 2000,
 
-    # OpenAI models (large context windows)
-    "text-embedding-3-small": 30000,
-    "text-embedding-3-large": 30000,
-    "text-embedding-ada-002": 30000,
+    # OpenAI models — 8191 tokens max, target ~6000 chars for quality
+    "text-embedding-3-small": 6000,
+    "text-embedding-3-large": 6000,
+    "text-embedding-ada-002": 6000,
 
     # Ollama/local models
-    "nomic-embed-text": 30000,
+    "nomic-embed-text": 6000,
     "snowflake-arctic-embed2": 2000,
     "snowflake-arctic-embed2:latest": 2000,
     "mxbai-embed-large": 2000,
@@ -150,7 +150,16 @@ class Settings:
         # Allow explicit override via MAX_CHUNK_LENGTH env var
         max_chunk_override = os.getenv("MAX_CHUNK_LENGTH")
         if max_chunk_override:
-            self.max_chunk_length = int(max_chunk_override)
+            override_val = int(max_chunk_override)
+            self.max_chunk_length = override_val
+            # Also cap chunk config so chunking respects the same limit
+            if self._chunk_config.target_chars > int(override_val * 0.7):
+                self._chunk_config = ChunkConfig(
+                    max_chars=override_val,
+                    target_chars=int(override_val * 0.7),
+                    overlap_chars=int(override_val * 0.07),
+                    min_chars=max(100, int(override_val * 0.1)),
+                )
         else:
             self.max_chunk_length = self._chunk_config.max_chars
 
@@ -174,6 +183,13 @@ class Settings:
         # LLM for summaries and text generation
         self.llm_model = os.getenv("LLM_MODEL", "qwen3-coder:30b")
         self.llm_base_url = os.getenv("LLM_BASE_URL", self.embeddings_base_url)  # Defaults to embeddings URL
+
+        # Summarize-for-embedding LLM (optional, falls back to default "small" model)
+        # Set these to use a dedicated lightweight model for summarizing oversized chunks
+        self.summarize_provider = os.getenv("SUMMARIZE_PROVIDER", "")
+        self.summarize_model = os.getenv("SUMMARIZE_MODEL", "")
+        self.summarize_base_url = os.getenv("SUMMARIZE_BASE_URL", "")
+        self.summarize_api_key = os.getenv("SUMMARIZE_API_KEY", "")
 
         # Repo scanning
         self.repo_root = os.getenv("REPO_ROOT", "")

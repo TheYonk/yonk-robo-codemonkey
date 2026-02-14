@@ -257,7 +257,11 @@ async def _index_file(
                 chunks = _create_sql_chunks(source, file_path)
             else:
                 # Create simple text-based chunks for other files
-                chunks = _create_plain_text_chunks(source, language)
+                from yonk_code_robomonkey.config_settings import settings as cfg
+                chunks = _create_plain_text_chunks(
+                    source, language,
+                    max_chars=cfg.chunk_config.target_chars
+                )
 
     # Calculate relative path
     rel_path = str(file_path.relative_to(repo_root))
@@ -434,15 +438,21 @@ async def _index_file(
         return True
 
 
-def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100) -> list[Chunk]:
+def _create_plain_text_chunks(
+    source: bytes, language: str,
+    max_lines: int = 100,
+    max_chars: int | None = None
+) -> list[Chunk]:
     """Create simple line-based chunks for files without tree-sitter parsers.
 
-    Used for SQL files and other plain text files.
+    Used for SQL files and other plain text files. Splits by line count
+    or character count, whichever limit is hit first.
 
     Args:
         source: Source file content as bytes
         language: Language identifier (e.g., 'sql')
         max_lines: Maximum lines per chunk (default 100)
+        max_chars: Maximum characters per chunk (default None = no char limit)
 
     Returns:
         List of chunks with sequence tracking
@@ -486,6 +496,17 @@ def _create_plain_text_chunks(source: bytes, language: str, max_lines: int = 100
         # Extract chunk content
         chunk_lines = lines[current_line:end_line]
         content = "".join(chunk_lines)
+
+        # If chunk exceeds max_chars, walk back to find the line boundary
+        if max_chars and len(content) > max_chars:
+            accumulated = 0
+            for idx, line in enumerate(chunk_lines):
+                accumulated += len(line)
+                if accumulated > max_chars:
+                    end_line = current_line + max(1, idx)  # At least 1 line
+                    chunk_lines = lines[current_line:end_line]
+                    content = "".join(chunk_lines)
+                    break
 
         # Calculate content hash
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
@@ -578,7 +599,8 @@ def _create_sql_chunks(source: bytes, file_path: Path, skip_data_statements: boo
     except Exception as e:
         print(f"  Warning: SQL chunking failed for {file_path.name}: {e}, falling back to plain text")
         # Fall back to plain text chunking
-        return _create_plain_text_chunks(source, "sql", max_lines=100)
+        from yonk_code_robomonkey.config_settings import settings as cfg
+        return _create_plain_text_chunks(source, "sql", max_lines=100, max_chars=cfg.chunk_config.target_chars)
 
     # If no chunks created (all statements skipped), create one summary chunk
     if not chunks:
